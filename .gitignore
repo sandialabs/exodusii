@@ -1,0 +1,10 @@
+*.pyc
+__pycache__
+.cache
+.coverage
+htmlcov
+*.bak
+
+# Ignore personal settings
+.vscode
+.vscode/settings.json
