@@ -78,24 +78,33 @@ class cylinder:
            a[i] is True if points[i] is in the cylinder
 
         """
+        if self.dimension == 2:
+            return self._contains2d(points)
         points = np.asarray(points)
         one_point = points.ndim == 1
         if one_point:
             points = points[np.newaxis, :]
-
         axis = self.p2 - self.p1
-
         # points lie between end points of the cylinder
         condition1 = np.einsum("ij,j->i", points - self.p1, axis) >= 0
         condition2 = np.einsum("ij,j->i", points - self.p2, axis) <= 0
-
         # points lie within curved surface of cylinder
         cp = np.cross(points - self.p1, axis)
         norm = np.abs(cp) if cp.ndim == 1 else np.linalg.norm(cp, axis=1)
         condition3 = norm <= self.radius * np.linalg.norm(axis)
-
         contains = np.array(condition1 & condition2 & condition3)
         return contains[0] if one_point else contains
+
+    def _contains2d(self, points):
+        """A cylinder in 2d is really just a rectangle"""
+        axis = self.p2 - self.p1
+        u = np.array([-axis[1], axis[0]])
+        r = self.radius * u / np.sqrt(np.dot(u, u))
+        a = self.p1 - r
+        b = self.p2 - r
+        c = self.p2 + r
+        d = self.p1 + r
+        return convex_polygon.contains([a, b, c, d], points)
 
 
 class convex_polygon:
@@ -104,11 +113,8 @@ class convex_polygon:
     def __init__(self, *args, **kwargs):
         raise NotImplementedError("complex_polygon is an abstract base class")
 
-    @property
-    def verticies(self):
-        raise NotImplementedError
-
-    def contains(self, points):
+    @staticmethod
+    def contains(vertices, points):
         """Determine with points is contained in the polygon
 
         Parameters
@@ -127,8 +133,8 @@ class convex_polygon:
         if one_point:
             points = points[np.newaxis, :]
         condition = None
-        for (i, a) in enumerate(self.vertices, start=1):
-            b = self.vertices[i] if i < len(self.vertices) else self.vertices[0]
+        for (i, a) in enumerate(vertices, start=1):
+            b = vertices[i] if i < len(vertices) else vertices[0]
             edge = b - a
             v = points - a
             c = edge[0] * v[:, 1] - v[:, 0] * edge[1] >= 0
@@ -171,9 +177,9 @@ class quad(convex_polygon):
         self.c = np.asarray(c)
         self.d = np.asarray(d)
 
-    @property
-    def vertices(self):
-        return [self.a, self.b, self.c, self.d]
+    def contains(self, points):
+        vertices = [self.a, self.b, self.c, self.d]
+        return convex_polygon.contains(vertices, points)
 
 
 class rectangle(quad):
