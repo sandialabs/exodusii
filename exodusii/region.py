@@ -278,7 +278,7 @@ class sphere:
 
         cx, cy, cz = self.center
         x, y, z = p[:, 0], p[:, 1], p[:, 2]
-        condition = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 < self.radius ** 2
+        condition = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 <= self.radius ** 2
         contains = np.array(condition)
 
         return contains[0] if one_point else contains
@@ -334,7 +334,7 @@ class circle:
 
         cx, cy = self.center
         x, y = p[:, 0], p[:, 1]
-        condition = (x - cx) ** 2 + (y - cy) ** 2 < self.radius ** 2
+        condition = (x - cx) ** 2 + (y - cy) ** 2 <= self.radius ** 2
         contains = np.array(condition)
 
         return contains[0] if one_point else contains

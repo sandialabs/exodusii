@@ -85,3 +85,25 @@ def test_region_quad():
     contains = region.contains(points)
     assert contains[0]
     assert not contains[1]
+
+
+def test_region_circle():
+    region = exodusii.region.circle([0., 0.], 1.)
+    points = [[0., 0.], [0., 1.], [1., 0.], [-1., 0], [0., -1.], [0, 1.1]]
+    for point in points[:-1]:
+        assert region.contains(point)
+    assert not region.contains(points[-1])
+    contains = region.contains(points)
+    assert all(contains[:-1])
+    assert not contains[-1]
+
+
+def test_region_sphere():
+    region = exodusii.region.sphere([0., 0., 0.], 1.)
+    points = [[0., 0., 0.], [0., 1., 0.], [1., 0., 0.], [0., 0, -1.], [0., -1., 0], [0, 1.1, .8]]
+    for point in points[:-1]:
+        assert region.contains(point)
+    assert not region.contains(points[-1])
+    contains = region.contains(points)
+    assert all(contains[:-1])
+    assert not contains[-1]
