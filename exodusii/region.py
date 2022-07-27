@@ -1,7 +1,7 @@
 import numpy as np
 
 
-class bounded_time_region:
+class bounded_time_domain:
     """Represents a bounded time region [t0, tf]
 
     Parameters
@@ -19,7 +19,7 @@ class bounded_time_region:
 
     def __init__(self, t_min=None, t_max=None):
         self.t_min = t_min or 0.0
-        self.t_max = t_max or bounded_time_region.tmax
+        self.t_max = t_max or bounded_time_domain.tmax
 
     def __call__(self, times):
         return np.array((times >= self.t_min) & (times <= self.t_max))

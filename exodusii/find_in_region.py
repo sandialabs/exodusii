@@ -3,7 +3,7 @@ import numpy as np
 from collections import OrderedDict as ordered_dict
 
 from .file import exodusii_file
-from .region import bounded_time_region
+from .region import bounded_time_domain
 from .extension import compute_element_centers
 
 
@@ -50,7 +50,7 @@ def find_node_data_in_region(files, vars, region, time_region=None):
         files = [files]
 
     data = ordered_dict()
-    time_region = time_region or bounded_time_region(0, None)
+    time_region = time_region or bounded_time_domain(0, None)
 
     for (i, filename) in enumerate(files):
 
@@ -137,7 +137,7 @@ def find_element_data_in_region(files, vars, region, time_region=None):
     if isinstance(files, str):
         files = [files]
 
-    time_region = time_region or bounded_time_region(0, None)
+    time_region = time_region or bounded_time_domain(0, None)
 
     data = ordered_dict()
     for (i, filename) in enumerate(files):
