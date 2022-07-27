@@ -7,7 +7,7 @@ from .region import bounded_time_domain
 from .extension import compute_element_centers
 
 
-def find_node_data_in_region(files, vars, region, time_region=None):
+def find_node_data_in_region(files, vars, region, time_domain=None):
     """Finds element data in a finite element mesh region
 
     Parameters
@@ -20,7 +20,7 @@ def find_node_data_in_region(files, vars, region, time_region=None):
         An object implementing a `contains` method that takes as input an array of
         coordinates and returns a boolean array of the same length containing True if
         the point is in the region and False otherwise.
-    time_region : callable
+    time_domain : callable
         Takes an array of times as input and returns a boolean array of the same
         length containg True if the time should be queried and False otherwise.
 
@@ -34,9 +34,9 @@ def find_node_data_in_region(files, vars, region, time_region=None):
     Examples
     --------
     >>> region = cylinder((0, 12.5e-6), (None, 12.5e-6), 6e-6)
-    >>> time_region = bound_time_region(0, None)
+    >>> time_domain = bound_time_domain(0, None)
     >>> vars = ("FORCEX", "FORCEY")
-    >>> data = find_node_data_in_region(files, vars, region, time_reigon=time_region)
+    >>> data = find_node_data_in_region(files, vars, region, time_domain=time_domain)
     >>> data[0]["time"]
     0.000
     >>> data[0]["cycle"]
@@ -50,7 +50,7 @@ def find_node_data_in_region(files, vars, region, time_region=None):
         files = [files]
 
     data = ordered_dict()
-    time_region = time_region or bounded_time_domain(0, None)
+    time_domain = time_domain or bounded_time_domain(0, None)
 
     for (i, filename) in enumerate(files):
 
@@ -60,7 +60,7 @@ def find_node_data_in_region(files, vars, region, time_region=None):
 
         if i == 0:
             times = file.get_times()
-            cycles = time_region(times).nonzero()[0]
+            cycles = time_domain(times).nonzero()[0]
 
         xc = file.get_coords()
         dimension = 1 if xc.ndim == 1 else xc.shape[1]
@@ -95,7 +95,7 @@ def find_node_data_in_region(files, vars, region, time_region=None):
     return data
 
 
-def find_element_data_in_region(files, vars, region, time_region=None):
+def find_element_data_in_region(files, vars, region, time_domain=None):
     """Finds element data in a finite element mesh region
 
     Parameters
@@ -122,9 +122,9 @@ def find_element_data_in_region(files, vars, region, time_region=None):
     Examples
     --------
     >>> region = cylinder((0, 12.5e-6), (None, 12.5e-6), 6e-6)
-    >>> time_region = bound_time_region(0, None)
+    >>> time_domain = bound_time_domain(0, None)
     >>> vars = ("BE_MAG", "VOID_FRC")
-    >>> data = find_element_data_in_region(files, vars, region, time_reigon=time_region)
+    >>> data = find_element_data_in_region(files, vars, region, time_domain=time_domain)
     >>> data[0]["time"]
     0.000
     >>> data[0]["cycle"]
@@ -137,7 +137,7 @@ def find_element_data_in_region(files, vars, region, time_region=None):
     if isinstance(files, str):
         files = [files]
 
-    time_region = time_region or bounded_time_domain(0, None)
+    time_domain = time_domain or bounded_time_domain(0, None)
 
     data = ordered_dict()
     for (i, filename) in enumerate(files):
@@ -148,7 +148,7 @@ def find_element_data_in_region(files, vars, region, time_region=None):
 
         if i == 0:
             times = file.get_times()
-            cycles = time_region(times).nonzero()[0]
+            cycles = time_domain(times).nonzero()[0]
 
         block_ids = file.get_element_block_ids()
         for block_id in block_ids:
