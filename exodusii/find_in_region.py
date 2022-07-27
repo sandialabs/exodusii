@@ -28,10 +28,21 @@ def find_node_data_in_region(files, vars, region, time_region=None):
     -------
     data : dict
         data[cycle] = cycle_data
-        where cycle_data is an ndarray of dimension (1 + dim + len(vars), len(cycles))
-        column 1 contains the cycle time
-        columns 2-2+dim contains the spatial coordinates
-        columns 2+dim+1: contains the node data
+        where cycle_data is a dictionary containing ndarrays for the nodal
+        coordinates and each node variable.
+
+    Examples
+    --------
+    >>> region = cylinder((0, 12.5e-6), (None, 12.5e-6), 6e-6)
+    >>> time_region = bound_time_region(0, None)
+    >>> vars = ("FORCEX", "FORCEY")
+    >>> data = find_node_data_in_region(files, vars, region, time_reigon=time_region)
+    >>> data[0]["time"]
+    0.000
+    >>> data[0]["cycle"]
+    0
+    >>> data[0]["FORCEX"]
+    ndarray([3.4529e+3, ..., 5.3914e+4])
 
     """
 
@@ -52,7 +63,8 @@ def find_node_data_in_region(files, vars, region, time_region=None):
             cycles = time_region(times).nonzero()[0]
 
         xc = file.get_coords()
-        if xc.ndim != region.dimension:
+        dimension = 1 if xc.ndim == 1 else xc.shape[1]
+        if dimension != region.dimension:
             raise ValueError("Coordinate dimension does not match region dimension")
 
         ix = region.contains(xc)
@@ -60,11 +72,10 @@ def find_node_data_in_region(files, vars, region, time_region=None):
             continue
 
         for cycle in cycles:
-            xd = [np.ones(len(ix.nonzero())) * times[cycle], xc[ix]]
+            xd = [xc[ix]]
             for var in vars:
                 elem_data = file.get_node_variable_values(var, time_step=cycle + 1)
                 xd.append(elem_data[ix])
-
             xd = np.column_stack(xd)
             if cycle in data:
                 data[cycle] = np.row_stack((data[cycle], xd))
@@ -74,7 +85,12 @@ def find_node_data_in_region(files, vars, region, time_region=None):
     for (cycle, xd) in data.items():
         # Sort by coordinate
         ix = np.argsort(xd[:, 0])
-        data[cycle] = xd[ix]
+        cycle_data = {"cycle": cycle, "time": times[cycle]}
+        for (i, dim) in enumerate("XYZ"[:dimension]):
+            cycle_data[dim] = xd[ix, i]
+        for (i, var) in enumerate(vars, start=dimension):
+            cycle_data[var] = xd[ix, i]
+        data[cycle] = cycle_data
 
     return data
 
@@ -100,10 +116,21 @@ def find_element_data_in_region(files, vars, region, time_region=None):
     -------
     data : dict
         data[cycle] = cycle_data
-        where cycle_data is an ndarray of dimension (1 + dim + len(vars), len(cycles))
-        column 1 contains the cycle time
-        columns 2-2+dim contains the spatial coordinates
-        columns 2+dim+1: contains the element data
+        where cycle_data is a dictionary containing ndarrays for the nodal
+        coordinates and each node variable.
+
+    Examples
+    --------
+    >>> region = cylinder((0, 12.5e-6), (None, 12.5e-6), 6e-6)
+    >>> time_region = bound_time_region(0, None)
+    >>> vars = ("BE_MAG", "VOID_FRC")
+    >>> data = find_element_data_in_region(files, vars, region, time_reigon=time_region)
+    >>> data[0]["time"]
+    0.000
+    >>> data[0]["cycle"]
+    0
+    >>> data[0]["BE_MAG"]
+    ndarray([3.4529e+3, ..., 5.3914e+4])
 
     """
 
@@ -129,7 +156,8 @@ def find_element_data_in_region(files, vars, region, time_region=None):
             if not num_elem:
                 continue
             xe = compute_element_centers(file, block_id)
-            if xe.ndim != region.dimension:
+            dimension = 1 if xe.ndim == 1 else xe.shape[1]
+            if dimension != region.dimension:
                 raise ValueError("Coordinate dimension does not match region dimension")
 
             ix = region.contains(xe)
@@ -149,8 +177,13 @@ def find_element_data_in_region(files, vars, region, time_region=None):
                     data[cycle] = xd
 
     for (cycle, xd) in data.items():
-        # Sort by first coordinate
-        ix = np.argsort(xd[:, 1])
-        data[cycle] = xd[ix]
+        # Sort by coordinate
+        ix = np.argsort(xd[:, 0])
+        cycle_data = {"cycle": cycle, "time": times[cycle]}
+        for (i, dim) in enumerate("XYZ"[:dimension]):
+            cycle_data[dim] = xd[ix, i]
+        for (i, var) in enumerate(vars, start=dimension):
+            cycle_data[var] = xd[ix, i]
+        data[cycle] = cycle_data
 
     return data
