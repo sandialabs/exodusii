@@ -5,6 +5,7 @@ from collections import OrderedDict as ordered_dict
 from .file import exodusii_file
 from .region import bounded_time_domain
 from .extension import compute_element_centers
+from .parallel_file import parallel_exodusii_file
 
 
 def find_node_data_in_region(files, vars, region, time_domain=None):
@@ -46,17 +47,18 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
 
     """
 
-    if isinstance(files, str):
+    if isinstance(files, (str, exodusii_file, parallel_exodusii_file)):
         files = [files]
 
     data = ordered_dict()
     time_domain = time_domain or bounded_time_domain(0, None)
 
-    for (i, filename) in enumerate(files):
+    for (i, file) in enumerate(files):
 
         logging.info(f"Processing file {i + 1} of {len(files)} files")
 
-        file = exodusii_file(filename, mode="r")
+        if not isinstance(file, (exodusii_file, parallel_exodusii_file)):
+            file = exodusii_file(file, mode="r")
 
         if i == 0:
             times = file.get_times()
@@ -95,7 +97,7 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
     return data
 
 
-def find_element_data_in_region(files, vars, region, time_domain=None):
+def find_element_data_in_region(files, vars, region, time_domain=None, block_ids=None):
     """Finds element data in a finite element mesh region
 
     Parameters
@@ -108,9 +110,11 @@ def find_element_data_in_region(files, vars, region, time_domain=None):
         An object implementing a `contains` method that takes as input an array of
         coordinates and returns a boolean array of the same length containing True if
         the point is in the region and False otherwise.
-    tr : callable
+    time_domain : callable
         Takes an array of times as input and returns a boolean array of the same
         length containg True if the time should be queried and False otherwise.
+    block_ids : list of int
+        Get element data only from these blocks.  If None, get data from all blocks
 
     Returns
     -------
@@ -134,23 +138,25 @@ def find_element_data_in_region(files, vars, region, time_domain=None):
 
     """
 
-    if isinstance(files, str):
+    if isinstance(files, (str, exodusii_file, parallel_exodusii_file)):
         files = [files]
 
+    _block_ids = block_ids
     time_domain = time_domain or bounded_time_domain(0, None)
 
     data = ordered_dict()
-    for (i, filename) in enumerate(files):
+    for (i, file) in enumerate(files):
 
         logging.info(f"Processing file {i + 1} of {len(files)} files")
 
-        file = exodusii_file(filename, mode="r")
+        if not isinstance(file, (exodusii_file, parallel_exodusii_file)):
+            file = exodusii_file(file, mode="r")
 
         if i == 0:
             times = file.get_times()
             cycles = time_domain(times).nonzero()[0]
 
-        block_ids = file.get_element_block_ids()
+        block_ids = file.get_element_block_ids() if _block_ids is None else _block_ids
         for block_id in block_ids:
             num_elem = file.num_elems_in_blk(block_id)
             if not num_elem:
@@ -164,7 +170,7 @@ def find_element_data_in_region(files, vars, region, time_domain=None):
             if not np.any(ix):
                 continue
             for cycle in cycles:
-                xd = [np.ones(len(ix.nonzero()[0])) * times[cycle], xe[ix]]
+                xd = [xe[ix]]
                 for var in vars:
                     elem_data = file.get_element_variable_values(
                         block_id, var, time_step=cycle + 1

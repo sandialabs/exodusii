@@ -6,8 +6,12 @@ class bounded_time_domain:
 
     Parameters
     ----------
-    t_min, t_max : float
-        min and max of region
+    t_min : float
+        min of domain
+        if None, t_min is set to 0.
+    t_max : float
+        max of domain
+        if None, t_max is set to bounded_time_domain.tmax
 
     Notes
     -----
@@ -15,6 +19,7 @@ class bounded_time_domain:
     (or times) is contained inside the time domain.
 
     """
+
     tmax = 1e20
 
     def __init__(self, t_min=None, t_max=None):
@@ -77,6 +82,7 @@ class cylinder:
         one_point = points.ndim == 1
         if one_point:
             points = points[np.newaxis, :]
+
         axis = self.p2 - self.p1
 
         # points lie between end points of the cylinder
@@ -89,4 +95,240 @@ class cylinder:
         condition3 = norm <= self.radius * np.linalg.norm(axis)
 
         contains = np.array(condition1 & condition2 & condition3)
+        return contains[0] if one_point else contains
+
+
+class convex_polygon:
+    dimension = 2
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError("complex_polygon is an abstract base class")
+
+    @property
+    def verticies(self):
+        raise NotImplementedError
+
+    def contains(self, points):
+        """Determine with points is contained in the polygon
+
+        Parameters
+        ----------
+        points : array_like
+            points[i] are the x, y coordinates of the point to be queried
+
+        Returns
+        -------
+        a : ndarray of bool
+           a[i] is True if points[i] is in the polygon
+
+        """
+        points = np.asarray(points)
+        one_point = points.ndim == 1
+        if one_point:
+            points = points[np.newaxis, :]
+        condition = None
+        for (i, a) in enumerate(self.vertices, start=1):
+            b = self.vertices[i] if i < len(self.vertices) else self.vertices[0]
+            edge = b - a
+            v = points - a
+            c = edge[0] * v[:, 1] - v[:, 0] * edge[1] >= 0
+            if condition is None:
+                condition = c
+            else:
+                condition = condition & c
+        contains = np.array(condition)
+        return contains[0] if one_point else contains
+
+
+class quad(convex_polygon):
+    """Region defining a quadrilateral
+
+    Parameters
+    ----------
+    a, b, c, d : array_like
+        x, y coordinates of points in quad
+
+    Notes
+    -----
+    quad provides a single public method `contains` that determines if a point
+    (or points) is contained inside the quad.
+
+    The points are ordered counter-clockwise:
+
+        d-------------------------------c
+        |                               |
+        |                               |
+        a-------------------------------b
+
+    """
+
+    def __init__(self, a, b, c, d):
+        for p in (a, b, c, d):
+            if len(p) != self.dimension:
+                raise ValueError("Expected quad points to be 2D")
+        self.a = np.asarray(a)
+        self.b = np.asarray(b)
+        self.c = np.asarray(c)
+        self.d = np.asarray(d)
+
+    @property
+    def vertices(self):
+        return [self.a, self.b, self.c, self.d]
+
+
+class rectangle(quad):
+    """Region defining a rectangle in 2d space
+
+    Parameters
+    ----------
+    origin : array_like
+        x, y coordinates of *center* of left hand side
+    width : float
+        The width of the rectangle
+    height : float
+        The height of the rectangle
+
+    Notes
+    -----
+    rectangle provides a single public method `contains` that determines if a point
+    (or points) is contained inside the rectangle.
+
+    The origin of the rectangle is as shown below
+         _______________________________
+        |                               |
+        o                               h
+        |_____________ w _______________|
+
+    """
+
+    pmax = 1e20
+
+    def __init__(self, origin, width=None, height=None):
+        if len(origin) != self.dimension:
+            raise ValueError("Expected rectangle origin to be 2D")
+
+        width = width or rectangle.pmax
+        if width <= 0:
+            raise ValueError("Expected rectangle width > 0")
+
+        height = height or width
+        if height <= 0:
+            raise ValueError("Expected rectangle height > 0")
+
+        origin = np.asarray(origin)
+        self.a = origin + np.array([0, -height / 2.0])
+        self.b = origin + np.array([width, -height / 2.0])
+        self.c = origin + np.array([width, height / 2.0])
+        self.d = origin + np.array([0, height / 2.0])
+
+
+class sphere:
+    """Region defining a sphere in 3d space
+
+    Parameters
+    ----------
+    center : array_like
+        x, y, z coordinates of center of sphere
+    radius : float
+        The radius of the sphere
+
+    Notes
+    -----
+    sphere provides a single public method `contains` that determines if a point
+    (or points) is contained inside the sphere.
+
+    """
+
+    pmax = 1e20
+
+    def __init__(self, center, radius):
+        self.dimension = 3
+        if len(center) != self.dimension:
+            raise ValueError("Expected sphere center to be 3D")
+        self.center = np.asarray(center)
+
+        if radius <= 0:
+            raise ValueError("Expected sphere radius > 0")
+        self.radius = radius
+
+    def contains(self, points):
+        """Determine with points is contained in the sphere
+
+        Parameters
+        ----------
+        points : array_like
+            points[i] are the x, y, z coordinates of the point to be queried
+
+        Returns
+        -------
+        a : ndarray of bool
+           a[i] is True if points[i] is in the sphere
+
+        """
+        p = np.asarray(points)
+        one_point = p.ndim == 1
+        if one_point:
+            p = p[np.newaxis, :]
+
+        cx, cy, cz = self.center
+        x, y, z = p[:, 0], p[:, 1], p[:, 2]
+        condition = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 < self.radius ** 2
+        contains = np.array(condition)
+
+        return contains[0] if one_point else contains
+
+
+class circle:
+    """Region defining a circle in 2d space
+
+    Parameters
+    ----------
+    center : array_like
+        x, y coordinates of center of circle
+    radius : float
+        The radius of the circle
+
+    Notes
+    -----
+    circle provides a single public method `contains` that determines if a point
+    (or points) is contained inside the circle.
+
+    """
+
+    pmax = 1e20
+
+    def __init__(self, center, radius):
+        self.dimension = 2
+        if len(center) != self.dimension:
+            raise ValueError("Expected circle center to be 3D")
+        self.center = np.asarray(center)
+
+        if radius <= 0:
+            raise ValueError("Expected circle radius > 0")
+        self.radius = radius
+
+    def contains(self, points):
+        """Determine with points is contained in the circle
+
+        Parameters
+        ----------
+        points : array_like
+            points[i] are the x, y coordinates of the point to be queried
+
+        Returns
+        -------
+        a : ndarray of bool
+           a[i] is True if points[i] is in the circle
+
+        """
+        p = np.asarray(points)
+        one_point = p.ndim == 1
+        if one_point:
+            p = p[np.newaxis, :]
+
+        cx, cy = self.center
+        x, y = p[:, 0], p[:, 1]
+        condition = (x - cx) ** 2 + (y - cy) ** 2 < self.radius ** 2
+        contains = np.array(condition)
+
         return contains[0] if one_point else contains

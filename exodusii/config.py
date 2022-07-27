@@ -13,12 +13,8 @@ def env_boolean(var, default=None):
 
 def initialize_config():
     cfg = SimpleNamespace()
-    cfg.use_netcdf4_if_possible = env_boolean(
-        "EXODUSII_USE_NETCDF4", default="on"
-    )
-    cfg.debug = env_boolean(
-        "EXODUSII_DEBUG", default="off"
-    )
+    cfg.use_netcdf4_if_possible = env_boolean("EXODUSII_USE_NETCDF4", default="on")
+    cfg.debug = env_boolean("EXODUSII_DEBUG", default="off")
     return cfg
 
 
