@@ -67,7 +67,7 @@ def test_region_cylinder_3d():
 
 
 def test_region_rectangle():
-    origin = [0., 0.]
+    origin = [0., -2.5]
     region = exodusii.region.rectangle(origin, 5., 5.)
     points = [[0, 2.5], [-3., 2.5]]
     assert region.contains(points[0])

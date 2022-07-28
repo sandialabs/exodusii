@@ -188,7 +188,7 @@ class rectangle(quad):
     Parameters
     ----------
     origin : array_like
-        x, y coordinates of *center* of left hand side
+        x, y coordinates of bottom left hand side
     width : float
         The width of the rectangle
     height : float
@@ -202,8 +202,8 @@ class rectangle(quad):
     The origin of the rectangle is as shown below
          _______________________________
         |                               |
-        o                               h
-        |_____________ w _______________|
+        |                               h
+        o_____________ w _______________|
 
     """
 
@@ -222,10 +222,10 @@ class rectangle(quad):
             raise ValueError("Expected rectangle height > 0")
 
         origin = np.asarray(origin)
-        self.a = origin + np.array([0, -height / 2.0])
-        self.b = origin + np.array([width, -height / 2.0])
-        self.c = origin + np.array([width, height / 2.0])
-        self.d = origin + np.array([0, height / 2.0])
+        self.a = origin
+        self.b = origin + np.array([width, 0])
+        self.c = origin + np.array([width, height])
+        self.d = origin + np.array([0, height])
 
 
 class sphere:
