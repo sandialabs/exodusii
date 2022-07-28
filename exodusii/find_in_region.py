@@ -3,12 +3,14 @@ import numpy as np
 from collections import OrderedDict as ordered_dict
 
 from .file import exodusii_file
-from .region import bounded_time_domain
+from .region import unbounded_time_domain
 from .extension import compute_element_centers
 from .parallel_file import parallel_exodusii_file
 
 
-def find_node_data_in_region(files, vars, region, time_domain=None):
+def find_node_data_in_region(
+    files, vars, region, time_domain=None, use_displaced_coords=False
+):
     """Finds element data in a finite element mesh region
 
     Parameters
@@ -21,9 +23,12 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
         An object implementing a `contains` method that takes as input an array of
         coordinates and returns a boolean array of the same length containing True if
         the point is in the region and False otherwise.
-    time_domain : callable
-        Takes an array of times as input and returns a boolean array of the same
-        length containg True if the time should be queried and False otherwise.
+    time_domain : object
+        An object implementing a `contains` method that take an array of times
+        as input and returns a boolean array of the same length containg True if
+        the time should be queried and False otherwise.
+    use_displaced_coords : bool
+        Use displaced coordinates for determining geometric region
 
     Returns
     -------
@@ -31,6 +36,15 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
         data[cycle] = cycle_data
         where cycle_data is a dictionary containing ndarrays for the nodal
         coordinates and each node variable.
+
+        cycle_data["cycle"] = int
+        cycle_data["time"] = float
+        cycle_data["X"] = ndarray
+        cycle_data["Y"] = ndarray
+        cycle_data["Z"] = ndarray  [only if 3d]
+        cycle_data["var1"] = ndarray
+        ...
+        cycle_data["varn"] = ndarray
 
     Examples
     --------
@@ -51,7 +65,7 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
         files = [files]
 
     data = ordered_dict()
-    time_domain = time_domain or bounded_time_domain(0, None)
+    time_domain = time_domain or unbounded_time_domain()
 
     for (i, file) in enumerate(files):
 
@@ -62,18 +76,29 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
 
         if i == 0:
             times = file.get_times()
-            cycles = time_domain(times).nonzero()[0]
+            cycles = time_domain.contains(times).nonzero()[0]
 
-        xc = file.get_coords()
-        dimension = 1 if xc.ndim == 1 else xc.shape[1]
-        if dimension != region.dimension:
-            raise ValueError("Coordinate dimension does not match region dimension")
-
-        ix = region.contains(xc)
-        if not np.any(ix):
-            continue
+        if not use_displaced_coords:
+            # Precompute element centers for all cycles
+            xc = file.get_coords()
+            dimension = 1 if xc.ndim == 1 else xc.shape[1]
+            if dimension != region.dimension:
+                raise ValueError("Coordinate dimension does not match region")
+            ix = region.contains(xc)
+            if not np.any(ix):
+                continue
 
         for cycle in cycles:
+
+            if use_displaced_coords:
+                xc = file.get_coords(time_step=cycle + 1)
+                dimension = 1 if xc.ndim == 1 else xc.shape[1]
+                if dimension != region.dimension:
+                    raise ValueError("Coordinate dimension does not match region")
+                ix = region.contains(xc)
+                if not np.any(ix):
+                    continue
+
             xd = [xc[ix]]
             for var in vars:
                 elem_data = file.get_node_variable_values(var, time_step=cycle + 1)
@@ -97,7 +122,9 @@ def find_node_data_in_region(files, vars, region, time_domain=None):
     return data
 
 
-def find_element_data_in_region(files, vars, region, time_domain=None, block_ids=None):
+def find_element_data_in_region(
+    files, vars, region, time_domain=None, block_ids=None, use_displaced_coords=False
+):
     """Finds element data in a finite element mesh region
 
     Parameters
@@ -110,11 +137,14 @@ def find_element_data_in_region(files, vars, region, time_domain=None, block_ids
         An object implementing a `contains` method that takes as input an array of
         coordinates and returns a boolean array of the same length containing True if
         the point is in the region and False otherwise.
-    time_domain : callable
-        Takes an array of times as input and returns a boolean array of the same
-        length containg True if the time should be queried and False otherwise.
+    time_domain : object
+        An object implementing a `contains` method that take an array of times
+        as input and returns a boolean array of the same length containg True if
+        the time should be queried and False otherwise.
     block_ids : list of int
         Get element data only from these blocks.  If None, get data from all blocks
+    use_displaced_coords : bool
+        Use displaced coordinates for determining geometric region
 
     Returns
     -------
@@ -122,6 +152,15 @@ def find_element_data_in_region(files, vars, region, time_domain=None, block_ids
         data[cycle] = cycle_data
         where cycle_data is a dictionary containing ndarrays for the nodal
         coordinates and each node variable.
+
+        cycle_data["cycle"] = int
+        cycle_data["time"] = float
+        cycle_data["X"] = ndarray
+        cycle_data["Y"] = ndarray
+        cycle_data["Z"] = ndarray  [only if 3d]
+        cycle_data["var1"] = ndarray
+        ...
+        cycle_data["varn"] = ndarray
 
     Examples
     --------
@@ -142,7 +181,7 @@ def find_element_data_in_region(files, vars, region, time_domain=None, block_ids
         files = [files]
 
     _block_ids = block_ids
-    time_domain = time_domain or bounded_time_domain(0, None)
+    time_domain = time_domain or unbounded_time_domain()
 
     data = ordered_dict()
     for (i, file) in enumerate(files):
@@ -154,22 +193,35 @@ def find_element_data_in_region(files, vars, region, time_domain=None, block_ids
 
         if i == 0:
             times = file.get_times()
-            cycles = time_domain(times).nonzero()[0]
+            cycles = time_domain.contains(times).nonzero()[0]
 
         block_ids = file.get_element_block_ids() if _block_ids is None else _block_ids
         for block_id in block_ids:
             num_elem = file.num_elems_in_blk(block_id)
             if not num_elem:
                 continue
-            xe = compute_element_centers(file, block_id)
-            dimension = 1 if xe.ndim == 1 else xe.shape[1]
-            if dimension != region.dimension:
-                raise ValueError("Coordinate dimension does not match region dimension")
 
-            ix = region.contains(xe)
-            if not np.any(ix):
-                continue
+            if not use_displaced_coords:
+                # Precompute element centers for all cycles
+                xe = compute_element_centers(file, block_id)
+                dimension = 1 if xe.ndim == 1 else xe.shape[1]
+                if dimension != region.dimension:
+                    raise ValueError("Coordinate dimension does not match region")
+                ix = region.contains(xe)
+                if not np.any(ix):
+                    continue
+
             for cycle in cycles:
+
+                if use_displaced_coords:
+                    xe = compute_element_centers(file, block_id, time_step=cycle + 1)
+                    dimension = 1 if xe.ndim == 1 else xe.shape[1]
+                    if dimension != region.dimension:
+                        raise ValueError("Coordinate dimension does not match region")
+                    ix = region.contains(xe)
+                    if not np.any(ix):
+                        continue
+
                 xd = [xe[ix]]
                 for var in vars:
                     elem_data = file.get_element_variable_values(

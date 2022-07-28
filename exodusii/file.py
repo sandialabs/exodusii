@@ -647,7 +647,7 @@ class exodusii_file:
         coords = np.column_stack([self.get_variable(_) for _ in coord_names])
         if time_step is not None:
             displ = self.get_displ(time_step)
-            if displ:
+            if displ is not None:
                 coords += displ
         return coords
 

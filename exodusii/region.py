@@ -15,7 +15,7 @@ class bounded_time_domain:
 
     Notes
     -----
-    provides a single public method `__call__` that determines whether a time
+    provides a single public method `contains` that determines whether a time
     (or times) is contained inside the time domain.
 
     """
@@ -26,8 +26,21 @@ class bounded_time_domain:
         self.t_min = t_min or 0.0
         self.t_max = t_max or bounded_time_domain.tmax
 
-    def __call__(self, times):
+    def contains(self, times):
         return np.array((times >= self.t_min) & (times <= self.t_max))
+
+
+class unbounded_time_domain:
+    """Represents an unbounded time region
+
+    Notes
+    -----
+    provides a single public method `contains` that determines whether a time
+    (or times) is contained inside the time domain.
+
+    """
+    def contains(self, times):
+        return True
 
 
 class cylinder:
@@ -96,14 +109,14 @@ class cylinder:
         return contains[0] if one_point else contains
 
     def _contains2d(self, points):
-        """A cylinder in 2d is really just a rectangle"""
+        """Specialized version for 2D cylinder"""
+        assert self.dimension == 2
+        # A cylinder in 2d is really just a rectangle"""
         axis = self.p2 - self.p1
         u = np.array([-axis[1], axis[0]])
         r = self.radius * u / np.sqrt(np.dot(u, u))
-        a = self.p1 - r
-        b = self.p2 - r
-        c = self.p2 + r
-        d = self.p1 + r
+        a, b = self.p1 - r, self.p2 - r
+        c, d = self.p2 + r, self.p1 + r
         return convex_polygon.contains([a, b, c, d], points)
 
 
@@ -112,6 +125,24 @@ class convex_polygon:
 
     def __init__(self, *args, **kwargs):
         raise NotImplementedError("complex_polygon is an abstract base class")
+
+    @staticmethod
+    def is_convex(*vertices):
+        vertices = [np.asarray(v) for v in vertices]
+        for i in range(len(vertices)):
+            p3 = vertices[i - 2]
+            p2 = vertices[i - 1]
+            p1 = vertices[i]
+            if convex_polygon.angle_between_points(p1, p2, p3) > np.pi:
+                return False
+        return True
+
+    @staticmethod
+    def angle_between_points(a, b, c):
+        x = np.arctan2(c[1] - b[1], c[0] - b[0])
+        y = np.arctan2(a[1] - b[1], a[0] - b[0])
+        angle = x - y
+        return angle + np.pi if angle < 0 else angle
 
     @staticmethod
     def contains(vertices, points):
@@ -132,17 +163,13 @@ class convex_polygon:
         one_point = points.ndim == 1
         if one_point:
             points = points[np.newaxis, :]
-        condition = None
-        for (i, a) in enumerate(vertices, start=1):
-            b = vertices[i] if i < len(vertices) else vertices[0]
+        contains = np.array([True] * len(points))
+        for i in range(len(vertices)):
+            a = vertices[i - 1]
+            b = vertices[i]
             edge = b - a
             v = points - a
-            c = edge[0] * v[:, 1] - v[:, 0] * edge[1] >= 0
-            if condition is None:
-                condition = c
-            else:
-                condition = condition & c
-        contains = np.array(condition)
+            contains &= edge[0] * v[:, 1] - v[:, 0] * edge[1] >= 0
         return contains[0] if one_point else contains
 
 
@@ -172,6 +199,8 @@ class quad(convex_polygon):
         for p in (a, b, c, d):
             if len(p) != self.dimension:
                 raise ValueError("Expected quad points to be 2D")
+        if not convex_polygon.is_convex(a, b, c, d):
+            raise ValueError("vertices do not form a convex polygon")
         self.a = np.asarray(a)
         self.b = np.asarray(b)
         self.c = np.asarray(c)
