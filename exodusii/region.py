@@ -40,7 +40,7 @@ class unbounded_time_domain:
 
     """
     def contains(self, times):
-        return True
+        return np.array([True] * len(times), dtype=bool)
 
 
 class cylinder:
