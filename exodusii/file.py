@@ -329,7 +329,12 @@ class exodusii_file:
             stream.close()
 
     def get(
-        self, *variables, time=None, index=None, cycle=None, lineout=None,
+        self,
+        *variables,
+        time=None,
+        index=None,
+        cycle=None,
+        lineout=None,
     ):
         """Finds the variables in the file and returns the values in a list of rows,
         where each row is a list of values.  The first row contains the labels.
@@ -4642,7 +4647,7 @@ def write_globals(data, times, title=None, filename="Globals.exo"):
     times : ndarray
         times (same for all variables in data).
 
-   """
+    """
 
     numtime = len(times)
 

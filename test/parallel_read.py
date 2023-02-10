@@ -124,7 +124,8 @@ def test_exodusii_read_1(datadir):
 
     assert np.allclose([1, 2, 3, 4], exof.get_element_id_map(exof.files[0]))
     assert np.allclose(
-        [1, 2, 3, 4, 5, 12, 13, 14, 15, 16], exof.get_node_id_map(exof.files[0]),
+        [1, 2, 3, 4, 5, 12, 13, 14, 15, 16],
+        exof.get_node_id_map(exof.files[0]),
     )
 
     assert np.allclose(

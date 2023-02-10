@@ -2,8 +2,7 @@ import numpy as np
 
 
 def similar(file1, file2, times=None):
-    """Compare two Exodus files, except the solution.
-    """
+    """Compare two Exodus files, except the solution."""
     from .file import ExodusIIFile
 
     if not isinstance(file1, ExodusIIFile):

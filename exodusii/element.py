@@ -495,7 +495,7 @@ class Hex8:
         coord = self.subcoord(intervals)
         conn = self.subconn(intervals)
 
-        m = intervals ** 3
+        m = intervals**3
         vols = np.zeros(m)
         for subel in range(m):
             loc_coords = coord[conn[subel]]
