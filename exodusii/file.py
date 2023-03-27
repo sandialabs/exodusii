@@ -100,6 +100,9 @@ class exodusii_file:
     def _filename(self, file):
         return nc.filename(file)
 
+    def get_filename(self, file):
+        return nc.filename(file)
+
     def _open(self, filename, mode):
         return nc.open(filename, mode=mode)
 
