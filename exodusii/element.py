@@ -13,7 +13,7 @@ def factory(elem_type, elem_coord):
         return Quad4(elem_coord)
     elif etype in ("hex", "hex8"):
         return Hex8(elem_coord)
-    elif etype in ("tet", "tet4", "tetra"):
+    elif etype in ("tet", "tet4", "tetra", "tetra4"):
         return Tet4(elem_coord)
     elif etype in ("wedge", "wedge6"):
         return Wedge6(elem_coord)
