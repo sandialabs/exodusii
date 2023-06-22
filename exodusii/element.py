@@ -13,6 +13,8 @@ def factory(elem_type, elem_coord):
         return Quad4(elem_coord)
     elif etype in ("hex", "hex8"):
         return Hex8(elem_coord)
+    elif etype in ("tri3", "triangle", "triangle3"):
+        return Tri3(elem_coord)
     elif etype in ("tet", "tet4", "tetra", "tetra4"):
         return Tet4(elem_coord)
     elif etype in ("wedge", "wedge6"):
@@ -495,7 +497,7 @@ class Hex8:
         coord = self.subcoord(intervals)
         conn = self.subconn(intervals)
 
-        m = intervals**3
+        m = intervals ** 3
         vols = np.zeros(m)
         for subel in range(m):
             loc_coords = coord[conn[subel]]
@@ -510,6 +512,119 @@ def _midpoint(a, b):
 
 def _distsquare(a, b):
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+
+
+class Tri3:
+    dim = 2
+    name = "TRI3"
+    nnode = 3
+
+    def __init__(self, coord):
+        self.coord = coord
+
+    @property
+    def volume(self):
+        x, y = self.coord[:, 0], self.coord[:, 1]
+        return 0.5 * abs(x[0] * y[1] - y[0] * x[1])
+
+    @property
+    def center(self):
+        """Compute the coordinates of the center of a tri element.
+
+        Note
+        ----
+        Simple average in physical space.
+
+        """
+        return np.average(self.coord, axis=0)
+
+    def subcoord(self, intervals):
+        """Divides the tri into 4^(intervals-1) new triangles, each with equal
+        volume. The triangles are recursively divided along their longest edge to
+        create two smaller triangles.
+
+        Parameters
+        ----------
+        intervals : int
+            The element will be subdivided into nx*ny*nz equispaced subelements,
+            where nx = ny = nz = intervals
+        """
+        if intervals <= 1:
+            return np.array(self.coord)
+        triindices = [[0, 1, 2]]
+        coord = np.array(self.coord)
+        self._subcoord(coord, triindices, intervals * 2 - 2)
+        return np.array(coord)
+
+    def subdiv(self, intervals):
+        """Compute node center list for a subdivided tri element"""
+        triindices = [[0, 1, 2]]
+        coord = np.array(self.coord)
+        if intervals > 1:
+            self._subcoord(coord, triindices, intervals * 2 - 2)
+        ntri = len(triindices)
+        subdiv = [Tri3(coord[triindices[i]]).center for i in range(ntri)]
+        return np.array(subdiv)
+
+    def subvols(self, intervals):
+        """Compute volumes of the subdivided tris"""
+        triindices = [[0, 1, 2]]
+        coord = np.array(self.coord)
+        self._subcoord(coord, triindices, intervals * 2 - 2)
+        ntri = len(triindices)
+        vol = [Tri3(coord[triindices[i]]).volume for i in range(ntri)]
+        return np.array(vol)
+
+    def subconn(self, intervals):
+        """Compute connectivity map for subdivided tris. elem_coords must be
+        supplied."""
+        triindices = [[0, 1, 2]]
+        if intervals > 1:
+            coord = np.array(self.coord)
+            self._subcoord(coord, triindices, intervals * 2 - 2)
+        return np.array(triindices, dtype=int)
+
+    def _subcoord(self, coord, tris, iterations):
+        """Main subivision function. 'coord' contains a list of nodes, and 'tris' is
+        a list containing objects like [2,5,7], where coord[2], coord[5], and
+        coord[7] would give the nodes of a triangle. This function divides
+        each triangle in half recursively, up to 'iterations' recursion levels.
+        Each triangle is divided in half on its longest edge, so the final
+        triangles should have similar dimensions.
+
+        After running, the lists passed as 'coord' and 'tris' will contain the
+        node locations and indexes respectively for the subdivided triangles.
+        """
+
+        if iterations <= 0:
+            return
+
+        newtris = []
+        for tri in tris:
+            # find longest edge
+            longest = 0
+            longi1 = 0
+            longi2 = 0
+            i3 = 0
+            for idx in range(-1, len(tri) - 1):
+                ds = _distsquare(coord[idx], coord[idx+1])
+                if ds > longest:
+                    longest = ds
+                    longi1 = tri[idx]
+                    longi2 = tri[idx+1]
+
+            i3 = (set(tri) - set((longi1, longi2))).pop()
+
+            # split it
+            mp = _midpoint(coord[longi1], coord[longi2])
+            coord = np.row_stack((coord, mp))
+            mpnode = len(coord) - 1
+            # replace it with the two new tets
+            newtris.append([longi1, mpnode, i3])
+            newtris.append([longi2, mpnode, i3])
+        # recurse
+        self._subcoord(coord, newtris, iterations - 1)
+        tris[:] = newtris
 
 
 class Tet4:
