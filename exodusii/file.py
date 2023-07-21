@@ -3343,6 +3343,27 @@ class exodusii_file:
         self._counter[counter] += 1
 
     @requires_write_mode
+    def put_element_block_names(self, names):
+        """
+        
+        """
+        names = ["{0:{1}s}".format(x, 32)[:32] for x in names]
+        block_ids = self.get_element_block_ids()
+
+        for (block_id, name) in zip(block_ids, names):
+            block_iid = self.get_element_block_iid(block_id)
+            self.fill_variable(ex.VAR_NAME_ELEM_BLK, block_iid-1, name)
+
+    @requires_write_mode
+    def put_element_block_name(self, block_id, name):
+        """
+        
+        """
+        name = "{0:{1}s}".format(name, 32)[:32]
+        block_iid = self.get_element_block_iid(block_id)
+        self.fill_variable(ex.VAR_NAME_ELEM_BLK, block_iid-1, name)
+
+    @requires_write_mode
     def put_element_conn(self, block_id, connect, type=ex.types.node):
         """writes the connectivity array for an element block
 
@@ -4255,6 +4276,7 @@ class exodusii_file:
         name : str
             The side set name
         """
+        name = "{0:{1}s}".format(name, 32)[:32]
         set_ids = self.get_side_set_ids()
         set_iid = self.get_iid(set_ids, set_id)
         self.fill_variable(ex.VAR_NAME_SIDE_SET, set_iid - 1, name)
