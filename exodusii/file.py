@@ -1141,12 +1141,11 @@ class exodusii_file:
         """get mapping of exodus element block index to user - or application-defined
         element block id.
 
-        block_ids is ordered by the element block INDEX ordering,
-        a 1-based system going from 1 to exo.num_blks(), used by exodus for storage
-        and input/output of array data stored on the element blocks a user or
-        application can optionally use a separate element block ID numbering system,
-        so the block_ids array points to the element block ID for each element
-        block INDEX
+        block_ids is ordered by the element block INDEX ordering, a 1-based system
+        going from 1 to exo.num_blks(), used by exodus for storage and input/output
+        of array data stored on the element blocks; a user or application can
+        optionally use a separate element block ID numbering system, so the block_ids
+        array points to the element block ID for each element block INDEX
 
         Returns
         -------
@@ -3344,7 +3343,13 @@ class exodusii_file:
 
     @requires_write_mode
     def put_element_block_names(self, names):
-        """
+        """store a list of all element block names ordered by block INDEX
+        (see get_element_block_ids for an explanation of the difference
+        between block id and index)
+
+        Returns
+        -------
+        elem_blk_names : list<string>
         
         """
         names = ["{0:{1}s}".format(x, 32)[:32] for x in names]
@@ -3356,7 +3361,13 @@ class exodusii_file:
 
     @requires_write_mode
     def put_element_block_name(self, block_id, name):
-        """
+        """store the element block name
+
+        Parameters
+        ----------
+        block_id : ex_entity_id
+            element block *ID* (not *INDEX*)
+        name : string
         
         """
         name = "{0:{1}s}".format(name, 32)[:32]
