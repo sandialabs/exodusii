@@ -1,0 +1,12 @@
+[project]
+name = "exodusii"
+version = "1.0.0"
+description = "Python wrappers to the ExodusII finite element database model"
+dependencies = ["netcdf4"]
+
+[project.scripts]
+"exoread.py" = "exodusii:exoread"
+
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm[toml]>=6.2.3"]
+build-backend = "setuptools.build_meta"

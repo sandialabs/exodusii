@@ -100,6 +100,9 @@ class exodusii_file:
     def _filename(self, file):
         return nc.filename(file)
 
+    def get_filename(self, file):
+        return nc.filename(file)
+
     def _open(self, filename, mode):
         return nc.open(filename, mode=mode)
 
@@ -787,7 +790,7 @@ class exodusii_file:
         -------
         edge_block_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_EDGE_BLK)
+        return self.get_variable(ex.VAR_NAME_EDGE_BLK, default=np.array([], dtype=str))
 
     def get_edge_block_conn(self, block_id):
         """Get the nodal connectivity for a single edge block
@@ -904,7 +907,7 @@ class exodusii_file:
         -------
         edge_set_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_EDGE_SET)
+        return self.get_variable(ex.VAR_NAME_EDGE_SET, default=np.array([], dtype=str))
 
     def get_edge_set_edges(self, set_id):
         """Get the list of edge *INDICES* in a edge set (see `exodus.get_id_map` for
@@ -978,7 +981,9 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_EDGE_SET_VAR)
+        return self.get_variable(
+            ex.VAR_NAME_EDGE_SET_VAR, default=np.array([], dtype=str)
+        )
 
     def get_edge_set_variable_number(self):
         """Get the number of edge set variables in the model
@@ -1038,7 +1043,7 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_EDGE_VAR)
+        return self.get_variable(ex.VAR_NAME_EDGE_VAR, default=np.array([], dtype=str))
 
     def get_edge_variable_number(self):
         """Get the number of edge variables in the model
@@ -1227,7 +1232,7 @@ class exodusii_file:
         -------
         elem_block_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_ELEM_BLK)
+        return self.get_variable(ex.VAR_NAME_ELEM_BLK, default=np.array([], dtype=str))
 
     def get_element_conn(self, block_id, type=ex.types.node):
         """Get the nodal connectivity for a single block
@@ -1341,7 +1346,7 @@ class exodusii_file:
         -------
         element_set_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_ELEM_SET)
+        return self.get_variable(ex.VAR_NAME_ELEM_SET, default=np.array([], dtype=str))
 
     def get_element_block_elem_type(self, block_id):
         """Get the element type, e.g. "HEX8", for an element block"""
@@ -1419,7 +1424,7 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_ELEM_VAR)
+        return self.get_variable(ex.VAR_NAME_ELEM_VAR, default=np.array([], dtype=str))
 
     def get_element_variable_number(self):
         """Get the number of element variables in the model
@@ -1599,7 +1604,7 @@ class exodusii_file:
         -------
         face_block_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_FACE_BLK)
+        return self.get_variable(ex.VAR_NAME_FACE_BLK, default=np.array([], dtype=str))
 
     def get_face_block_conn(self, block_id):
         """Get the nodal connectivity for a single block
@@ -1693,7 +1698,7 @@ class exodusii_file:
         -------
         face_set_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_FACE_SET)
+        return self.get_variable(ex.VAR_NAME_FACE_SET, default=np.array([], dtype=str))
 
     def get_face_set_faces(self, set_id):
         """Get the list of face *INDICES* in a face set (see `exodus.get_id_map` for
@@ -1767,7 +1772,9 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_FACE_SET_VAR)
+        return self.get_variable(
+            ex.VAR_NAME_FACE_SET_VAR, default=np.array([], dtype=str)
+        )
 
     def get_face_set_variable_number(self):
         """Get the number of face set variables in the model
@@ -1827,7 +1834,7 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_FACE_VAR)
+        return self.get_variable(ex.VAR_NAME_FACE_VAR, default=np.array([], dtype=str))
 
     def get_face_variable_number(self):
         """Get the number of face variables in the model
@@ -1890,7 +1897,7 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_GLO_VAR)
+        return self.get_variable(ex.VAR_NAME_GLO_VAR, default=np.array([], dtype=str))
 
     def get_global_variable_number(self):
         """Get the number of global variables in the model
@@ -2055,7 +2062,7 @@ class exodusii_file:
         -------
         node_set_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_NODE_SET)
+        return self.get_variable(ex.VAR_NAME_NODE_SET, default=np.array([], dtype=str))
 
     def get_node_set_nodes(self, set_id):
         """Get the list of node *INDICES* in a node set (see `exodus.get_id_map` for
@@ -2128,7 +2135,9 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_NODE_SET_VAR)
+        return self.get_variable(
+            ex.VAR_NAME_NODE_SET_VAR, default=np.array([], dtype=str)
+        )
 
     def get_node_set_variable_number(self):
         """Get the number of node set variables in the model
@@ -2210,8 +2219,7 @@ class exodusii_file:
         -------
         var_names : list of str
         """
-        var_names = self.get_variable(ex.VAR_NAME_NODE_VAR, default=[])
-        return var_names
+        return self.get_variable(ex.VAR_NAME_NODE_VAR, default=np.array([], dtype=str))
 
     def get_node_variable_number(self):
         """Get the number of node variables in the model
@@ -2353,7 +2361,7 @@ class exodusii_file:
         -------
         side_set_names : list of str
         """
-        return self.get_variable(ex.VAR_NAME_SIDE_SET)
+        return self.get_variable(ex.VAR_NAME_SIDE_SET, default=np.array([], dtype=str))
 
     def get_side_set_node_list(self, id):
         """Get two lists:

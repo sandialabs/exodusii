@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from argparse import Namespace
 
@@ -18,9 +19,16 @@ class parallel_exodusii_file(exodusii_file):
 
         maxlen = lambda list_like: max(list_like, key=len)
         self._title = maxlen([stringify(_.title) for _ in self.files])
-        self._qa_records = maxlen(
-            [self.get_variable(_, ex.VAR_QA_TITLE) for _ in self.files]
-        )
+        qa_records = self.get_variable(self.files[0], ex.VAR_QA_TITLE)
+        for file in self.files:
+            qa_records_this_file = self.get_variable(file, ex.VAR_QA_TITLE)
+            if qa_records_this_file is None:
+                continue
+            elif qa_records is None:
+                qa_records = qa_records_this_file
+            else:
+                qa_records = max([qa_records, qa_records_this_file], key=len)
+        self._qa_records = qa_records
 
         self.exinit = ex_init_params(self.files[0])
         self.cache = {}
@@ -30,13 +38,13 @@ class parallel_exodusii_file(exodusii_file):
 
     @property
     def filename(self):
-        return ",".join(self._filename(f) for f in self.files)
+        return ",".join(self.get_filename(f) for f in self.files)
 
     def open(self, *files):
-        files = [self._open(file, "r") for file in sorted(files)]
-        self.check_consistency(files)
+        self.files = [self._open(file, "r") for file in sorted(files)]
+        self.check_consistency(self.files)
 
-        return files
+        return self.files
 
     def close(self):
         pass
@@ -430,7 +438,16 @@ class parallel_exodusii_file(exodusii_file):
         elem_id_map : ndarray of int
 
         """
-        return self.get_variable(file, ex.VAR_ELEM_NUM_MAP)
+        map = self.get_variable(file, ex.VAR_ELEM_NUM_MAP)
+        if map is not None:
+            return map
+        start = 0
+        for f in self.files:
+            num_elem_this_file = self.get_dimension(f, ex.DIM_NUM_ELEM)
+            if os.path.samefile(self.get_filename(f), self.get_filename(file)):
+                return np.arange(start, start + num_elem_this_file, dtype=int) + 1
+            start += num_elem_this_file
+        raise ValueError("Cannot determine element number map")
 
     def get_element_id_map(self, file=None):
         """Get mapping of exodus element index to user- or application- defined
@@ -1623,7 +1640,7 @@ class parallel_exodusii_file(exodusii_file):
             if ex_init != ex_init_params(fh):
                 raise TypeError("initialization parameters not consistent across files")
 
-        nblks = self.get_dimension(files[0], ex.DIM_NUM_ELEM_BLK_GLOBAL, default=0)
+        nblks = self.get_dimension(files[0], ex.DIM_NUM_ELEM_BLK_GLOBAL, default=1)
         for file in files:
             counted = 0
             elem_num_map = self.f_get_element_id_map(file)
@@ -1635,7 +1652,7 @@ class parallel_exodusii_file(exodusii_file):
             if counted != len(elem_num_map):
                 raise ValueError(
                     f"Expected {len(elem_num_map)} elements across all blocks in "
-                    f"{self._filename(file)}, counted {counted}"
+                    f"{self.get_filename(file)}, counted {counted}"
                 )
 
         return
