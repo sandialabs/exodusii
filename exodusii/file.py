@@ -3339,7 +3339,7 @@ class exodusii_file:
         # element block attributes
         if num_attr:
             dim = ex.DIM_NUM_ATT_IN_ELEM_BLK(block_iid)
-            var = ex.VAR_ELEM_BLK_ATTRIB(block_iid)
+            var = ex.VAR_ELEM_ATTRIB(block_iid)
             self.create_dimension(dim, num_attr)
             self.create_variable(var, float, (dims[0], dim))
             self.fill_variable(var, np.zeros(num_attr))
