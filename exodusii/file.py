@@ -3940,8 +3940,8 @@ class exodusii_file:
         num_elem = self.get_dimension(ex.DIM_NUM_ELEM)
         if len(elem_map) > num_elem:
             raise ValueError("len(elem_map) > num_elem")
-        self.create_variable(ex.VAR_ELEM_MAP, int, (ex.DIM_NUM_ELEM,))
-        self.fill_variable(ex.VAR_ELEM_MAP, elem_map)
+        self.create_variable(ex.VAR_ELEM_MAP(1), int, (ex.DIM_NUM_ELEM,))
+        self.fill_variable(ex.VAR_ELEM_MAP(1), elem_map)
 
     @requires_write_mode
     def put_element_map(self, *args):
