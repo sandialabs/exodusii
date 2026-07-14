@@ -32,10 +32,9 @@ def test_parallel_uses_global_metadata(tmp_path: Path) -> None:
         assert exo.element_block_ids().tolist() == [10]
         assert exo.node_set_ids().tolist() == [100]
         assert exo.side_set_ids().tolist() == [200]
-        assert exo.num_elems_in_all_blks().tolist() == [2]
-        assert exo.num_elems_in_blk(10) == 2
-        assert exo.num_nodes_in_node_set(100) == 4
-        assert exo.num_sides_in_side_set(200) == 2
+        assert exo.element_block(10).count == 2
+        assert exo.node_set(100).count == 4
+        assert exo.side_set(200).count == 2
 
 
 def test_parallel_rejects_bad_global_node_count(tmp_path: Path) -> None:
