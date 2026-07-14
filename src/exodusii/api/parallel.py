@@ -1634,6 +1634,24 @@ class ParallelExodusFile:
 
         return float(self.times()[time_step - 1])
 
+    def get_time_step(self, target: float, pcttol: float = 1.0e-5) -> int:
+        """Legacy API: return one-based nearest time-step index."""
+
+        times = np.asarray(self.times(), dtype=np.float64)
+        if times.size == 0:
+            raise ValueError("no time steps found")
+
+        index = int(np.abs(times - target).argmin())
+
+        if abs(target) > 0.0:
+            relerr = abs(float(times[index]) - target) / abs(target)
+            if relerr > pcttol:
+                import logging
+
+                logging.warning("Solution time differs significantly from desired solution time.")
+
+        return index + 1
+
     def get_coord_names(self) -> npt.NDArray[np.str_]:
         """Legacy API: coordinate names."""
 

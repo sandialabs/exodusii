@@ -113,7 +113,7 @@ def allclose(
 
 
 def similar(
-    file1: ExodusFileLike, file2: ExodusFileLike, *, times: Iterable[float] | None = None
+    file1: ExodusFileLike, file2: ExodusFileLike, times: Iterable[float] | None = None
 ) -> bool:
     """Return true if two Exodus files have the same mesh and variable layout.
 
@@ -190,6 +190,9 @@ def _compare_variable_layout(exo1: ExodusFile, exo2: ExodusFile) -> None:
 
 
 def _compare_coordinates(exo1: ExodusFile, exo2: ExodusFile) -> None:
+    if exo1.node_count == 0 and exo2.node_count == 0:
+        return
+
     if not np.allclose(exo1.coordinates(), exo2.coordinates()):
         raise ValueError("files do not have the same node coordinates")
 
