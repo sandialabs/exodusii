@@ -23,13 +23,14 @@ from exodusii.api.query import query
 from exodusii.api.writer import ExodusWriter
 from exodusii.compat import ExodusIIFile
 from exodusii.compat import File
+from exodusii.compat import MFExodusIIFile
+from exodusii.compat import ParallelExodusIIFile
 from exodusii.compat import exodusii_file
+from exodusii.compat import parallel_exodusii_file
 from exodusii.compat import write_globals
 
 region = importlib.import_module("exodusii.region")
 
-parallel_exodusii_file = ParallelExodusFile
-MFExodusIIFile = ParallelExodusFile
 exo_file = File
 
 try:
@@ -46,6 +47,7 @@ __all__ = [
     "Lineout",
     "MFExodusIIFile",
     "ParallelExodusFile",
+    "ParallelExodusIIFile",
     "QueryResult",
     "__version__",
     "allclose",

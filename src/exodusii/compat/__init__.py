@@ -8,7 +8,19 @@ from exodusii.compat.legacy_file import ExodusIIFile
 from exodusii.compat.legacy_file import File
 from exodusii.compat.legacy_file import exodusii_file
 from exodusii.compat.legacy_file import write_globals
+from exodusii.compat.legacy_parallel import MFExodusIIFile
+from exodusii.compat.legacy_parallel import ParallelExodusIIFile
+from exodusii.compat.legacy_parallel import parallel_exodusii_file
 
 exo_file = File
 
-__all__ = ["ExodusIIFile", "File", "exo_file", "exodusii_file", "write_globals"]
+__all__ = [
+    "ExodusIIFile",
+    "File",
+    "MFExodusIIFile",
+    "ParallelExodusIIFile",
+    "exo_file",
+    "exodusii_file",
+    "parallel_exodusii_file",
+    "write_globals",
+]

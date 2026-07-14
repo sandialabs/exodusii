@@ -11,6 +11,7 @@ import exodusii
 from exodusii.api.file import ExodusFile
 from exodusii.api.parallel import ParallelExodusFile
 from exodusii.api.writer import ExodusWriter
+from exodusii.compat.legacy_parallel import ParallelExodusIIFile
 from exodusii.core.errors import ExodusConsistencyError
 
 
@@ -97,7 +98,8 @@ def test_legacy_file_factory_opens_parallel(tmp_path: Path) -> None:
     part0, part1 = _write_parts(tmp_path)
 
     with exodusii.File(part0, part1) as exo:
-        assert isinstance(exo, ParallelExodusFile)
+        assert isinstance(exo, ParallelExodusIIFile)
+        assert isinstance(exo._parallel, ParallelExodusFile)
         assert exo.node_count == 8
         assert exo.element_count == 2
 

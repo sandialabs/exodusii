@@ -1427,9 +1427,9 @@ def File(filename: str | Path, *files: str | Path, mode: str = "r"):
     if files:
         if mode != "r":
             raise ExodusInvalidModeError("parallel Exodus files can only be opened in read mode")
-        from exodusii.api.parallel import ParallelExodusFile
+        from exodusii.compat.legacy_parallel import ParallelExodusIIFile
 
-        return ParallelExodusFile(filename, *files)
+        return ParallelExodusIIFile(filename, *files)
 
     return ExodusIIFile(filename, mode=mode)
 
