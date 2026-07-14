@@ -343,3 +343,12 @@ def test_parallel_legacy_methods(tmp_path: Path) -> None:
         assert np.allclose(exo.get_element_variable_values(10, "ENERGY", 2), [1.5, 2.5])
         assert np.allclose(exo.get_node_variable_history("TEMP", 6), [60.0, 61.0])
         assert np.allclose(exo.get_element_variable_history("ENERGY", 2), [1.5, 2.5])
+
+
+def test_exodus_name_decoding_preserves_meaningful_trailing_zero() -> None:
+    from exodusii.api.file import _strip_exodus_padding
+
+    assert _strip_exodus_padding("nodeset_100") == "nodeset_100"
+    assert _strip_exodus_padding("sideset_200") == "sideset_200"
+    assert _strip_exodus_padding("MAT_10") == "MAT_10"
+    assert _strip_exodus_padding("DT_HYDRO0000000000000000000000000") == "DT_HYDRO"
