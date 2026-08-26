@@ -1,0 +1,330 @@
+{
+  "capabilities": {
+    "schema_version": "1.0.0",
+    "dataset": "capabilities",
+    "audience": "AI coding agents and automation tools that need to discover how to use exodusii without loading the full documentation corpus.",
+    "format": {
+      "type": "static_json",
+      "query_command": "python -m exodusii learn -c CAPABILITY [query]",
+      "query_language": "Lightweight path syntax: whole object with '.', dotted object keys, bracketed object keys, and list indexes. This is not jq.",
+      "progressive_disclosure": "Top-level objects are compact indexes. Query deeper paths for operational details."
+    },
+    "overview": {
+      "what_is_exodusii": "exodusii is a Python interface for reading, writing, comparing, querying, and inspecting Sandia Exodus II finite-element databases stored as NetCDF files.",
+      "core_use_cases": [
+        "Inspect mesh and result metadata from finite-element simulations.",
+        "Read nodal, element, global, edge, face, and set variables.",
+        "Query result variables at selected time steps.",
+        "Aggregate decomposed parallel Exodus/Nemesis files.",
+        "Write or copy supported Exodus databases.",
+        "Compute simple mesh geometry quantities such as centers, volumes, and nodal volumes.",
+        "Expose JSON output for AI agents and automation tools."
+      ],
+      "start_here": {
+        "agent_cli": ".commands",
+        "database_inspection": ".commands.inspect",
+        "database_query": ".commands.query",
+        "summaries": ".commands.stats",
+        "python_api": ".python_api",
+        "variable_selectors": ".query.selectors",
+        "time_selectors": ".query.time_selectors",
+        "legacy_compatibility": ".legacy"
+      },
+      "common_agent_queries": [
+        "python -m exodusii learn -c overview",
+        "python -m exodusii learn -c commands",
+        "python -m exodusii learn -c query",
+        "python -m exodusii learn -c python_api",
+        "python -m exodusii learn --skill list",
+        "python -m exodusii inspect mesh.exo",
+        "python -m exodusii variables mesh.exo",
+        "python -m exodusii query mesh.exo --select n/TEMP --time last",
+        "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block"
+      ]
+    },
+    "concepts": {
+      "exodus_database": "An Exodus II database is a NetCDF file containing finite-element mesh topology, sets, blocks, coordinates, time values, and result variables.",
+      "entities": {
+        "global": "Whole-database result variables, usually one value per time step.",
+        "node": "Nodal result variables, one value per node per time step.",
+        "element": "Element result variables, usually stored by element block.",
+        "edge": "Edge result variables, stored by edge block when edge entities exist.",
+        "face": "Face result variables, stored by face block when face entities exist.",
+        "element_block": "A group of elements with the same element type and connectivity width.",
+        "edge_block": "A group of edges with the same edge topology.",
+        "face_block": "A group of faces with the same face topology.",
+        "node_set": "A set of nodes, optionally with distribution factors.",
+        "side_set": "A set of element-side pairs, optionally with distribution factors.",
+        "edge_set": "A set of edges, optionally with orientations and distribution factors.",
+        "face_set": "A set of faces, optionally with orientations and distribution factors.",
+        "element_set": "A set of elements, optionally with distribution factors."
+      },
+      "time_indexing": {
+        "python_api": "Modern API time indexes are zero-based when integers are used.",
+        "legacy_api": "Legacy ExodusIIFile-style methods usually use one-based time_step arguments.",
+        "cli": "The agent CLI accepts first, last, index:N, step:N, or a physical float time."
+      },
+      "connectivity_indexing": {
+        "file_storage": "Exodus connectivity is conventionally one-based.",
+        "modern_api_default": "Modern reader methods return one-based connectivity by default.",
+        "zero_based_option": "Many methods accept zero_based=True to return Python-friendly zero-based connectivity."
+      }
+    },
+    "commands": {
+      "summary": "The agent-oriented CLI is available through python -m exodusii and prints JSON by default with indent=2. Use --terse for compact JSON.",
+      "learn": {
+        "purpose": "Query static exodusii capabilities and skills for self-learning.",
+        "examples": [
+          "python -m exodusii learn -c overview",
+          "python -m exodusii learn -c query",
+          "python -m exodusii learn -c python_api.values",
+          "python -m exodusii learn --skill list",
+          "python -m exodusii learn --skill exodusii-querying .body"
+        ]
+      },
+      "inspect": {
+        "purpose": "Print an agent-friendly summary of one Exodus database.",
+        "example": "python -m exodusii inspect mesh.exo",
+        "returns": [
+          "title",
+          "storage type",
+          "spatial dimension",
+          "mesh counts",
+          "time summary",
+          "coordinate names",
+          "displacement variable names",
+          "result variable names",
+          "block and set IDs",
+          "agent hints"
+        ]
+      },
+      "variables": {
+        "purpose": "Print result-variable inventory by entity.",
+        "examples": [
+          "python -m exodusii variables mesh.exo",
+          "python -m exodusii variables mesh.exo --truth-tables"
+        ]
+      },
+      "blocks": {
+        "purpose": "Print element, edge, and face block metadata.",
+        "examples": [
+          "python -m exodusii blocks mesh.exo",
+          "python -m exodusii blocks mesh.exo --connectivity --limit 5"
+        ]
+      },
+      "sets": {
+        "purpose": "Print node, side, edge, face, and element set metadata.",
+        "examples": [
+          "python -m exodusii sets mesh.exo",
+          "python -m exodusii sets mesh.exo --entries --limit 20"
+        ]
+      },
+      "times": {
+        "purpose": "Print time-step information.",
+        "examples": [
+          "python -m exodusii times mesh.exo",
+          "python -m exodusii times mesh.exo --all"
+        ]
+      },
+      "query": {
+        "purpose": "Query result variables from a database and emit JSON records.",
+        "examples": [
+          "python -m exodusii query mesh.exo --select g/TOTAL_ENERGY",
+          "python -m exodusii query mesh.exo --select n/TEMP --time last --limit 10",
+          "python -m exodusii query mesh.exo --select e/ENERGY --time step:5 --limit 10"
+        ]
+      },
+      "stats": {
+        "purpose": "Compute compact numeric summaries for selected variables.",
+        "examples": [
+          "python -m exodusii stats mesh.exo --select n/TEMP --time last",
+          "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block"
+        ]
+      },
+      "examples": {
+        "purpose": "Print database-specific Python snippets.",
+        "example": "python -m exodusii examples mesh.exo"
+      },
+      "json_format": {
+        "default": "Indented JSON with indent=2.",
+        "terse": "Use --terse for compact JSON with separators(',', ':').",
+        "error_shape": {
+          "ok": false,
+          "error": {
+            "type": "ExceptionClassName",
+            "message": "human readable error"
+          }
+        }
+      }
+    },
+    "query": {
+      "summary": "The database query command extracts result variables from Exodus databases. The static learn query path extracts information from installed JSON capability datasets.",
+      "selectors": {
+        "format": "ENTITY/NAME",
+        "examples": [
+          "g/TOTAL_ENERGY",
+          "n/TEMP",
+          "n/coordinates",
+          "n/displacements",
+          "e/ENERGY",
+          "d/EDGE_VAR",
+          "f/FACE_VAR",
+          "ns/NS_VAR",
+          "ss/SS_VAR"
+        ],
+        "entity_prefixes": {
+          "g": "global",
+          "n": "node",
+          "e": "element",
+          "d": "edge",
+          "f": "face",
+          "ns": "node_set",
+          "ss": "side_set",
+          "es": "edge_set",
+          "fs": "face_set",
+          "els": "element_set"
+        },
+        "special_node_selectors": {
+          "n/coordinates": "Nodal coordinates.",
+          "n/displacements": "Nodal displacement vectors when displacement variables are present."
+        }
+      },
+      "time_selectors": {
+        "first": "First time step.",
+        "last": "Last time step.",
+        "index:N": "Zero-based Python time index.",
+        "step:N": "One-based Exodus time step.",
+        "float": "Nearest physical time value."
+      },
+      "lineouts": {
+        "summary": "The Lineout helper can restrict spatial tabular data to a line parallel to a coordinate axis.",
+        "python_api": "exodusii.api.lineout.Lineout",
+        "cli_status": "If wired into the JSON CLI, lineout specifications should mirror exoread's -L/--lineout behavior."
+      }
+    },
+    "python_api": {
+      "summary": "The modern API is centered on ExodusFile for reading, ExodusWriter for writing, and ParallelExodusFile for aggregating decomposed files.",
+      "open": {
+        "import": "from exodusii.api.file import ExodusFile",
+        "example": "with ExodusFile.open('mesh.exo') as exo:\n    print(exo.title)\n    print(exo.dimension)"
+      },
+      "metadata": {
+        "properties": [
+          "exo.title",
+          "exo.storage_type",
+          "exo.dimension",
+          "exo.node_count",
+          "exo.edge_count",
+          "exo.face_count",
+          "exo.element_count",
+          "exo.element_block_count",
+          "exo.node_set_count",
+          "exo.side_set_count"
+        ],
+        "methods": [
+          "exo.times()",
+          "exo.coordinate_names()",
+          "exo.variable_names('node')",
+          "exo.element_block_ids()",
+          "exo.node_set_ids()",
+          "exo.side_set_ids()"
+        ]
+      },
+      "values": {
+        "method": "exo.values(name, on=ENTITY, time=None, block_id=None, set_id=None)",
+        "global": "exo.values('TOTAL_ENERGY', on='global') returns a time history.",
+        "node": "exo.values('TEMP', on='node', time='last') returns nodal values at one time.",
+        "element": "exo.values('ENERGY', on='element', block_id=1, time='last') returns values for one block.",
+        "all_element_blocks": "exo.values('ENERGY', on='element', time='last') concatenates block values.",
+        "set_variable": "exo.values('VAR', on='node_set', set_id=10, time='last') reads one set variable."
+      },
+      "coordinates": {
+        "material": "exo.coordinates()",
+        "displaced": "exo.coordinates(time='last', displaced=True)",
+        "displacements": "exo.displacements(time='last')",
+        "displacement_names": "exo.displacement_variable_names()"
+      },
+      "blocks": {
+        "ids": "exo.element_block_ids()",
+        "metadata": "exo.element_block(block_id)",
+        "connectivity": "exo.element_connectivity(block_id)",
+        "zero_based": "exo.element_connectivity(block_id, zero_based=True)"
+      },
+      "sets": {
+        "node_sets": [
+          "exo.node_set_ids()",
+          "exo.node_set(set_id)"
+        ],
+        "side_sets": [
+          "exo.side_set_ids()",
+          "exo.side_set(set_id)"
+        ]
+      },
+      "parallel": {
+        "import": "from exodusii.api.parallel import ParallelExodusFile",
+        "example": "with ParallelExodusFile.open('mesh.e.2.0', 'mesh.e.2.1') as exo:\n    coords = exo.coordinates()\n    values = exo.values('TEMP', on='node', time='last')"
+      },
+      "writer": {
+        "import": "from exodusii.api.writer import ExodusWriter",
+        "purpose": "Create new Exodus databases from arrays.",
+        "note": "Initialize first, define coordinates/blocks/sets, define variables, then write time and values."
+      },
+      "copy": {
+        "import": "from exodusii.api.copy import copy_file",
+        "example": "copy_file('input.exo', 'output.exo')"
+      },
+      "compare": {
+        "import": "from exodusii.api.compare import allclose, similar",
+        "allclose": "Data-wise equality within tolerances.",
+        "similar": "Mesh and variable layout similarity."
+      }
+    },
+    "mesh_geometry": {
+      "summary": "exodusii.mesh provides finite-element geometry helpers.",
+      "functions": {
+        "entity_centers": "Compute centers from zero-based connectivity and coordinates.",
+        "element_volumes": "Compute element areas or volumes.",
+        "nodal_volumes": "Distribute element measures to nodes.",
+        "connected_average": "Average nodal values over connectivity.",
+        "bounding_box": "Compute coordinate bounding box."
+      },
+      "elements": [
+        "Quad4",
+        "Hex8",
+        "Tri3",
+        "Tet4",
+        "Wedge6"
+      ]
+    },
+    "legacy": {
+      "summary": "The compatibility layer preserves much of the historical ExodusIIFile-style API.",
+      "imports": [
+        "from exodusii.compat.legacy_file import ExodusIIFile",
+        "from exodusii.compat.legacy_file import File",
+        "from exodusii.compat.legacy_parallel import ParallelExodusIIFile"
+      ],
+      "time_indexing": "Legacy methods generally use one-based time_step arguments.",
+      "examples": [
+        "exo.get_times()",
+        "exo.get_coords(time_step=1)",
+        "exo.get_node_variable_values('TEMP', time_step=1)",
+        "exo.get_element_variable_values(block_id, 'ENERGY', time_step=1)"
+      ]
+    },
+    "limitations": {
+      "query_cli": [
+        "Large arrays are truncated by default; use --limit -1 carefully.",
+        "The JSON database query command depends on the capabilities of exodusii.api.query.",
+        "Some advanced Exodus entities may require direct Python API access if not exposed through the CLI."
+      ],
+      "static_capabilities": [
+        "The static capability dataset is a compact guide, not a full API reference.",
+        "Source code and generated API documentation remain authoritative for exact signatures."
+      ],
+      "file_support": [
+        "Requires netCDF4.",
+        "Supports common Exodus II NetCDF structures; unusual files may require additional compatibility work."
+      ]
+    }
+  }
+}
