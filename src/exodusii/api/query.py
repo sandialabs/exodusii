@@ -104,18 +104,25 @@ def _query_global(
     exo: ExodusFile, selectors: tuple[VariableSelector, ...], *, time: TimeSelector
 ) -> npt.NDArray[np.void]:
     times = exo.times()
-    columns = [times]
     names = ["TIME"]
 
-    for selector in selectors:
-        columns.append(exo.values(selector.name, on=Entity.GLOBAL))
-        names.append(selector.name)
-
-    dense = np.column_stack(columns)
-
-    if time is not None:
+    if time is None:
+        # Full time history for every selected global variable.
+        columns: list[npt.NDArray[np.float64]] = [times]
+        for selector in selectors:
+            columns.append(exo.values(selector.name, on=Entity.GLOBAL))
+            names.append(selector.name)
+        dense = np.column_stack(columns)
+    else:
+        # Single time step: read only that step from each variable instead
+        # of pulling the entire history and slicing.
         selection = resolve_time(times, time)
-        dense = dense[selection.index : selection.index + 1]
+        row: list[float] = [float(times[selection.index])]
+        for selector in selectors:
+            value = exo.values(selector.name, on=Entity.GLOBAL, time=time)
+            row.append(float(np.asarray(value)))
+            names.append(selector.name)
+        dense = np.asarray([row], dtype=np.float64)
 
     return _structured(names, dense, metadata={"entity": Entity.GLOBAL.value})
 

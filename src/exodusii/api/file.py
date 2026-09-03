@@ -45,6 +45,12 @@ class ExodusFile:
 
     def __init__(self, backend: NetCDFBackend) -> None:
         self._backend = backend
+        # Cache for immutable metadata reads (times, variable-name tables,
+        # set/block id arrays, and index lookups).  ExodusFile is a pure
+        # reader (all writes go through ExodusWriter with its own backend),
+        # so these are stable for the lifetime of the instance.  The cache
+        # is cleared on close()/sync() as a safety measure.
+        self._cache: dict[str, Any] = {}
 
     @classmethod
     def open(cls, path: str | Path, mode: str = "r") -> "ExodusFile":
@@ -73,11 +79,13 @@ class ExodusFile:
     def close(self) -> None:
         """Close the database."""
 
+        self._cache.clear()
         self._backend.close()
 
     def sync(self) -> None:
         """Flush pending writes."""
 
+        self._cache.clear()
         self._backend.sync()
 
     def __enter__(self) -> "ExodusFile":
@@ -209,11 +217,16 @@ class ExodusFile:
         """Return set IDs for a set entity."""
 
         spec = set_spec(on)
-        values = self._backend.variable(spec.ids_variable, default=None)
-        if values is None:
-            return np.asarray([], dtype=np.int64)
-
-        ids = np.asarray(values, dtype=np.int64)
+        cache_key = f"set_ids:{spec.entity.value}"
+        ids = self._cache.get(cache_key)
+        if ids is None:
+            values = self._backend.variable(spec.ids_variable, default=None)
+            if values is None:
+                ids = np.asarray([], dtype=np.int64)
+            else:
+                ids = np.asarray(values, dtype=np.int64)
+            ids.setflags(write=False)
+            self._cache[cache_key] = ids
 
         if active_only:
             status = self.set_status(spec.entity)
@@ -323,8 +336,13 @@ class ExodusFile:
     def times(self) -> npt.NDArray[np.float64]:
         """Return all time values."""
 
-        values = self._backend.variable(VariableName.TIME.value, default=[])
-        return np.asarray(values, dtype=np.float64)
+        cached = self._cache.get("times")
+        if cached is None:
+            values = self._backend.variable(VariableName.TIME.value, default=[])
+            cached = np.asarray(values, dtype=np.float64)
+            cached.setflags(write=False)
+            self._cache["times"] = cached
+        return cached
 
     def coordinate_names(self) -> npt.NDArray[np.str_]:
         """Return coordinate names."""
@@ -413,11 +431,16 @@ class ExodusFile:
         """Return block IDs for an element, edge, or face block entity."""
 
         spec = block_spec(on)
-        values = self._backend.variable(spec.ids_variable, default=None)
-        if values is None:
-            return np.asarray([], dtype=np.int64)
-
-        ids = np.asarray(values, dtype=np.int64)
+        cache_key = f"block_ids:{spec.entity.value}"
+        ids = self._cache.get(cache_key)
+        if ids is None:
+            values = self._backend.variable(spec.ids_variable, default=None)
+            if values is None:
+                ids = np.asarray([], dtype=np.int64)
+            else:
+                ids = np.asarray(values, dtype=np.int64)
+            ids.setflags(write=False)
+            self._cache[cache_key] = ids
 
         if active_only:
             status = self.block_status(spec.entity)
@@ -726,14 +749,22 @@ class ExodusFile:
         if not ent.is_variable_location:
             raise ExodusInvalidEntityError(f"{ent.value!r} is not a variable location")
 
+        cache_key = f"variable_names:{ent.value}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         spec = variable_spec(ent)
         expected_count = self.dimension_size(spec.count_dimension, default=0)
         if expected_count == 0:
+            self._cache[cache_key] = ()
             return ()
 
         values = self._backend.variable(spec.names_variable, default=[])
         names = _decode_name_table(values, expected_count=expected_count)
-        return tuple(name for name in names if name)
+        result = tuple(name for name in names if name)
+        self._cache[cache_key] = result
+        return result
 
     def variable_truth_table(
         self, on: Entity | str, *, id: int | None = None
@@ -976,8 +1007,14 @@ class ExodusFile:
         return self._object_block_values(name, on=Entity.ELEMENT, time=time, block_id=block)
 
     def _variable_index(self, ent: Entity, name: str) -> int:
+        cache_key = f"variable_index:{ent.value}:{name}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
         names = self.variable_names(ent)
-        return _one_based_name_index(names, name)
+        index = _one_based_name_index(names, name)
+        self._cache[cache_key] = index
+        return index
 
     def _id_index(self, ent: Entity, id_value: int) -> int:
         ids = self.ids(ent)
