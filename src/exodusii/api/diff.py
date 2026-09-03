@@ -1,0 +1,666 @@
+# Copyright NTESS. See COPYRIGHT file for details.
+#
+# SPDX-License-Identifier: MIT
+
+"""Exodiff-style comparison of two Exodus databases.
+
+This is a pure-Python, exodusii-based counterpart to the SEACAS ``exodiff``
+tool.  Phase 1 supports files whose mesh entities are in the same order
+(no coordinate-based mesh matching): it compares mesh metadata, coordinates,
+element attributes, and result variables (global, nodal, element, edge, face,
+and set variables) using the :mod:`exodusii.core.tolerance` model, reporting
+the worst difference per variable.
+
+The comparison is truth-table aware for block and set variables, and reports
+NaN mismatches as differences (matching exodiff's default ``ignore_nans`` off).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import field
+from pathlib import Path
+
+import numpy as np
+
+from exodusii.api.file import ExodusFile
+from exodusii.core.entities import Entity
+from exodusii.core.tolerance import Tolerance
+from exodusii.core.tolerance import ToleranceMode
+
+__all__ = ["DiffOptions", "DiffResult", "VariableDiff", "diff"]
+
+ExodusFileLike = ExodusFile | str | Path
+
+# Result-variable entity locations exodiff compares.
+_BLOCK_VAR_ENTITIES = (Entity.ELEMENT, Entity.EDGE, Entity.FACE)
+_SET_VAR_ENTITIES = (
+    Entity.NODE_SET,
+    Entity.SIDE_SET,
+    Entity.EDGE_SET,
+    Entity.FACE_SET,
+    Entity.ELEMENT_SET,
+)
+
+# Map a block-variable entity to the block entity holding its ids/truth table.
+_BLOCK_LOCATION = {
+    Entity.ELEMENT: Entity.ELEMENT_BLOCK,
+    Entity.EDGE: Entity.EDGE_BLOCK,
+    Entity.FACE: Entity.FACE_BLOCK,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class VariableDiff:
+    """Worst difference found for a single variable at a single location."""
+
+    entity: str
+    name: str
+    max_delta: float
+    tolerance_mode: str
+    exceeded: bool
+    # Location of the worst value (best-effort; index within the entity).
+    time_index: int | None = None
+    entry_index: int | None = None
+    block_id: int | None = None
+    set_id: int | None = None
+    value1: float | None = None
+    value2: float | None = None
+
+
+@dataclass(slots=True)
+class DiffResult:
+    """Outcome of comparing two Exodus databases."""
+
+    same: bool
+    file1: str
+    file2: str
+    # Fatal structural errors (counts, missing variables, etc.).
+    errors: list[str] = field(default_factory=list)
+    # Non-fatal warnings.
+    warnings: list[str] = field(default_factory=list)
+    # Per-variable worst-difference records (only those that exceeded tol,
+    # unless show_all is requested).
+    variable_diffs: list[VariableDiff] = field(default_factory=list)
+    # Coordinate worst difference, if compared.
+    coordinate_max_delta: float | None = None
+
+    def __bool__(self) -> bool:
+        return self.same
+
+
+@dataclass(frozen=True, slots=True)
+class DiffOptions:
+    """Options controlling a :func:`diff`.
+
+    Parameters
+    ----------
+    default_tolerance
+        Tolerance applied to result variables without a per-category or
+        per-variable override.
+    global_tolerance, nodal_tolerance, element_tolerance, edge_tolerance,
+    face_tolerance, node_set_tolerance, side_set_tolerance,
+    edge_set_tolerance, face_set_tolerance, element_set_tolerance,
+    attribute_tolerance
+        Per-category default tolerances.  If ``None`` (default),
+        ``default_tolerance`` is used for that category.
+    coordinate_tolerance
+        Tolerance for nodal coordinates (exodiff default: absolute 1e-6).
+    time_tolerance
+        Tolerance for matching/comparing time values.
+    variable_tolerances
+        Per-variable tolerance overrides, keyed by variable name (case
+        handling follows ``ignore_case``).  These take precedence over the
+        per-category and default tolerances.
+    exclude
+        Variable names to exclude from comparison.
+    ignore_case
+        If true, variable-name matching is case-insensitive (exodiff default).
+    time_step_offset
+        Offset added to file-1 step indices when matching file-2 steps.
+    compare_coordinates
+        If true, compare nodal coordinates.
+    compare_attributes
+        If true, compare element/edge/face block attributes.
+    show_all
+        If true, retain a record for every compared variable, not only those
+        exceeding tolerance.
+    """
+
+    default_tolerance: Tolerance = field(
+        default_factory=lambda: Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 0.0)
+    )
+    global_tolerance: Tolerance | None = None
+    nodal_tolerance: Tolerance | None = None
+    element_tolerance: Tolerance | None = None
+    edge_tolerance: Tolerance | None = None
+    face_tolerance: Tolerance | None = None
+    node_set_tolerance: Tolerance | None = None
+    side_set_tolerance: Tolerance | None = None
+    edge_set_tolerance: Tolerance | None = None
+    face_set_tolerance: Tolerance | None = None
+    element_set_tolerance: Tolerance | None = None
+    attribute_tolerance: Tolerance | None = None
+    coordinate_tolerance: Tolerance = field(
+        default_factory=lambda: Tolerance(ToleranceMode.ABSOLUTE, 1.0e-6, 0.0)
+    )
+    time_tolerance: Tolerance = field(
+        default_factory=lambda: Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 1.0e-15)
+    )
+    variable_tolerances: Mapping[str, Tolerance] = field(default_factory=dict)
+    exclude: frozenset[str] = field(default_factory=frozenset)
+    ignore_case: bool = True
+    time_step_offset: int = 0
+    compare_coordinates: bool = True
+    compare_attributes: bool = True
+    show_all: bool = False
+
+    def _category_default(self, ent: Entity) -> Tolerance:
+        mapping = {
+            Entity.GLOBAL: self.global_tolerance,
+            Entity.NODE: self.nodal_tolerance,
+            Entity.ELEMENT: self.element_tolerance,
+            Entity.EDGE: self.edge_tolerance,
+            Entity.FACE: self.face_tolerance,
+            Entity.NODE_SET: self.node_set_tolerance,
+            Entity.SIDE_SET: self.side_set_tolerance,
+            Entity.EDGE_SET: self.edge_set_tolerance,
+            Entity.FACE_SET: self.face_set_tolerance,
+            Entity.ELEMENT_SET: self.element_set_tolerance,
+        }
+        category = mapping.get(ent)
+        return category if category is not None else self.default_tolerance
+
+    def tolerance_for(self, name: str, ent: Entity) -> Tolerance:
+        """Return the tolerance to use for a variable name at a location.
+
+        Per-variable overrides win over per-category defaults, which win over
+        the global default.
+        """
+
+        if self.variable_tolerances:
+            if self.ignore_case:
+                lowered = {k.lower(): v for k, v in self.variable_tolerances.items()}
+                found = lowered.get(name.lower())
+            else:
+                found = self.variable_tolerances.get(name)
+            if found is not None:
+                return found
+        return self._category_default(ent)
+
+    def is_excluded(self, name: str) -> bool:
+        """Return true if ``name`` is excluded from comparison."""
+
+        if not self.exclude:
+            return False
+        if self.ignore_case:
+            return name.lower() in {n.lower() for n in self.exclude}
+        return name in self.exclude
+
+
+def _open_if_needed(file: ExodusFileLike) -> tuple[ExodusFile, bool]:
+    if isinstance(file, ExodusFile):
+        return file, False
+    return ExodusFile.open(file), True
+
+
+def _match_names(
+    names1: Iterable[str], names2: Iterable[str], *, ignore_case: bool
+) -> tuple[list[str], list[str], list[str]]:
+    """Return (common, only1, only2) preserving file-1 order for common names."""
+
+    list1 = list(names1)
+    list2 = list(names2)
+    if ignore_case:
+        lower2 = {n.lower() for n in list2}
+        lower1 = {n.lower() for n in list1}
+        common = [n for n in list1 if n.lower() in lower2]
+        only1 = [n for n in list1 if n.lower() not in lower2]
+        only2 = [n for n in list2 if n.lower() not in lower1]
+    else:
+        set2 = set(list2)
+        set1 = set(list1)
+        common = [n for n in list1 if n in set2]
+        only1 = [n for n in list1 if n not in set2]
+        only2 = [n for n in list2 if n not in set1]
+    return common, only1, only2
+
+
+def _worst(delta: np.ndarray) -> tuple[float, tuple[int, ...]]:
+    """Return the maximum delta and its multi-index."""
+
+    if delta.size == 0:
+        return 0.0, ()
+    flat_index = int(np.nanargmax(delta)) if np.any(~np.isnan(delta)) else 0
+    index = np.unravel_index(flat_index, delta.shape)
+    value = float(delta.flat[flat_index])
+    return value, tuple(int(i) for i in index)
+
+
+def _nan_mismatch(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Return a boolean mask where NaN presence differs between a and b."""
+
+    return np.isnan(a) != np.isnan(b)
+
+
+def _compare_variable_series(
+    values1: np.ndarray,
+    values2: np.ndarray,
+    tol: Tolerance,
+    *,
+    ent: Entity,
+    name: str,
+    block_id: int | None,
+    set_id: int | None,
+) -> VariableDiff | None:
+    """Compare two arrays (possibly multi-step) for one variable."""
+
+    a = np.asarray(values1, dtype=np.float64)
+    b = np.asarray(values2, dtype=np.float64)
+
+    if a.shape != b.shape:
+        return VariableDiff(
+            entity=ent.value,
+            name=name,
+            max_delta=float("inf"),
+            tolerance_mode=tol.mode.value,
+            exceeded=True,
+            block_id=block_id,
+            set_id=set_id,
+        )
+
+    delta = tol.delta_array(a, b)
+
+    # NaN mismatches are always differences (ignore_nans is off by default).
+    nan_mask = _nan_mismatch(a, b)
+    # A finite delta comparison, plus NaN mismatches.
+    diff_mask = tol.diff_array(a, b) | nan_mask
+    exceeded = bool(np.any(diff_mask))
+
+    # Report the worst delta location; prefer a NaN-mismatch entry if present
+    # (its delta is meaningless, so mark it as infinite).
+    if np.any(nan_mask):
+        index = tuple(int(i) for i in np.argwhere(nan_mask)[0])
+        max_delta = float("inf")
+    else:
+        max_delta, index = _worst(delta)
+
+    time_index: int | None = None
+    entry_index: int | None = None
+    v1: float | None = None
+    v2: float | None = None
+    if index:
+        v1 = float(a[index])
+        v2 = float(b[index])
+        if a.ndim >= 2:
+            time_index = index[0]
+            entry_index = index[1] if len(index) > 1 else None
+        else:
+            entry_index = index[0]
+
+    return VariableDiff(
+        entity=ent.value,
+        name=name,
+        max_delta=max_delta,
+        tolerance_mode=tol.mode.value,
+        exceeded=exceeded,
+        time_index=time_index,
+        entry_index=entry_index,
+        block_id=block_id,
+        set_id=set_id,
+        value1=v1,
+        value2=v2,
+    )
+
+
+def diff(
+    file1: ExodusFileLike, file2: ExodusFileLike, options: DiffOptions | None = None
+) -> DiffResult:
+    """Compare two Exodus databases exodiff-style (matched mesh ordering).
+
+    Parameters
+    ----------
+    file1, file2
+        Open :class:`ExodusFile` objects or paths.
+    options
+        Comparison options; defaults to :class:`DiffOptions`.
+
+    Returns
+    -------
+    DiffResult
+        Structured comparison outcome.  ``result.same`` is true when no
+        structural error and no variable exceeded tolerance.
+    """
+
+    opts = options or DiffOptions()
+
+    exo1, close1 = _open_if_needed(file1)
+    exo2, close2 = _open_if_needed(file2)
+
+    result = DiffResult(same=True, file1=str(exo1.path), file2=str(exo2.path))
+
+    try:
+        _compare_mesh_metadata(exo1, exo2, result)
+        if opts.compare_coordinates:
+            _compare_coordinates(exo1, exo2, opts, result)
+        _compare_times(exo1, exo2, opts, result)
+        if opts.compare_attributes:
+            _compare_attributes(exo1, exo2, opts, result)
+        _compare_all_variables(exo1, exo2, opts, result)
+    finally:
+        if close1:
+            exo1.close()
+        if close2:
+            exo2.close()
+
+    result.same = not result.errors and not any(vd.exceeded for vd in result.variable_diffs)
+    return result
+
+
+def _compare_mesh_metadata(exo1: ExodusFile, exo2: ExodusFile, result: DiffResult) -> None:
+    if exo1.dimension != exo2.dimension:
+        result.errors.append(f"dimension differs: {exo1.dimension} != {exo2.dimension}")
+    if exo1.node_count != exo2.node_count:
+        result.errors.append(f"node count differs: {exo1.node_count} != {exo2.node_count}")
+    if exo1.element_count != exo2.element_count:
+        result.errors.append(f"element count differs: {exo1.element_count} != {exo2.element_count}")
+    ids1 = exo1.element_block_ids().tolist()
+    ids2 = exo2.element_block_ids().tolist()
+    if ids1 != ids2:
+        result.errors.append(f"element block ids differ: {ids1} != {ids2}")
+
+
+def _compare_coordinates(
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+) -> None:
+    if opts.coordinate_tolerance.mode is ToleranceMode.IGNORE:
+        return
+    if exo1.node_count != exo2.node_count:
+        return
+    coords1 = exo1.coordinates()
+    coords2 = exo2.coordinates()
+    if coords1.shape != coords2.shape:
+        result.errors.append("coordinate shapes differ")
+        return
+    delta = opts.coordinate_tolerance.delta_array(coords1, coords2)
+    max_delta, _ = _worst(delta)
+    result.coordinate_max_delta = max_delta
+    if np.any(opts.coordinate_tolerance.diff_array(coords1, coords2)):
+        result.errors.append(f"coordinates differ (max delta {max_delta:.6e})")
+
+
+def _compare_times(
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+) -> None:
+    times1 = exo1.times()
+    times2 = exo2.times()
+    n1 = len(times1)
+    n2 = len(times2)
+    offset = opts.time_step_offset
+    if n1 != n2:
+        result.warnings.append(f"time step count differs: {n1} != {n2}")
+    for i in range(n1):
+        j = i + offset
+        if j < 0 or j >= n2:
+            continue
+        if opts.time_tolerance.diff(float(times1[i]), float(times2[j])):
+            result.warnings.append(
+                f"time value differs at step {i}: {times1[i]:.6e} != {times2[j]:.6e}"
+            )
+
+
+def _steps_to_compare(
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions
+) -> list[tuple[int, int]]:
+    n1 = len(exo1.times())
+    n2 = len(exo2.times())
+    offset = opts.time_step_offset
+    pairs: list[tuple[int, int]] = []
+    for i in range(n1):
+        j = i + offset
+        if 0 <= j < n2:
+            pairs.append((i, j))
+    return pairs
+
+
+def _compare_attributes(
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+) -> None:
+    tol = opts.attribute_tolerance or opts.default_tolerance
+    if tol.mode is ToleranceMode.IGNORE:
+        return
+    for block_entity, value_entity in (
+        (Entity.ELEMENT_BLOCK, Entity.ELEMENT),
+        (Entity.EDGE_BLOCK, Entity.EDGE),
+        (Entity.FACE_BLOCK, Entity.FACE),
+    ):
+        ids1 = exo1.block_ids(block_entity).tolist()
+        for block_id in ids1:
+            try:
+                names1 = exo1.attribute_names(block_entity, block_id)
+                names2 = exo2.attribute_names(block_entity, block_id)
+            except Exception:
+                continue
+            common, _only1, _only2 = _match_names(names1, names2, ignore_case=opts.ignore_case)
+            for attr_name in common:
+                if opts.is_excluded(attr_name):
+                    continue
+                try:
+                    col1 = exo1.attribute_values(block_entity, block_id, attr_name)
+                    col2 = exo2.attribute_values(block_entity, block_id, attr_name)
+                except Exception as exc:
+                    result.errors.append(f"attribute {attr_name!r} block {block_id}: {exc}")
+                    continue
+                vd = _compare_variable_series(
+                    col1,
+                    col2,
+                    tol,
+                    ent=value_entity,
+                    name=f"attr:{attr_name}",
+                    block_id=block_id,
+                    set_id=None,
+                )
+                _record(result, opts, vd)
+
+
+def _compare_all_variables(
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+) -> None:
+    steps = _steps_to_compare(exo1, exo2, opts)
+
+    _compare_global_variables(exo1, exo2, opts, result, steps)
+    _compare_nodal_variables(exo1, exo2, opts, result, steps)
+    for ent in _BLOCK_VAR_ENTITIES:
+        _compare_block_variables(exo1, exo2, opts, result, steps, ent)
+    for ent in _SET_VAR_ENTITIES:
+        _compare_set_variables(exo1, exo2, opts, result, steps, ent)
+
+
+def _record(result: DiffResult, opts: DiffOptions, vd: VariableDiff | None) -> None:
+    if vd is None:
+        return
+    if vd.exceeded or opts.show_all:
+        result.variable_diffs.append(vd)
+
+
+def _names_to_compare(
+    exo1: ExodusFile, exo2: ExodusFile, ent: Entity, opts: DiffOptions, result: DiffResult
+) -> list[str]:
+    names1 = exo1.variable_names(ent)
+    names2 = exo2.variable_names(ent)
+    common, only1, only2 = _match_names(names1, names2, ignore_case=opts.ignore_case)
+    for name in only1:
+        if not opts.is_excluded(name):
+            result.errors.append(f"{ent.value} variable {name!r} missing from file2")
+    for name in only2:
+        if not opts.is_excluded(name):
+            result.errors.append(f"{ent.value} variable {name!r} missing from file1")
+    return [n for n in common if not opts.is_excluded(n)]
+
+
+def _compare_global_variables(
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    steps: list[tuple[int, int]],
+) -> None:
+    for name in _names_to_compare(exo1, exo2, Entity.GLOBAL, opts, result):
+        tol = opts.tolerance_for(name, Entity.GLOBAL)
+        values1 = np.array([float(exo1.values(name, on=Entity.GLOBAL, time=i)) for i, _ in steps])
+        values2 = np.array([float(exo2.values(name, on=Entity.GLOBAL, time=j)) for _, j in steps])
+        vd = _compare_variable_series(
+            values1, values2, tol, ent=Entity.GLOBAL, name=name, block_id=None, set_id=None
+        )
+        _record(result, opts, vd)
+
+
+def _compare_nodal_variables(
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    steps: list[tuple[int, int]],
+) -> None:
+    for name in _names_to_compare(exo1, exo2, Entity.NODE, opts, result):
+        tol = opts.tolerance_for(name, Entity.NODE)
+        rows1 = [exo1.values(name, on=Entity.NODE, time=i) for i, _ in steps]
+        rows2 = [exo2.values(name, on=Entity.NODE, time=j) for _, j in steps]
+        vd = _compare_variable_series(
+            np.array(rows1),
+            np.array(rows2),
+            tol,
+            ent=Entity.NODE,
+            name=name,
+            block_id=None,
+            set_id=None,
+        )
+        _record(result, opts, vd)
+
+
+def _variable_present(
+    exo: ExodusFile, ent: Entity, name: str, object_id: int, name_index: int
+) -> bool:
+    """Return whether a block/set variable is present per the truth table.
+
+    ``ent`` is the *variable* entity (e.g. ``Entity.ELEMENT`` or
+    ``Entity.NODE_SET``); ``object_id`` is the block or set id.
+    """
+
+    try:
+        row = exo.variable_truth_table(ent, id=object_id)
+    except Exception:
+        return False
+    if row is None:
+        return True
+    if name_index < 0 or name_index >= len(row):
+        return True
+    return bool(row[name_index])
+
+
+def _name_index(names: tuple[str, ...], name: str, *, ignore_case: bool) -> int:
+    if ignore_case:
+        lowered = name.lower()
+        for i, candidate in enumerate(names):
+            if candidate.lower() == lowered:
+                return i
+    else:
+        for i, candidate in enumerate(names):
+            if candidate == name:
+                return i
+    return -1
+
+
+def _compare_block_variables(
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    steps: list[tuple[int, int]],
+    ent: Entity,
+) -> None:
+    names = _names_to_compare(exo1, exo2, ent, opts, result)
+    if not names:
+        return
+    block_entity = _BLOCK_LOCATION[ent]
+    block_ids = exo1.block_ids(block_entity).tolist()
+    names1 = exo1.variable_names(ent)
+    names2 = exo2.variable_names(ent)
+    for name in names:
+        tol = opts.tolerance_for(name, ent)
+        idx1 = _name_index(names1, name, ignore_case=opts.ignore_case)
+        idx2 = _name_index(names2, name, ignore_case=opts.ignore_case)
+        for block_id in block_ids:
+            present1 = _variable_present(exo1, ent, name, block_id, idx1)
+            present2 = _variable_present(exo2, ent, name, block_id, idx2)
+            if not present1 and not present2:
+                continue
+            if present1 != present2:
+                result.errors.append(
+                    f"{ent.value} variable {name!r} block {block_id}: truth-table presence differs"
+                )
+                continue
+            try:
+                rows1 = [exo1.values(name, on=ent, block_id=block_id, time=i) for i, _ in steps]
+                rows2 = [exo2.values(name, on=ent, block_id=block_id, time=j) for _, j in steps]
+            except Exception as exc:
+                result.errors.append(f"{ent.value} variable {name!r} block {block_id}: {exc}")
+                continue
+            vd = _compare_variable_series(
+                np.array(rows1),
+                np.array(rows2),
+                tol,
+                ent=ent,
+                name=name,
+                block_id=block_id,
+                set_id=None,
+            )
+            _record(result, opts, vd)
+
+
+def _compare_set_variables(
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    steps: list[tuple[int, int]],
+    ent: Entity,
+) -> None:
+    names = _names_to_compare(exo1, exo2, ent, opts, result)
+    if not names:
+        return
+    set_ids = exo1.set_ids(ent).tolist()
+    names1 = exo1.variable_names(ent)
+    names2 = exo2.variable_names(ent)
+    for name in names:
+        tol = opts.tolerance_for(name, ent)
+        idx1 = _name_index(names1, name, ignore_case=opts.ignore_case)
+        idx2 = _name_index(names2, name, ignore_case=opts.ignore_case)
+        for set_id in set_ids:
+            present1 = _variable_present(exo1, ent, name, set_id, idx1)
+            present2 = _variable_present(exo2, ent, name, set_id, idx2)
+            if not present1 and not present2:
+                continue
+            if present1 != present2:
+                result.errors.append(
+                    f"{ent.value} variable {name!r} set {set_id}: truth-table presence differs"
+                )
+                continue
+            try:
+                rows1 = [exo1.values(name, on=ent, set_id=set_id, time=i) for i, _ in steps]
+                rows2 = [exo2.values(name, on=ent, set_id=set_id, time=j) for _, j in steps]
+            except Exception as exc:
+                result.errors.append(f"{ent.value} variable {name!r} set {set_id}: {exc}")
+                continue
+            vd = _compare_variable_series(
+                np.array(rows1),
+                np.array(rows2),
+                tol,
+                ent=ent,
+                name=name,
+                block_id=None,
+                set_id=set_id,
+            )
+            _record(result, opts, vd)

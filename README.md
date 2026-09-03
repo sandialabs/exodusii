@@ -244,6 +244,62 @@ exodusii.similar("baseline.exo", "candidate.exo")
 
 ---
 
+## Exodiff-style comparison
+
+A pure-Python counterpart to the SEACAS `exodiff` tool compares two databases
+that share the same mesh ordering (matched node/element ids). It compares mesh
+metadata, nodal coordinates, block attributes, time steps, and all result
+variables (global, nodal, element, edge, face, and set variables), and is
+truth-table aware for block/set variables. NaN mismatches are reported as
+differences.
+
+```python
+from exodusii import diff, DiffOptions, Tolerance, ToleranceMode
+
+result = diff("gold.exo", "test.exo")
+if not result:  # result is falsey when files differ
+    for vd in result.variable_diffs:
+        print(vd.entity, vd.name, vd.max_delta)
+    print("\n".join(result.errors))
+```
+
+Control tolerances (default is relative `1e-6`), exclude variables, or add
+per-variable / per-category overrides:
+
+```python
+options = DiffOptions(
+    default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-8),
+    nodal_tolerance=Tolerance(ToleranceMode.RELATIVE, 1.0e-6),
+    variable_tolerances={"PRESSURE": Tolerance(ToleranceMode.COMBINED, 1.0e-5)},
+    exclude=frozenset({"TIME"}),
+    compare_coordinates=True,
+    compare_attributes=True,
+)
+result = diff("gold.exo", "test.exo", options)
+```
+
+Supported tolerance modes mirror SEACAS `exodiff`: `relative`, `absolute`,
+`combined`, `ignore`, `eigenrel`, `eigenabs`, `eigencom`, `ulps_float`, and
+`ulps_double`.
+
+### `exodiff` CLI
+
+If installed with console scripts enabled, `exodiff` compares two files and
+returns SEACAS-compatible exit codes (`0` same, `1` error, `2` different):
+
+```bash
+exodiff gold.exo test.exo
+exodiff --absolute -t 1e-8 gold.exo test.exo
+exodiff -x TIME --no-coordinates gold.exo test.exo
+exodiff --format json --terse gold.exo test.exo
+```
+
+Note: `exodiff` covers the common matched-ordering workflow. Coordinate-based
+mesh matching, nodeset/sideset nodelist matching, connectivity permutation, and
+time interpolation from the reference tool are not yet implemented.
+
+---
+
 ## Query and printing
 
 Query variables into a structured NumPy array:

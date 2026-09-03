@@ -237,7 +237,9 @@ class Tri3:
         a = self.coord[0, :2]
         b = self.coord[1, :2]
         c = self.coord[2, :2]
-        return float(0.5 * abs(np.cross(b - a, c - a)))
+        u = b - a
+        v = c - a
+        return float(0.5 * abs(u[0] * v[1] - u[1] * v[0]))
 
     def subdiv(self, intervals: int) -> FloatArray:
         coords, conn = _longest_edge_subdivision(self.coord, [[0, 1, 2]], intervals)

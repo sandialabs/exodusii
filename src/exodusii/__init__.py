@@ -13,6 +13,10 @@ from exodusii.api.compare import allclose
 from exodusii.api.compare import similar
 from exodusii.api.copy import copy
 from exodusii.api.copy import copy_file
+from exodusii.api.diff import DiffOptions
+from exodusii.api.diff import DiffResult
+from exodusii.api.diff import VariableDiff
+from exodusii.api.diff import diff
 from exodusii.api.file import ExodusFile
 from exodusii.api.lineout import Lineout
 from exodusii.api.lineout import lineout
@@ -28,6 +32,8 @@ from exodusii.compat import ParallelExodusIIFile
 from exodusii.compat import exodusii_file
 from exodusii.compat import parallel_exodusii_file
 from exodusii.compat import write_globals
+from exodusii.core.tolerance import Tolerance
+from exodusii.core.tolerance import ToleranceMode
 
 region = importlib.import_module("exodusii.region")
 
@@ -40,6 +46,8 @@ except PackageNotFoundError:  # pragma: no cover
 
 __all__ = [
     "ComparisonResult",
+    "DiffOptions",
+    "DiffResult",
     "ExodusFile",
     "ExodusIIFile",
     "ExodusWriter",
@@ -49,10 +57,14 @@ __all__ = [
     "ParallelExodusFile",
     "ParallelExodusIIFile",
     "QueryResult",
+    "Tolerance",
+    "ToleranceMode",
+    "VariableDiff",
     "__version__",
     "allclose",
     "copy",
     "copy_file",
+    "diff",
     "exo_file",
     "exodusii_file",
     "lineout",

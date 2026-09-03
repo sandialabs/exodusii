@@ -46,6 +46,7 @@ dev = [
 
 [project.scripts]
 exoread = "exodusii.cli.exoread:main"
+exodiff = "exodusii.cli.exodiff:main"
 
 
 [project.urls]
@@ -93,7 +94,7 @@ select = [
   "SIM",
   "RUF",
 ]
-ignore = [ "E731", "E741", "F841" ]
+ignore = [ "E731", "E741", "F841", "B905" ]
 
 [tool.ruff.lint.isort]
 force-single-line = true
