@@ -6,6 +6,7 @@
 
 from pathlib import Path
 from typing import Any
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -24,6 +25,7 @@ from exodusii.core.names import VariableName
 from exodusii.core.schema import block_spec
 from exodusii.core.schema import set_spec
 from exodusii.core.schema import variable_spec
+from exodusii.core.schema import VariableSpec
 from exodusii.core.schema import variable_value_name
 from exodusii.core.strings import decode_text
 from exodusii.core.strings import string_array
@@ -357,14 +359,32 @@ class ExodusFile:
     ) -> npt.NDArray[np.float64]:
         """Return nodal coordinates.
 
+        Supports both large-model files (separate ``coordx``/``coordy``/``coordz``
+        variables, the modern default) and normal-model files (a combined 2D
+        ``coord`` variable with shape ``(num_dim, num_nodes)``), matching the
+        ``ex_large_model`` branching in the SEACAS C library (``ex_get_coord.c``).
+
         If ``displaced`` is true, displacement variables are added at the selected
         time.
         """
 
+        # Try large-model format first (coordx / coordy / coordz).
         coord_names = [ExodusNames.coordinate(i) for i in range(self.dimension)]
-        coords = np.column_stack([self._backend.variable(name) for name in coord_names]).astype(
-            np.float64
-        )
+        components = [self._backend.variable(name, default=None) for name in coord_names]
+
+        if all(c is not None for c in components):
+            coords = np.column_stack(components).astype(np.float64)
+        else:
+            # Fall back to normal-model combined ``coord`` variable
+            # (shape: num_dim × num_nodes, stored row-major).
+            combined = self._backend.variable(VariableName.COORDINATES.value, default=None)
+            if combined is None:
+                raise ValueError(
+                    "nodal coordinates not found: neither 'coordx'/'coordy'/'coordz' "
+                    "nor the combined 'coord' variable is present in the file"
+                )
+            # combined shape is (num_dim, num_nodes); transpose to (num_nodes, num_dim)
+            coords = np.asarray(combined, dtype=np.float64).T
 
         if displaced:
             coords = coords + self.displacements(time=time)
@@ -769,7 +789,16 @@ class ExodusFile:
     def variable_truth_table(
         self, on: Entity | str, *, id: int | None = None
     ) -> npt.NDArray[np.int64] | None:
-        """Return variable truth table for block/set variables."""
+        """Return variable truth table for block/set variables.
+
+        When no explicit truth table is stored in the file, the table is derived
+        dynamically by probing whether each per-block/set result variable exists in
+        the NetCDF file — matching the behaviour of ``ex_get_truth_table`` in the
+        SEACAS C library (``ex_get_truth_table.c:162–178``).
+
+        Returns ``None`` only when the entity type does not support a truth table
+        (e.g. ``Entity.GLOBAL``).
+        """
 
         ent = entity(on)
         spec = variable_spec(ent)
@@ -777,10 +806,15 @@ class ExodusFile:
             return None
 
         table = self._backend.variable(spec.truth_table_variable, default=None)
-        if table is None:
-            return None
+        if table is not None:
+            array = np.asarray(table, dtype=np.int64)
+        else:
+            # Derive dynamically: probe whether vals_*_varN*M exists for every
+            # (variable_index, location_index) pair — mirrors ex_get_truth_table.c.
+            array = self._derive_truth_table(spec)
+            if array is None:
+                return None
 
-        array = np.asarray(table, dtype=np.int64)
         if id is None:
             return array
 
@@ -795,6 +829,41 @@ class ExodusFile:
             return array
 
         return array[index - 1]
+
+    def _derive_truth_table(self, spec: VariableSpec) -> npt.NDArray[np.int64] | None:
+        """Derive truth table by probing per-block/set variable existence.
+
+        Reproduces the dynamic derivation in ``ex_get_truth_table.c`` when no
+        explicit truth table variable is stored.  Returns a ``(num_loc, num_var)``
+        int64 array, or ``None`` if there are no variables of this type.
+        """
+        num_var = self.dimension_size(spec.count_dimension, default=0)
+        if num_var == 0:
+            return None
+
+        if spec.location_entity is None:
+            return None
+
+        if spec.location_entity.is_block:
+            ids = self.block_ids(spec.location_entity)
+        elif spec.location_entity.is_set:
+            ids = self.set_ids(spec.location_entity)
+        else:
+            return None
+
+        num_loc = len(ids)
+        if num_loc == 0:
+            return None
+
+        table = np.zeros((num_loc, num_var), dtype=np.int64)
+        for loc_idx in range(num_loc):
+            for var_idx in range(num_var):
+                # variable_index and location_index are both 1-based
+                nc_var = spec.values_variable(var_idx + 1, loc_idx + 1)
+                if self._backend.has_variable(nc_var):
+                    table[loc_idx, var_idx] = 1
+
+        return table
 
     def values(
         self,

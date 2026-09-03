@@ -7,6 +7,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -500,14 +501,16 @@ class ParallelExodusFile:
     def side_set(self, set_id: int) -> SetInfo:
         """Return aggregate side set using global element labels.
 
-        Ordering follows the order encountered in the component files and local
-        side-set arrays. Distribution factors are concatenated in file/local
-        order, matching the legacy parallel reader behavior.
+        Duplicate ``(element_gid, side)`` pairs that arise from border elements
+        shared across processor boundaries are deduplicated, consistent with the
+        behaviour of :meth:`node_set` which deduplicates shared node GIDs.
+        Distribution factors for the first occurrence of each unique pair are
+        retained.
         """
 
-        elements: list[int] = []
-        sides: list[int] = []
-        factors: list[float] = []
+        # Use an ordered dict to deduplicate (elem_gid, side) pairs while
+        # preserving encounter order and associating distribution factors.
+        seen: dict[tuple[int, int], float | None] = {}
         has_factors = False
         name = ""
 
@@ -523,17 +526,24 @@ class ParallelExodusFile:
             element_map = self._maps[file_index].element_lid_to_gid
 
             for position, local_element_id in enumerate(side_set.elems):
-                elements.append(int(element_map[int(local_element_id) - 1]))
-                sides.append(int(side_set.sides[position]))
+                gid = int(element_map[int(local_element_id) - 1])
+                side = int(side_set.sides[position])
+                key = (gid, side)
+                if key not in seen:
+                    df: float | None = None
+                    if side_set.dist_facts is not None:
+                        has_factors = True
+                        df = float(side_set.dist_facts[position])
+                    seen[key] = df
 
-            if side_set.dist_facts is not None:
-                has_factors = True
-                factors.extend(np.asarray(side_set.dist_facts, dtype=np.float64).tolist())
-
-        if not elements:
+        if not seen:
             raise ExodusLookupError(f"side_set ID {set_id} not found")
 
-        dist_facts = np.asarray(factors, dtype=np.float64) if has_factors else None
+        elements = np.asarray([k[0] for k in seen], dtype=np.int64)
+        sides = np.asarray([k[1] for k in seen], dtype=np.int64)
+        dist_facts = (
+            np.asarray([v for v in seen.values()], dtype=np.float64) if has_factors else None
+        )
 
         return SetInfo(
             id=set_id,
@@ -542,8 +552,8 @@ class ParallelExodusFile:
             count=len(elements),
             distribution_factors=0 if dist_facts is None else len(dist_facts),
             name=name,
-            entries=np.asarray(elements, dtype=np.int64),
-            extra_entries=np.asarray(sides, dtype=np.int64),
+            entries=elements,
+            extra_entries=sides,
             distribution_values=dist_facts,
         )
 
@@ -616,8 +626,8 @@ class ParallelExodusFile:
         """Return global distribution-factor count for a set if Nemesis metadata exists."""
 
         variable_names = {
-            Entity.NODE_SET: "ns_df_cnt_global",
-            Entity.SIDE_SET: "ss_df_cnt_global",
+            Entity.NODE_SET: VariableName.NODE_SET_DF_COUNT_GLOBAL.value,
+            Entity.SIDE_SET: VariableName.SIDE_SET_DF_COUNT_GLOBAL.value,
             Entity.EDGE_SET: "es_df_cnt_global",
             Entity.FACE_SET: "fs_df_cnt_global",
             Entity.ELEMENT_SET: "els_df_cnt_global",
@@ -829,9 +839,11 @@ class ParallelExodusFile:
         return output - 1 if zero_based and not labels else output
 
     def _object_set(self, on: Entity, set_id: int) -> SetInfo:
-        labels: list[int] = []
-        extra_by_label: dict[int, int] = {}
-        factors_by_label: dict[int, float] = {}
+        all_labels: list[int] = []
+        all_extras: list[int] = []
+        all_factors: list[float] = []
+        has_extras = False
+        has_factors = False
         name = ""
 
         for file_index, file in enumerate(self._files):
@@ -843,29 +855,25 @@ class ParallelExodusFile:
             local_labels = self._local_set_global_labels(file_index, local_set, on)
 
             for position, label in enumerate(local_labels):
-                label_int = int(label)
-                labels.append(label_int)
+                all_labels.append(int(label))
 
                 if local_set.extra_entries is not None:
-                    extra_by_label[label_int] = int(local_set.extra_entries[position])
+                    has_extras = True
+                    all_extras.append(int(local_set.extra_entries[position]))
                 if local_set.dist_facts is not None:
-                    factors_by_label[label_int] = float(local_set.dist_facts[position])
+                    has_factors = True
+                    all_factors.append(float(local_set.dist_facts[position]))
 
-        unique_labels = sorted(set(labels))
-        if not unique_labels:
+        if not all_labels:
             raise ExodusLookupError(f"{on.value} ID {set_id} not found")
 
-        entries = np.asarray(unique_labels, dtype=np.int64)
-        extra = (
-            np.asarray([extra_by_label[label] for label in unique_labels], dtype=np.int64)
-            if extra_by_label
-            else None
-        )
-        dist = (
-            np.asarray([factors_by_label[label] for label in unique_labels], dtype=np.float64)
-            if factors_by_label
-            else None
-        )
+        # Do NOT deduplicate: element/edge/face sets may legitimately contain
+        # duplicate entries (the same object referenced multiple times).  The
+        # raw Exodus API (ex_get_set) returns entries without deduplication.
+        entries = np.asarray(all_labels, dtype=np.int64)
+        extra = np.asarray(all_extras, dtype=np.int64) if has_extras else None
+        dist = np.asarray(all_factors, dtype=np.float64) if has_factors else None
+
         return SetInfo(
             id=set_id,
             index=_one_based_index(self.set_ids(on), set_id),
@@ -1256,21 +1264,42 @@ class ParallelExodusFile:
         for file in self._files:
             node_map = file.variable(VariableName.NODE_ID_MAP.value, default=None)
             if node_map is None:
+                warnings.warn(
+                    f"{file.path}: 'node_num_map' not found; using sequential fallback. "
+                    "This is only correct for non-overlapping partitions with no shared nodes. "
+                    "Real Nemesis files with shared border/external nodes must include node_num_map.",
+                    stacklevel=2,
+                )
                 node_map = np.arange(node_offset + 1, node_offset + file.node_count + 1)
             node_map = np.asarray(node_map, dtype=np.int64)
 
             element_map = file.variable(VariableName.ELEMENT_ID_MAP.value, default=None)
             if element_map is None:
+                warnings.warn(
+                    f"{file.path}: 'elem_num_map' not found; using sequential fallback. "
+                    "This is only correct for non-overlapping partitions.",
+                    stacklevel=2,
+                )
                 element_map = np.arange(element_offset + 1, element_offset + file.element_count + 1)
             element_map = np.asarray(element_map, dtype=np.int64)
 
             edge_map = file.variable(VariableName.EDGE_ID_MAP.value, default=None)
             if edge_map is None:
+                if file.edge_count > 0:
+                    warnings.warn(
+                        f"{file.path}: 'edge_num_map' not found; using sequential fallback.",
+                        stacklevel=2,
+                    )
                 edge_map = np.arange(edge_offset + 1, edge_offset + file.edge_count + 1)
             edge_map = np.asarray(edge_map, dtype=np.int64)
 
             face_map = file.variable(VariableName.FACE_ID_MAP.value, default=None)
             if face_map is None:
+                if file.face_count > 0:
+                    warnings.warn(
+                        f"{file.path}: 'face_num_map' not found; using sequential fallback.",
+                        stacklevel=2,
+                    )
                 face_map = np.arange(face_offset + 1, face_offset + file.face_count + 1)
             face_map = np.asarray(face_map, dtype=np.int64)
 
@@ -1385,6 +1414,23 @@ class ParallelExodusFile:
     def _block_object_gids_for_file(
         self, file_index: int, location: Entity, block_id: int, *, require_active: bool = False
     ) -> npt.NDArray[np.int64]:
+        """Return the global object IDs for a block from one component file.
+
+        .. note:: **Specification assumption**
+
+           This method maps local object indices to global IDs by accumulating
+           per-block element counts across blocks in the order returned by
+           ``file.block_ids(location)``.  This relies on the conventional
+           Nemesis/Exodus layout where ``elem_num_map`` (or ``edge_num_map`` /
+           ``face_num_map``) lists all objects contiguously per block, in the
+           same order as the block ID list.
+
+           Standard decomposers (e.g., ``nem_slice``) write files in this
+           layout, but the Exodus/Nemesis specification does not formally
+           guarantee it.  Files produced by non-standard decomposers that store
+           objects in a different order within the map will produce incorrect
+           GID assignments here.
+        """
         file = self._files[file_index]
         spec = block_spec(location)
 

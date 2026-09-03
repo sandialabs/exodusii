@@ -131,6 +131,8 @@ def _write_parts(tmp_path: Path) -> tuple[Path, Path]:
         [10.0, 20.0, 30.0, 40.0],
         [11.0, 21.0, 31.0, 41.0],
         [0.5, 1.5],
+        node_offset=0,
+        element_offset=0,
         node_set_nodes=[1, 4],
         node_set_factors=[1.0, 2.0],
         side_set_sides=[2],
@@ -142,6 +144,8 @@ def _write_parts(tmp_path: Path) -> tuple[Path, Path]:
         [50.0, 60.0, 70.0, 80.0],
         [51.0, 61.0, 71.0, 81.0],
         [1.5, 2.5],
+        node_offset=4,
+        element_offset=1,
         node_set_nodes=[1, 4],
         node_set_factors=[3.0, 4.0],
         side_set_sides=[4],
@@ -159,6 +163,8 @@ def _write_part(
     energy: list[float],
     *,
     times: list[float] | None = None,
+    node_offset: int = 0,
+    element_offset: int = 0,
     node_set_nodes: list[int] | None = None,
     node_set_factors: list[float] | None = None,
     side_set_sides: list[int] | None = None,
@@ -169,10 +175,14 @@ def _write_part(
     node_set_factors = node_set_factors or [1.0, 2.0]
     side_set_sides = side_set_sides or [2]
     side_set_factors = side_set_factors or [5.0]
+    n_nodes = coords.shape[0]
 
     with ExodusWriter.create(path) as writer:
-        writer.initialize("part mesh", 2, 4, 1, element_blocks=1, node_sets=1, side_sets=1)
+        writer.initialize("part mesh", 2, n_nodes, 1, element_blocks=1, node_sets=1, side_sets=1)
         writer.write_coordinates(coords)
+        # Write id maps so parallel reader does not fall back to sequential numbering.
+        writer.write_node_id_map(np.arange(node_offset + 1, node_offset + n_nodes + 1))
+        writer.write_element_id_map(np.arange(element_offset + 1, element_offset + 2))
         writer.define_element_block(10, "quad", [[1, 2, 3, 4]], name="block_10")
         writer.define_node_set(
             100, node_set_nodes, distribution_factors=node_set_factors, name="nodeset_100"

@@ -164,6 +164,8 @@ class VariableName(StrEnum):
     ELEMENT_BLOCK_IDS_GLOBAL = "el_blk_ids_global"
     NODE_SET_NODE_COUNT_GLOBAL = "ns_node_cnt_global"
     SIDE_SET_SIDE_COUNT_GLOBAL = "ss_side_cnt_global"
+    NODE_SET_DF_COUNT_GLOBAL = "ns_df_cnt_global"
+    SIDE_SET_DF_COUNT_GLOBAL = "ss_df_cnt_global"
     ELEMENT_BLOCK_COUNT_GLOBAL = "el_blk_cnt_global"
 
 
