@@ -4,10 +4,10 @@
 
 """Parallel/multi-file Exodus reader using Exodus global ID maps."""
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-import warnings
 
 import numpy as np
 import numpy.typing as npt

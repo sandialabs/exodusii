@@ -188,11 +188,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Last file-2 step to compare, inclusive (default: all).",
     )
     ts.add_argument(
-        "--increment",
-        type=int,
-        default=1,
-        metavar="N",
-        help="Step stride (default 1).",
+        "--increment", type=int, default=1, metavar="N", help="Step stride (default 1)."
     )
     ts.add_argument(
         "--exclude-steps",

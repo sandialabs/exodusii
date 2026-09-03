@@ -66,14 +66,8 @@ html_static_path = ["_static"]
 
 html_theme_options = {
     "sidebar_hide_name": False,
-    "light_css_variables": {
-        "color-brand-primary": "#1a6496",
-        "color-brand-content": "#1a6496",
-    },
-    "dark_css_variables": {
-        "color-brand-primary": "#4db8ff",
-        "color-brand-content": "#4db8ff",
-    },
+    "light_css_variables": {"color-brand-primary": "#1a6496", "color-brand-content": "#1a6496"},
+    "dark_css_variables": {"color-brand-primary": "#4db8ff", "color-brand-content": "#4db8ff"},
     "footer_icons": [
         {
             "name": "GitHub",
@@ -86,12 +80,12 @@ html_theme_options = {
                 " 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3"
                 ".64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-"
                 ".21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2"
-                '-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 '
+                "-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 "
                 "3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 "
                 '8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>'
             ),
             "class": "",
-        },
+        }
     ],
 }
 

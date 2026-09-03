@@ -113,7 +113,7 @@ class MeshMap:
     unmatched_elems: int = 0
 
     @classmethod
-    def identity(cls, n_nodes: int, n_elems: int) -> "MeshMap":
+    def identity(cls, n_nodes: int, n_elems: int) -> MeshMap:
         """Return the identity map (both files in the same order).
 
         Parameters
@@ -132,10 +132,7 @@ class MeshMap:
         idx_n = np.arange(n_nodes, dtype=np.int64)
         idx_e = np.arange(n_elems, dtype=np.int64)
         return cls(
-            node_map=idx_n,
-            node_map_inv=idx_n.copy(),
-            elem_map=idx_e,
-            elem_map_inv=idx_e.copy(),
+            node_map=idx_n, node_map_inv=idx_n.copy(), elem_map=idx_e, elem_map_inv=idx_e.copy()
         )
 
     def block_elem_perm(self, block_id2: int) -> tuple[IntArray, IntArray]:
@@ -190,19 +187,15 @@ class MeshMap:
         # file-2 block-local: j_local ∈ [0, count2)  →  j_global = off2 + j_local
         # file-1 block-local: i_local ∈ [0, count1)  →  i_global = off1 + i_local
         j_globals = np.arange(off2, off2 + count2, dtype=np.int64)
-        i_globals = self.elem_map[j_globals]           # file-1 global indices
-        i_locals = i_globals - off1                    # file-1 block-local
-        perm = i_locals                                 # perm[j_local] = i_local
-        perm_inv = np.argsort(perm).astype(np.int64)   # perm_inv[i_local] = j_local
+        i_globals = self.elem_map[j_globals]  # file-1 global indices
+        i_locals = i_globals - off1  # file-1 block-local
+        perm = i_locals  # perm[j_local] = i_local
+        perm_inv = np.argsort(perm).astype(np.int64)  # perm_inv[i_local] = j_local
         return perm, perm_inv
 
 
 def build_mesh_map(
-    exo1,
-    exo2,
-    *,
-    matching_tolerance: float = 1.0e-6,
-    require_unique_mapping: bool = True,
+    exo1, exo2, *, matching_tolerance: float = 1.0e-6, require_unique_mapping: bool = True
 ) -> MeshMap:
     """Build a coordinate-based :class:`MeshMap` between two Exodus databases.
 
@@ -253,13 +246,9 @@ def build_mesh_map(
     n_elems = exo1.element_count
 
     if exo2.node_count != n_nodes:
-        raise ValueError(
-            f"node count mismatch: file1={n_nodes}, file2={exo2.node_count}"
-        )
+        raise ValueError(f"node count mismatch: file1={n_nodes}, file2={exo2.node_count}")
     if exo2.element_count != n_elems:
-        raise ValueError(
-            f"element count mismatch: file1={n_elems}, file2={exo2.element_count}"
-        )
+        raise ValueError(f"element count mismatch: file1={n_elems}, file2={exo2.element_count}")
 
     coords1 = np.asarray(exo1.coordinates(), dtype=np.float64)
     coords2 = np.asarray(exo2.coordinates(), dtype=np.float64)
@@ -280,7 +269,7 @@ def build_mesh_map(
 
     matched_blocks = _match_blocks(exo1, exo2, ids1, ids2, coords1, coords2, matching_tolerance)
 
-    for bid1, bid2, conn1, conn2, goff1, goff2 in matched_blocks:
+    for bid1, bid2, _conn1, _conn2, goff1, goff2 in matched_blocks:
         block_map[bid2] = bid1
         block_elem_offsets1[bid1] = goff1
         block_elem_offsets2[bid2] = goff2
@@ -291,7 +280,7 @@ def build_mesh_map(
 
     for bid1, bid2, conn1, conn2, goff1, goff2 in matched_blocks:
         # Compute centroids for file-1 and file-2 elements in this block.
-        centers1 = _centroids(conn1, coords1)    # (n_elems_in_block, dim)
+        centers1 = _centroids(conn1, coords1)  # (n_elems_in_block, dim)
         centers2 = _centroids(conn2, coords2)
 
         n_block = centers1.shape[0]
@@ -316,12 +305,10 @@ def build_mesh_map(
             elem_map[j_global] = i_global
 
             # Derive node map from matched element local nodes.
-            local_nodes1 = conn1[int(i_local)]    # file-1 node indices (0-based)
-            local_nodes2 = conn2[j_local]         # file-2 node indices (0-based)
+            local_nodes1 = conn1[int(i_local)]  # file-1 node indices (0-based)
+            local_nodes2 = conn2[j_local]  # file-2 node indices (0-based)
             _match_local_nodes(
-                local_nodes1, local_nodes2,
-                coords1, coords2,
-                node_map, matching_tolerance,
+                local_nodes1, local_nodes2, coords1, coords2, node_map, matching_tolerance
             )
 
     # ── Step 3: Free-node fallback ───────────────────────────────────────
@@ -370,9 +357,7 @@ def build_mesh_map(
             msg_parts.append(
                 f"{unmatched_elems} unmatched element(s) (first few file-2 indices: {bad})"
             )
-        raise MeshMatchError(
-            "Coordinate-based mesh matching failed: " + "; ".join(msg_parts)
-        )
+        raise MeshMatchError("Coordinate-based mesh matching failed: " + "; ".join(msg_parts))
 
     if unmatched_nodes > 0:
         warnings.warn(
@@ -410,11 +395,7 @@ def build_mesh_map(
     )
 
 
-def check_sideset_ordinals(
-    exo1,
-    exo2,
-    mesh_map: MeshMap,
-) -> list[str]:
+def check_sideset_ordinals(exo1, exo2, mesh_map: MeshMap) -> list[str]:
     """Check whether sideset face ordinals are consistent after element remapping.
 
     After element IDs are translated through *mesh_map*, the face-ordinal
@@ -463,7 +444,7 @@ def check_sideset_ordinals(
         except Exception:
             continue
 
-        entries1 = getattr(si1, "entries", None)   # 1-based element IDs
+        entries1 = getattr(si1, "entries", None)  # 1-based element IDs
         sides1 = getattr(si1, "extra_entries", None)  # side ordinals
         entries2 = getattr(si2, "entries", None)
         sides2 = getattr(si2, "extra_entries", None)
@@ -492,7 +473,9 @@ def check_sideset_ordinals(
         # Clamp to valid range to avoid IndexError on partial maps.
         n_elems = mesh_map.elem_map.shape[0]
         valid = (e2_0based >= 0) & (e2_0based < n_elems)
-        mapped_e1_0based = np.where(valid, mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)], -1)
+        mapped_e1_0based = np.where(
+            valid, mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)], -1
+        )
         mapped_e1_1based = mapped_e1_0based + 1
 
         # Build a lookup from file-1 (element_id, side) → True
@@ -504,9 +487,7 @@ def check_sideset_ordinals(
             # Check if the translated (element, side) pair exists in file-1.
             if (eid1_mapped, side2) not in pairs1:
                 # Check whether the element itself matched but the side differs.
-                same_elem_diff_side = any(
-                    eid1_mapped == e for e, _s in pairs1
-                )
+                same_elem_diff_side = any(eid1_mapped == e for e, _s in pairs1)
                 if same_elem_diff_side:
                     warnings_out.append(
                         f"side set {set_id} entry {k}: element {entries2[k]} "
@@ -569,8 +550,14 @@ def _match_blocks(
     for bid1 in ids1:
         if bid1 in set2:
             try:
-                conn1 = np.asarray(exo1.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True), dtype=np.int64)
-                conn2 = np.asarray(exo2.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True), dtype=np.int64)
+                conn1 = np.asarray(
+                    exo1.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True),
+                    dtype=np.int64,
+                )
+                conn2 = np.asarray(
+                    exo2.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True),
+                    dtype=np.int64,
+                )
                 result.append((bid1, bid1, conn1, conn2, goff1_by_id[bid1], goff2_by_id[bid1]))
                 matched2.add(bid1)
             except Exception:
@@ -583,7 +570,10 @@ def _match_blocks(
     if unmatched_ids1 and unmatched_ids2:
         for bid1 in unmatched_ids1:
             try:
-                conn1 = np.asarray(exo1.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True), dtype=np.int64)
+                conn1 = np.asarray(
+                    exo1.block_connectivity(Entity.ELEMENT_BLOCK, bid1, zero_based=True),
+                    dtype=np.int64,
+                )
             except Exception:
                 continue
             if conn1.size == 0:
@@ -597,7 +587,10 @@ def _match_blocks(
                 if bid2 in matched2:
                     continue
                 try:
-                    conn2 = np.asarray(exo2.block_connectivity(Entity.ELEMENT_BLOCK, bid2, zero_based=True), dtype=np.int64)
+                    conn2 = np.asarray(
+                        exo2.block_connectivity(Entity.ELEMENT_BLOCK, bid2, zero_based=True),
+                        dtype=np.int64,
+                    )
                 except Exception:
                     continue
                 if conn2.size == 0:
@@ -615,7 +608,10 @@ def _match_blocks(
 
             if best_bid2 is not None and best_dist <= tol * 1000:
                 try:
-                    conn2 = np.asarray(exo2.block_connectivity(Entity.ELEMENT_BLOCK, best_bid2, zero_based=True), dtype=np.int64)
+                    conn2 = np.asarray(
+                        exo2.block_connectivity(Entity.ELEMENT_BLOCK, best_bid2, zero_based=True),
+                        dtype=np.int64,
+                    )
                     result.append(
                         (bid1, best_bid2, conn1, conn2, goff1_by_id[bid1], goff2_by_id[best_bid2])
                     )
@@ -658,11 +654,7 @@ def _centroids(conn: IntArray, coords: FloatArray) -> FloatArray:
     return coords[conn].mean(axis=1)
 
 
-def _match_points_sorted(
-    pts1: FloatArray,
-    pts2: FloatArray,
-    tol: float,
-) -> IntArray:
+def _match_points_sorted(pts1: FloatArray, pts2: FloatArray, tol: float) -> IntArray:
     """Match each row of *pts1* to the nearest row in *pts2* within *tol*.
 
     Uses a sorted-axis binary search strategy mirroring SEACAS ``map.C``.
@@ -714,9 +706,9 @@ def _match_points_sorted(
         if lo >= hi:
             continue
 
-        window = pts2_sorted[lo:hi]               # (W, dim)
-        diffs = np.abs(window - p)                # (W, dim)
-        within = np.all(diffs <= tol, axis=1)     # (W,)
+        window = pts2_sorted[lo:hi]  # (W, dim)
+        diffs = np.abs(window - p)  # (W, dim)
+        within = np.all(diffs <= tol, axis=1)  # (W,)
         hits = np.nonzero(within)[0]
 
         if len(hits) == 0:
@@ -762,8 +754,8 @@ def _match_local_nodes(
     """
 
     k = len(nodes1)
-    c1 = coords1[nodes1]   # (k, dim)
-    c2 = coords2[nodes2]   # (k, dim)
+    c1 = coords1[nodes1]  # (k, dim)
+    c2 = coords2[nodes2]  # (k, dim)
 
     for j_local in range(k):
         j_global = int(nodes2[j_local])

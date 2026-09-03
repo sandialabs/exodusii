@@ -9,8 +9,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from exodusii.mesh.matching import MeshMap, MeshMatchError, build_mesh_map, _match_points_sorted
-
+from exodusii.mesh.matching import MeshMap
+from exodusii.mesh.matching import MeshMatchError
+from exodusii.mesh.matching import _match_points_sorted
+from exodusii.mesh.matching import build_mesh_map
 
 # ---------------------------------------------------------------------------
 # _match_points_sorted unit tests
@@ -106,7 +108,6 @@ def test_meshmap_node_map_inv_is_true_inverse():
 def _write_quad_mesh(path: Path, node_order: list[int], elem_order: list[int]) -> None:
     """Write a 4-node, 1-element quad mesh with nodes/elements in given order."""
     from exodusii.api.writer import ExodusWriter
-    from exodusii.core.entities import Entity
 
     # Original coords: [0,0], [1,0], [1,1], [0,1]
     all_coords = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
@@ -131,20 +132,14 @@ def _write_quad_mesh(path: Path, node_order: list[int], elem_order: list[int]) -
         w.write_node_values("TEMP", node_values)
 
 
-def _write_two_quad_mesh(
-    path: Path,
-    node_order: list[int],
-) -> None:
+def _write_two_quad_mesh(path: Path, node_order: list[int]) -> None:
     """Write a 6-node, 2-element quad mesh (two side-by-side quads)."""
     from exodusii.api.writer import ExodusWriter
 
     # Original layout:
     # Nodes 0-5: [0,0],[1,0],[2,0],[0,1],[1,1],[2,1]
     # Elem 0: [0,1,4,3]  Elem 1: [1,2,5,4]
-    all_coords = np.array([
-        [0.0, 0.0], [1.0, 0.0], [2.0, 0.0],
-        [0.0, 1.0], [1.0, 1.0], [2.0, 1.0],
-    ])
+    all_coords = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0]])
     coords = all_coords[node_order]
     inv_node = [0] * 6
     for new_idx, orig_idx in enumerate(node_order):
@@ -214,9 +209,12 @@ def test_build_mesh_map_count_mismatch_raises(tmp_path: Path) -> None:
         w.define_element_block(10, "quad", [[1, 2, 3, 4]])
         w.write_time(0.0)
 
-    with ExodusFile.open(a) as exo1, ExodusFile.open(b) as exo2:
-        with pytest.raises(ValueError, match="node count mismatch"):
-            build_mesh_map(exo1, exo2)
+    with (
+        ExodusFile.open(a) as exo1,
+        ExodusFile.open(b) as exo2,
+        pytest.raises(ValueError, match="node count mismatch"),
+    ):
+        build_mesh_map(exo1, exo2)
 
 
 def test_build_mesh_map_no_match_raises(tmp_path: Path) -> None:
@@ -236,16 +234,16 @@ def test_build_mesh_map_no_match_raises(tmp_path: Path) -> None:
         w.define_element_block(10, "quad", [[1, 2, 3, 4]])
         w.write_time(0.0)
 
-    with ExodusFile.open(a) as exo1, ExodusFile.open(b) as exo2:
-        with pytest.raises(MeshMatchError):
-            build_mesh_map(exo1, exo2, matching_tolerance=1e-6, require_unique_mapping=True)
+    with ExodusFile.open(a) as exo1, ExodusFile.open(b) as exo2, pytest.raises(MeshMatchError):
+        build_mesh_map(exo1, exo2, matching_tolerance=1e-6, require_unique_mapping=True)
 
 
 def test_build_mesh_map_no_match_partial_allowed(tmp_path: Path) -> None:
     """require_unique_mapping=False should not raise, just set unmatched counts."""
+    import warnings
+
     from exodusii.api.file import ExodusFile
     from exodusii.api.writer import ExodusWriter
-    import warnings
 
     a = tmp_path / "a.exo"
     b = tmp_path / "b.exo"
@@ -258,10 +256,13 @@ def test_build_mesh_map_no_match_partial_allowed(tmp_path: Path) -> None:
         w.define_element_block(10, "quad", [[1, 2, 3, 4]])
         w.write_time(0.0)
 
-    with ExodusFile.open(a) as exo1, ExodusFile.open(b) as exo2:
-        with warnings.catch_warnings(record=True):
-            warnings.simplefilter("always")
-            mm = build_mesh_map(exo1, exo2, matching_tolerance=1e-6, require_unique_mapping=False)
+    with (
+        ExodusFile.open(a) as exo1,
+        ExodusFile.open(b) as exo2,
+        warnings.catch_warnings(record=True),
+    ):
+        warnings.simplefilter("always")
+        mm = build_mesh_map(exo1, exo2, matching_tolerance=1e-6, require_unique_mapping=False)
     assert mm.unmatched_nodes > 0
 
 

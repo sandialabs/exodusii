@@ -78,14 +78,7 @@ Write a simple mesh:
 import numpy as np
 import exodusii
 
-coords = np.asarray(
-    [
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.0, 1.0],
-    ]
-)
+coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
 
 with exodusii.File("square.exo", mode="w") as exo:
     exo.put_init("square", 2, 4, 1, 1, 0, 0)
@@ -101,10 +94,7 @@ import numpy as np
 import exodusii
 
 times = np.asarray([0.0, 1.0, 2.0])
-data = {
-    "energy": np.asarray([10.0, 11.0, 12.0]),
-    "mass": np.asarray([20.0, 20.0, 20.0]),
-}
+data = {"energy": np.asarray([10.0, 11.0, 12.0]), "mass": np.asarray([20.0, 20.0, 20.0])}
 
 exodusii.write_globals(data, times, title="global history", filename="globals.exo")
 ```
@@ -139,14 +129,7 @@ from exodusii import ExodusWriter
 
 with ExodusWriter.create("square.exo") as writer:
     writer.initialize("square", 2, 4, 1, element_blocks=1)
-    writer.write_coordinates(
-        [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [1.0, 1.0],
-            [0.0, 1.0],
-        ]
-    )
+    writer.write_coordinates([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
     writer.define_element_block(10, "quad", [[1, 2, 3, 4]], name="block_10")
 
     writer.define_node_variables(["TEMP"])
@@ -197,8 +180,8 @@ Parallel aggregation respects Exodus global ID maps where available:
 User-facing set APIs return global labels. For example:
 
 ```python
-nodes = exo.get_node_set_nodes(100)   # global node labels
-elems = exo.get_side_set_elems(200)   # global element labels
+nodes = exo.get_node_set_nodes(100)  # global node labels
+elems = exo.get_side_set_elems(200)  # global element labels
 ```
 
 Connectivity arrays are returned as 1-based logical indices suitable for
@@ -221,10 +204,7 @@ Skip variables or selected dimensions:
 
 ```python
 same_mesh_dimensions = exodusii.allclose(
-    "one.exo",
-    "two.exo",
-    variables=None,
-    dimensions="~four|len_line|len_string",
+    "one.exo", "two.exo", variables=None, dimensions="~four|len_line|len_string"
 )
 ```
 
@@ -293,7 +273,7 @@ reordering tools), enable coordinate-based matching:
 ```python
 opts = DiffOptions(
     coordinate_matching=True,
-    matching_tolerance=1e-8,   # spatial proximity tolerance for the map
+    matching_tolerance=1e-8,  # spatial proximity tolerance for the map
 )
 result = diff("gold.exo", "reordered.exo", opts)
 ```
@@ -402,11 +382,7 @@ from exodusii import ExodusFile, Lineout, query
 
 with ExodusFile.open("mesh.exo") as exo:
     result = query(
-        exo,
-        "n/coordinates",
-        "n/TEMP",
-        time="last",
-        lineout=Lineout(x="x", y=0.0, tol=1.0e-12),
+        exo, "n/coordinates", "n/TEMP", time="last", lineout=Lineout(x="x", y=0.0, tol=1.0e-12)
     )
 ```
 
@@ -458,14 +434,7 @@ Element geometry classes and mesh utilities live under `exodusii.mesh`:
 ```python
 from exodusii.mesh import Quad4, element_volumes
 
-quad = Quad4(
-    [
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [1.0, 1.0],
-        [0.0, 1.0],
-    ]
-)
+quad = Quad4([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
 
 print(quad.center)
 print(quad.volume)

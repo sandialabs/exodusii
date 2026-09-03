@@ -19,9 +19,5 @@ import pytest
 def _suppress_parallel_map_fallback_warning():
     """Suppress the sequential-fallback UserWarning in parallel tests."""
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r".*sequential fallback.*",
-            category=UserWarning,
-        )
+        warnings.filterwarnings("ignore", message=r".*sequential fallback.*", category=UserWarning)
         yield

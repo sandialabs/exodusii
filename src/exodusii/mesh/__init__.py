@@ -4,10 +4,6 @@
 
 """Mesh geometry helpers."""
 
-from exodusii.mesh.matching import MeshMap
-from exodusii.mesh.matching import MeshMatchError
-from exodusii.mesh.matching import build_mesh_map
-from exodusii.mesh.matching import check_sideset_ordinals
 from exodusii.mesh.elements import Element
 from exodusii.mesh.elements import Hex8
 from exodusii.mesh.elements import Quad4
@@ -21,6 +17,10 @@ from exodusii.mesh.geometry import connected_average
 from exodusii.mesh.geometry import element_volumes
 from exodusii.mesh.geometry import entity_centers
 from exodusii.mesh.geometry import nodal_volumes
+from exodusii.mesh.matching import MeshMap
+from exodusii.mesh.matching import MeshMatchError
+from exodusii.mesh.matching import build_mesh_map
+from exodusii.mesh.matching import check_sideset_ordinals
 from exodusii.mesh.regions import BoundedTimeDomain
 from exodusii.mesh.regions import Circle
 from exodusii.mesh.regions import Cylinder
@@ -41,14 +41,12 @@ from exodusii.mesh.regions import unbounded_time_domain
 
 __all__ = [
     "BoundedTimeDomain",
-    "MeshMap",
-    "MeshMatchError",
-    "build_mesh_map",
-    "check_sideset_ordinals",
     "Circle",
     "Cylinder",
     "Element",
     "Hex8",
+    "MeshMap",
+    "MeshMatchError",
     "Quad",
     "Quad4",
     "Rectangle",
@@ -62,7 +60,9 @@ __all__ = [
     "bound_time_domain",
     "bounded_time_domain",
     "bounding_box",
+    "build_mesh_map",
     "characteristic_element_length",
+    "check_sideset_ordinals",
     "circle",
     "connected_average",
     "cylinder",

@@ -13,7 +13,6 @@ files are closed automatically when used in a ``with`` statement.
 
 from pathlib import Path
 from typing import Any
-import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -29,10 +28,10 @@ from exodusii.core.names import AttributeName
 from exodusii.core.names import DimensionName
 from exodusii.core.names import ExodusNames
 from exodusii.core.names import VariableName
+from exodusii.core.schema import VariableSpec
 from exodusii.core.schema import block_spec
 from exodusii.core.schema import set_spec
 from exodusii.core.schema import variable_spec
-from exodusii.core.schema import VariableSpec
 from exodusii.core.schema import variable_value_name
 from exodusii.core.strings import decode_text
 from exodusii.core.strings import string_array

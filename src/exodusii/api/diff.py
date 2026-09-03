@@ -55,7 +55,7 @@ from exodusii.core.entities import Entity
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
 from exodusii.mesh.matching import MeshMap
-from exodusii.mesh.matching import MeshMatchError  # noqa: F401 – re-exported for callers
+from exodusii.mesh.matching import MeshMatchError
 from exodusii.mesh.matching import build_mesh_map
 from exodusii.mesh.matching import check_sideset_ordinals
 
@@ -701,9 +701,7 @@ def _compare_times(
             )
 
 
-def _surrounding_steps(
-    t: float, times2: np.ndarray
-) -> tuple[int, int, float]:
+def _surrounding_steps(t: float, times2: np.ndarray) -> tuple[int, int, float]:
     """Return ``(lo, hi, proportion)`` bracketing ``t`` in ``times2``.
 
     ``proportion`` satisfies ``times2[lo] + proportion * (times2[hi] - times2[lo]) == t``.
@@ -746,10 +744,7 @@ StepTriple = tuple[int, int, float]
 
 
 def _steps_to_compare(
-    exo1: ExodusFile,
-    exo2: ExodusFile,
-    opts: DiffOptions,
-    result: DiffResult,
+    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
 ) -> list[StepTriple]:
     """Return the list of (file1_idx, file2_lo_idx, proportion) triples.
 
@@ -848,10 +843,7 @@ def _compare_attributes(
                     try:
                         _perm, perm_inv = mesh_map.block_elem_perm(block_id2)
                         col2 = np.asarray(col2, dtype=np.float64)
-                        if col2.ndim == 1:
-                            col2 = col2[perm_inv]
-                        else:
-                            col2 = col2[perm_inv, :]
+                        col2 = col2[perm_inv] if col2.ndim == 1 else col2[perm_inv, :]
                     except Exception:
                         pass  # skip reorder if block offsets unavailable
                 vd = _compare_variable_series(
@@ -954,7 +946,11 @@ def _compare_global_variables(
         )
         values2 = np.array(
             [
-                float(_interp_values(exo2, name, on=Entity.GLOBAL, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p))
+                float(
+                    _interp_values(
+                        exo2, name, on=Entity.GLOBAL, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p
+                    )
+                )
                 for _i1, lo, p in steps
             ]
         )
@@ -984,13 +980,7 @@ def _compare_nodal_variables(
         if mesh_map is not None:
             arr2 = arr2[:, mesh_map.node_map_inv]
         vd = _compare_variable_series(
-            np.array(rows1),
-            arr2,
-            tol,
-            ent=Entity.NODE,
-            name=name,
-            block_id=None,
-            set_id=None,
+            np.array(rows1), arr2, tol, ent=Entity.NODE, name=name, block_id=None, set_id=None
         )
         _record(result, opts, vd)
 
@@ -1072,7 +1062,12 @@ def _compare_block_variables(
                 ]
                 rows2 = [
                     _interp_values(
-                        exo2, name, on=ent, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p,
+                        exo2,
+                        name,
+                        on=ent,
+                        lo=lo,
+                        hi=lo + (1 if p > 0 else 0),
+                        prop=p,
                         block_id=block_id2,
                     )
                     for _i1, lo, p in steps
@@ -1089,13 +1084,7 @@ def _compare_block_variables(
                 except Exception:
                     pass  # skip reorder if block offsets unavailable
             vd = _compare_variable_series(
-                np.array(rows1),
-                arr2,
-                tol,
-                ent=ent,
-                name=name,
-                block_id=block_id,
-                set_id=None,
+                np.array(rows1), arr2, tol, ent=ent, name=name, block_id=block_id, set_id=None
             )
             _record(result, opts, vd)
 
@@ -1130,12 +1119,15 @@ def _compare_set_variables(
                 )
                 continue
             try:
-                rows1 = [
-                    exo1.values(name, on=ent, set_id=set_id, time=i1) for i1, _lo, _p in steps
-                ]
+                rows1 = [exo1.values(name, on=ent, set_id=set_id, time=i1) for i1, _lo, _p in steps]
                 rows2 = [
                     _interp_values(
-                        exo2, name, on=ent, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p,
+                        exo2,
+                        name,
+                        on=ent,
+                        lo=lo,
+                        hi=lo + (1 if p > 0 else 0),
+                        prop=p,
                         set_id=set_id,
                     )
                     for _i1, lo, p in steps
@@ -1156,13 +1148,7 @@ def _compare_set_variables(
                     arr2 = arr2[:, order2]
 
             vd = _compare_variable_series(
-                arr1,
-                arr2,
-                tol,
-                ent=ent,
-                name=name,
-                block_id=None,
-                set_id=set_id,
+                arr1, arr2, tol, ent=ent, name=name, block_id=None, set_id=set_id
             )
             _record(result, opts, vd)
 
@@ -1235,9 +1221,7 @@ def _align_set_entries(
         e2_0based = entries2 - 1
         valid = (e2_0based >= 0) & (e2_0based < n_nodes)
         mapped = np.where(
-            valid,
-            mesh_map.node_map[np.clip(e2_0based, 0, n_nodes - 1)] + 1,
-            entries2,
+            valid, mesh_map.node_map[np.clip(e2_0based, 0, n_nodes - 1)] + 1, entries2
         )
         # Sort both by file-1 node ID.
         order1 = np.argsort(entries1, stable=True).astype(np.int64)
@@ -1256,12 +1240,10 @@ def _align_set_entries(
         e2_0based = entries2 - 1
         valid = (e2_0based >= 0) & (e2_0based < n_elems)
         mapped_entries = np.where(
-            valid,
-            mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1,
-            entries2,
+            valid, mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1, entries2
         )
         # Sort by (mapped_element_id, side_ordinal).
-        keys1 = entries1 * 10000 + sides1   # composite sort key (assuming sides < 10000)
+        keys1 = entries1 * 10000 + sides1  # composite sort key (assuming sides < 10000)
         keys2 = mapped_entries * 10000 + sides2
         order1 = np.argsort(keys1, stable=True).astype(np.int64)
         order2 = np.argsort(keys2, stable=True).astype(np.int64)
@@ -1274,9 +1256,7 @@ def _align_set_entries(
         e2_0based = entries2 - 1
         valid = (e2_0based >= 0) & (e2_0based < n_elems)
         mapped_entries = np.where(
-            valid,
-            mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1,
-            entries2,
+            valid, mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1, entries2
         )
         order1 = np.argsort(entries1, stable=True).astype(np.int64)
         order2 = np.argsort(mapped_entries, stable=True).astype(np.int64)

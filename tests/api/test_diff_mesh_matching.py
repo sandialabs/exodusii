@@ -9,14 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
-from exodusii.api.diff import DiffOptions, DiffResult, diff
+from exodusii.api.diff import DiffOptions
+from exodusii.api.diff import diff
 from exodusii.api.file import ExodusFile
 from exodusii.api.writer import ExodusWriter
 from exodusii.core.entities import Entity
-from exodusii.core.tolerance import Tolerance, ToleranceMode
-
+from exodusii.core.tolerance import Tolerance
+from exodusii.core.tolerance import ToleranceMode
 
 # ---------------------------------------------------------------------------
 # Mesh-writing helpers
@@ -98,18 +98,14 @@ def _permute_mesh(path_in: Path, path_out: Path, node_perm: list[int]) -> None:
         with ExodusWriter.create(path_out) as w:
             n_nodes = exo.node_count
             n_elems = exo.element_count
-            w.initialize(
-                "permuted",
-                exo.dimension,
-                n_nodes,
-                n_elems,
-                element_blocks=len(block_ids),
-            )
+            w.initialize("permuted", exo.dimension, n_nodes, n_elems, element_blocks=len(block_ids))
             w.write_coordinates(new_coords)
 
             # Re-index connectivity.
             for bid in block_ids:
-                raw_conn = np.asarray(exo.block_connectivity(Entity.ELEMENT_BLOCK, bid), dtype=np.int64)
+                raw_conn = np.asarray(
+                    exo.block_connectivity(Entity.ELEMENT_BLOCK, bid), dtype=np.int64
+                )
                 # raw_conn is 1-based; convert to 0-based, remap, convert back.
                 new_conn = np.vectorize(lambda x: inv_perm[x - 1] + 1)(raw_conn)
                 blk = exo.block(Entity.ELEMENT_BLOCK, bid)
@@ -279,10 +275,7 @@ def test_element_variables_same_after_mapping(tmp_path: Path) -> None:
     b = tmp_path / "b.exo"
 
     # Two-element mesh: write original then permuted node order.
-    all_coords = np.array([
-        [0.0, 0.0], [1.0, 0.0], [2.0, 0.0],
-        [0.0, 1.0], [1.0, 1.0], [2.0, 1.0],
-    ])
+    all_coords = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0]])
     conn_orig = [[1, 2, 5, 4], [2, 3, 6, 5]]  # 1-based
 
     def _write(path, coords, conn):
@@ -345,7 +338,6 @@ def test_block_id_mismatch_is_warning_not_error_with_matching(tmp_path: Path) ->
 
 def test_block_id_mismatch_is_error_without_matching(tmp_path: Path) -> None:
     """Block ID mismatch is a fatal error when coordinate_matching=False."""
-    from exodusii.api.writer import ExodusWriter
 
     a = tmp_path / "a.exo"
     b = tmp_path / "b.exo"
@@ -386,8 +378,9 @@ def test_mesh_matching_failure_is_error_in_result(tmp_path: Path) -> None:
 
 def test_mesh_matching_partial_allowed(tmp_path: Path) -> None:
     """require_unique_mapping=False allows partial matches without fatal error."""
-    from exodusii.api.writer import ExodusWriter
     import warnings
+
+    from exodusii.api.writer import ExodusWriter
 
     a = tmp_path / "a.exo"
     b = tmp_path / "b.exo"
@@ -401,9 +394,7 @@ def test_mesh_matching_partial_allowed(tmp_path: Path) -> None:
         w.write_time(0.0)
 
     opts = DiffOptions(
-        coordinate_matching=True,
-        matching_tolerance=1e-6,
-        require_unique_mapping=False,
+        coordinate_matching=True, matching_tolerance=1e-6, require_unique_mapping=False
     )
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
@@ -434,8 +425,9 @@ def test_cli_match_coordinates_same(tmp_path: Path) -> None:
 
 def test_cli_match_coordinates_different(tmp_path: Path) -> None:
     """exodiff --match-coordinates detects difference in permuted file, exits 2."""
-    from exodusii.cli.exodiff import main
     import io
+
+    from exodusii.cli.exodiff import main
 
     a = tmp_path / "a.exo"
     c = tmp_path / "c.exo"
@@ -451,6 +443,7 @@ def test_cli_match_coordinates_json_output(tmp_path: Path) -> None:
     """exodiff --match-coordinates --format json includes mesh_map_built."""
     import io
     import json
+
     from exodusii.cli.exodiff import main
 
     a = tmp_path / "a.exo"
@@ -475,14 +468,16 @@ def test_cli_matching_tolerance_flag(tmp_path: Path) -> None:
 
 def test_cli_allow_partial_match_flag(tmp_path: Path) -> None:
     """--allow-partial-match flag is accepted without crashing."""
-    from exodusii.cli.exodiff import main
     import warnings
+
+    from exodusii.cli.exodiff import main
 
     a = tmp_path / "a.exo"
     b = tmp_path / "b.exo"
     _write_matched(a)
 
     from exodusii.api.writer import ExodusWriter
+
     all_coords_far = _quad_coords() + 1000.0
     with ExodusWriter.create(b) as w:
         w.initialize("far", 2, 4, 1, element_blocks=1)
@@ -492,11 +487,7 @@ def test_cli_allow_partial_match_flag(tmp_path: Path) -> None:
 
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
-        rc = main([
-            "--match-coordinates",
-            "--allow-partial-match",
-            str(a), str(b),
-        ])
+        rc = main(["--match-coordinates", "--allow-partial-match", str(a), str(b)])
     # Exits 1 (error) because comparison fails after partial map, not crash.
     assert rc in (1, 2)
 
@@ -527,7 +518,7 @@ def test_nodeset_variable_same_after_mapping(tmp_path: Path) -> None:
         w.initialize("ns_test", 2, 4, 1, element_blocks=1, node_sets=1)
         w.write_coordinates(all_coords)
         w.define_element_block(10, "quad", [[1, 2, 3, 4]])
-        w.define_node_set(20, [1, 3])   # 1-based: nodes 0 and 2
+        w.define_node_set(20, [1, 3])  # 1-based: nodes 0 and 2
         w.define_node_set_variables(["NSTEMP"])
         w.write_time(0.0)
         w.write_node_set_values("NSTEMP", [10.0, 20.0], set_id=20)

@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 
 import exodusii
-from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
+from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import diff
 from exodusii.api.file import ExodusFile
 from exodusii.api.writer import ExodusWriter
@@ -618,10 +618,7 @@ def test_time_value_scale_and_offset(tmp_path: Path) -> None:
 
     # With scale=0.5, file-1 adjusted times become 0, 1, 2, 3, 4 — matching file-2.
     ts = TimeSelection(time_value_scale=0.5, interpolating=True)
-    opts = DiffOptions(
-        time_selection=ts,
-        time_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10),
-    )
+    opts = DiffOptions(time_selection=ts, time_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10))
     result = diff(a, b, opts)
     assert result.same, result.errors
 
