@@ -2,7 +2,20 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Comparison utilities for Exodus databases."""
+"""Comparison utilities for Exodus databases.
+
+This module provides two levels of comparison:
+
+* :func:`allclose` — numeric equality within configurable absolute and
+  relative tolerances, operating directly on the underlying NetCDF
+  dimensions and variables.
+* :func:`similar` — structural equivalence check that verifies mesh
+  topology, variable layout, block and set definitions, and connectivity
+  without comparing result values.
+
+Both functions accept open :class:`~exodusii.api.file.ExodusFile` objects or
+file-system paths and handle file opening/closing automatically.
+"""
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -20,12 +33,24 @@ ExodusFileLike = ExodusFile | str | Path
 
 @dataclass(frozen=True, slots=True)
 class ComparisonResult:
-    """Detailed comparison result."""
+    """Detailed result of an :func:`allclose` comparison.
+
+    Evaluates as a bool (``True`` when the comparison found no differences).
+
+    Attributes
+    ----------
+    equal : bool
+        ``True`` when no errors were detected.
+    errors : tuple of str
+        Descriptions of every dimension or variable that differed between
+        the two files.  Empty when ``equal`` is ``True``.
+    """
 
     equal: bool
     errors: tuple[str, ...] = ()
 
     def __bool__(self) -> bool:
+        """Return ``True`` when the comparison found no differences."""
         return self.equal
 
 
@@ -45,19 +70,54 @@ def allclose(
     Parameters
     ----------
     file1, file2
-        Open :class:`ExodusFile` objects or paths.
-    atol, rtol
-        Absolute and relative tolerances for numeric data.
-    dimensions
-        Dimensions to compare. ``True`` compares all dimensions, ``False`` or
-        ``None`` compares none. A string of the form ``"~a|b"`` compares all
-        except ``a`` and ``b``.
-    variables
-        Variables to compare. Same selection rules as ``dimensions``.
-    verbose
-        If true, print errors to stderr. If a text stream, write errors there.
-    result
-        If true, return :class:`ComparisonResult` instead of a bare bool.
+        Open :class:`ExodusFile` objects or paths to Exodus files.
+        If paths are provided the files are opened and closed automatically.
+    atol : float, optional
+        Absolute tolerance for numeric comparisons (default ``1e-12``).
+    rtol : float, optional
+        Relative tolerance for numeric comparisons (default ``1e-12``).
+    dimensions : bool or str or iterable of str or None, optional
+        Dimensions to compare.  ``True`` (default) compares all dimensions;
+        ``False`` or ``None`` compares none.  A string of the form
+        ``"~a|b"`` compares all dimensions *except* ``a`` and ``b``.
+        A plain string ``"name"`` compares only that one dimension.
+        An iterable of strings compares exactly those dimensions.
+    variables : bool or str or iterable of str or None, optional
+        Variables to compare.  Same selection rules as ``dimensions``.
+    verbose : bool or TextIO, optional
+        If ``True``, write error messages to ``sys.stderr``.  If a text
+        stream, write errors there.  Default ``False`` (silent).
+    result : bool, optional
+        If ``True``, return a :class:`ComparisonResult` instead of a plain
+        bool.  Default ``False``.
+
+    Returns
+    -------
+    bool or ComparisonResult
+        When ``result`` is ``False`` (default), returns a plain ``bool``
+        that is ``True`` when the files are considered equal.  When
+        ``result`` is ``True``, returns a :class:`ComparisonResult` with
+        full error details.
+
+    Examples
+    --------
+    Simple check with default tolerances:
+
+    >>> allclose("before.exo", "after.exo")
+    True
+
+    Looser tolerances, only compare nodal variables:
+
+    >>> allclose("a.exo", "b.exo", atol=1e-6, rtol=1e-6,
+    ...          dimensions=False, variables="~elem_var1")
+    True
+
+    Collect detailed errors:
+
+    >>> cr = allclose("a.exo", "b.exo", result=True)
+    >>> if not cr:
+    ...     for err in cr.errors:
+    ...         print(err)
     """
 
     opened1 = _open_if_needed(file1)
@@ -117,8 +177,59 @@ def similar(
 ) -> bool:
     """Return true if two Exodus files have the same mesh and variable layout.
 
-    This intentionally ignores result values except for optional time presence
-    checks.
+    Checks that the two files are structurally compatible: identical spatial
+    dimension, entity counts, variable name sets, block and set definitions,
+    element connectivity, truth tables, and block/set status arrays.
+    Result values (nodal and element variable data) are *not* compared.
+
+    Parameters
+    ----------
+    file1, file2
+        Open :class:`ExodusFile` objects or paths to Exodus files.
+        If paths are provided the files are opened and closed automatically.
+    times : iterable of float or None, optional
+        When provided, each requested time value must be present (within
+        absolute tolerance ``1e-12``) in *both* files.  If any value is
+        absent from either file a :exc:`ValueError` is raised.
+
+    Returns
+    -------
+    bool
+        ``True`` when all structural checks pass.
+
+    Raises
+    ------
+    ValueError
+        When any structural check fails (differing counts, IDs, element
+        types, connectivity, truth tables, or requested time values).
+
+    Notes
+    -----
+    The checks performed are:
+
+    * Spatial dimension and entity counts (nodes, edges, faces, elements,
+      element blocks).
+    * Node, element, edge, and face ID maps.
+    * Variable name sets for every entity type (global, nodal, element,
+      edge, face, all set types).
+    * Nodal coordinates (via :func:`numpy.allclose` with default tolerances).
+    * Element-block, edge-block, and face-block IDs, element types, entity
+      counts, nodes-per-entity, and connectivity arrays.
+    * Node-set, side-set, edge-set, face-set, and element-set IDs, entry
+      counts, entries, and extra entries.
+    * Variable truth tables for block and set variables.
+    * Block and set active/inactive status arrays.
+    * Element-block attribute names and values.
+
+    Examples
+    --------
+    >>> similar("mesh_a.exo", "mesh_b.exo")
+    True
+
+    Require specific time steps to be present in both files:
+
+    >>> similar("run1.exo", "run2.exo", times=[0.0, 0.5, 1.0])
+    True
     """
 
     opened1 = _open_if_needed(file1)

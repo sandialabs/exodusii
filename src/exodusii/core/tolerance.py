@@ -29,7 +29,32 @@ __all__ = ["Tolerance", "ToleranceMode"]
 class ToleranceMode(enum.Enum):
     """Comparison tolerance modes.
 
-    Mirrors the SEACAS ``exodiff`` ``ToleranceMode`` enumeration.
+    Mirrors the SEACAS ``exodiff`` ``ToleranceMode`` enumeration.  Each mode
+    determines how :class:`Tolerance` interprets its ``value`` field when
+    deciding whether two scalars (or array elements) are considered different.
+
+    Notes
+    -----
+    Available modes:
+
+    RELATIVE
+        Scaled difference: ``|a - b| > value * max(|a|, |b|)``.
+    ABSOLUTE
+        Raw difference: ``|a - b| > value``.
+    COMBINED
+        Relative when ``max(|a|, |b|) > 1``, otherwise absolute.
+    IGNORE
+        Always report values as equal; never flags a difference.
+    EIGEN_RELATIVE
+        Like ``RELATIVE`` but compares magnitudes: ``| |a| - |b| |``.
+    EIGEN_ABSOLUTE
+        Like ``ABSOLUTE`` but compares magnitudes.
+    EIGEN_COMBINED
+        Like ``COMBINED`` but compares magnitudes.
+    ULPS_FLOAT
+        Unit-in-the-last-place distance at single (32-bit) precision.
+    ULPS_DOUBLE
+        Unit-in-the-last-place distance at double (64-bit) precision.
     """
 
     RELATIVE = "relative"
@@ -44,13 +69,57 @@ class ToleranceMode(enum.Enum):
 
     @property
     def abbreviation(self) -> str:
-        """Return the three-letter abbreviation used by exodiff reports."""
+        """Return the three-letter abbreviation used by exodiff reports.
+
+        Returns
+        -------
+        str
+            A three-letter string such as ``"rel"``, ``"abs"``, or ``"com"``
+            that matches the abbreviation used in SEACAS ``exodiff`` output.
+        """
 
         return _ABBREVIATIONS[self]
 
     @classmethod
     def parse(cls, value: ToleranceMode | str) -> ToleranceMode:
-        """Parse a mode from a name, abbreviation, or :class:`ToleranceMode`."""
+        """Parse a mode from a name, abbreviation, or :class:`ToleranceMode`.
+
+        Accepts the canonical enum value string (e.g. ``"relative"``), the
+        three-letter abbreviation (e.g. ``"rel"``), several spelled-out aliases
+        (e.g. ``"eigen_relative"``), or an existing :class:`ToleranceMode`
+        instance (returned unchanged).  Lookup is case-insensitive and
+        strips surrounding whitespace.
+
+        Parameters
+        ----------
+        value : ToleranceMode or str
+            The mode to parse.  May be an existing :class:`ToleranceMode`
+            member, a canonical value string such as ``"relative"``, a
+            three-letter abbreviation such as ``"rel"``, or a recognised alias
+            such as ``"eigen_relative"``.
+
+        Returns
+        -------
+        ToleranceMode
+            The matched :class:`ToleranceMode` member.
+
+        Raises
+        ------
+        ValueError
+            If ``value`` is a string that does not match any known mode name,
+            abbreviation, or alias.
+
+        Examples
+        --------
+        >>> ToleranceMode.parse("relative")
+        <ToleranceMode.RELATIVE: 'relative'>
+        >>> ToleranceMode.parse("rel")
+        <ToleranceMode.RELATIVE: 'relative'>
+        >>> ToleranceMode.parse(ToleranceMode.ABSOLUTE)
+        <ToleranceMode.ABSOLUTE: 'absolute'>
+        >>> ToleranceMode.parse("eigen_relative")
+        <ToleranceMode.EIGEN_RELATIVE: 'eigenrel'>
+        """
 
         if isinstance(value, ToleranceMode):
             return value
@@ -115,18 +184,43 @@ def _ulps_distance(a: float, b: float, *, dtype: str) -> float:
 class Tolerance:
     """A comparison tolerance.
 
+    Encapsulates the mode, threshold value, and floor used when determining
+    whether two floating-point scalars (or arrays) are considered different.
+    Scalar comparisons are provided by :meth:`diff` and :meth:`delta`;
+    vectorized equivalents are :meth:`diff_array` and :meth:`delta_array`.
+
     Parameters
     ----------
-    mode
-        Tolerance mode.
-    value
-        Tolerance value (interpreted per mode).
-    floor
-        Floor below which values are treated as equal.
-    use_old_floor
-        If true, use the older floor definition ``|a - b| < floor``.  The
-        default (new) definition treats values as equal when both magnitudes
-        are ``<= floor``.
+    mode : ToleranceMode, optional
+        Tolerance mode controlling how ``value`` is interpreted.
+        Defaults to ``ToleranceMode.RELATIVE``.
+    value : float, optional
+        Tolerance threshold; interpretation depends on ``mode``.
+        Defaults to ``0.0``.
+    floor : float, optional
+        Values whose magnitudes are both at or below this threshold are
+        treated as equal regardless of ``mode``.  Defaults to ``0.0``.
+    use_old_floor : bool, optional
+        If ``True``, the legacy floor definition is used: values are below
+        the floor when ``|a - b| < floor``.  The default (``False``) new
+        definition treats values as equal when both ``|a| <= floor`` and
+        ``|b| <= floor``.
+
+    Examples
+    --------
+    Construct a relative tolerance and test two scalars:
+
+    >>> tol = Tolerance(mode=ToleranceMode.RELATIVE, value=1e-6)
+    >>> tol.diff(1.0, 1.0 + 1e-7)
+    False
+    >>> tol.diff(1.0, 1.0 + 1e-5)
+    True
+
+    Construct via the :meth:`make` factory using a string mode:
+
+    >>> tol = Tolerance.make("abs", value=0.01)
+    >>> tol.delta(3.0, 3.005)
+    0.004999999999999893
     """
 
     mode: ToleranceMode = ToleranceMode.RELATIVE
@@ -143,7 +237,41 @@ class Tolerance:
         *,
         use_old_floor: bool = False,
     ) -> Tolerance:
-        """Construct a tolerance, parsing ``mode`` if it is a string."""
+        """Construct a tolerance, parsing ``mode`` if it is a string.
+
+        This is the preferred factory for interactive use because it accepts
+        mode strings and abbreviations in addition to :class:`ToleranceMode`
+        members.
+
+        Parameters
+        ----------
+        mode : ToleranceMode or str, optional
+            Tolerance mode.  Accepts any value understood by
+            :meth:`ToleranceMode.parse`, including full names (``"relative"``),
+            abbreviations (``"rel"``), and aliases.  Defaults to
+            ``ToleranceMode.RELATIVE``.
+        value : float, optional
+            Tolerance threshold.  Defaults to ``0.0``.
+        floor : float, optional
+            Floor below which values are treated as equal.  Defaults to
+            ``0.0``.
+        use_old_floor : bool, optional
+            Use the legacy floor semantics (``|a - b| < floor``).  Defaults to
+            ``False``.
+
+        Returns
+        -------
+        Tolerance
+            A new :class:`Tolerance` instance with the parsed mode and
+            coerced float fields.
+
+        Examples
+        --------
+        >>> Tolerance.make("rel", value=1e-4)
+        Tolerance(mode=<ToleranceMode.RELATIVE: 'relative'>, value=0.0001, floor=0.0, use_old_floor=False)
+        >>> Tolerance.make("abs", value=0.001, floor=1e-10)
+        Tolerance(mode=<ToleranceMode.ABSOLUTE: 'absolute'>, value=0.001, floor=1e-10, use_old_floor=False)
+        """
 
         return cls(
             mode=ToleranceMode.parse(mode),
@@ -160,7 +288,55 @@ class Tolerance:
         return abs(v1) <= self.floor and abs(v2) <= self.floor
 
     def diff(self, v1: float, v2: float) -> bool:
-        """Return true if ``v1`` and ``v2`` differ by more than the tolerance."""
+        """Return ``True`` if ``v1`` and ``v2`` differ by more than the tolerance.
+
+        The comparison depends on :attr:`mode`:
+
+        * ``IGNORE`` — always returns ``False``.
+        * Both values below the floor — returns ``False``.
+        * ``RELATIVE`` — ``|v1 - v2| > value * max(|v1|, |v2|)``; both-zero
+          is treated as equal.
+        * ``ABSOLUTE`` — ``|v1 - v2| > value``.
+        * ``COMBINED`` — relative when ``max(|v1|, |v2|) > 1``, otherwise
+          absolute.
+        * ``ULPS_FLOAT`` / ``ULPS_DOUBLE`` — ULPs distance exceeds ``value``.
+        * ``EIGEN_*`` — same as above but on magnitudes ``|v1|``, ``|v2|``.
+
+        Parameters
+        ----------
+        v1 : float
+            First scalar value.
+        v2 : float
+            Second scalar value.
+
+        Returns
+        -------
+        bool
+            ``True`` when the values differ by more than the tolerance,
+            ``False`` otherwise.
+
+        Examples
+        --------
+        Absolute mode — straightforward threshold test:
+
+        >>> tol = Tolerance(mode=ToleranceMode.ABSOLUTE, value=0.01)
+        >>> tol.diff(1.0, 1.005)
+        False
+        >>> tol.diff(1.0, 1.02)
+        True
+
+        Relative mode — both-zero treated as equal:
+
+        >>> tol = Tolerance(mode=ToleranceMode.RELATIVE, value=1e-6)
+        >>> tol.diff(0.0, 0.0)
+        False
+
+        IGNORE mode — always equal:
+
+        >>> tol = Tolerance(mode=ToleranceMode.IGNORE)
+        >>> tol.diff(0.0, 1e10)
+        False
+        """
 
         if self.mode is ToleranceMode.IGNORE:
             return False
@@ -198,8 +374,46 @@ class Tolerance:
     def delta(self, v1: float, v2: float) -> float:
         """Return the mode-dependent magnitude of the difference.
 
-        Returns 0.0 when the values are below the floor or the mode is
-        ``IGNORE``.
+        Returns ``0.0`` when the values are below the floor or the mode is
+        ``IGNORE``.  The returned value is the same quantity compared against
+        ``value`` inside :meth:`diff`, so ``diff`` is equivalent to
+        ``delta(v1, v2) > value`` for most modes.
+
+        Parameters
+        ----------
+        v1 : float
+            First scalar value.
+        v2 : float
+            Second scalar value.
+
+        Returns
+        -------
+        float
+            Mode-dependent measure of the difference between ``v1`` and
+            ``v2``.  Common cases:
+
+            * ``RELATIVE`` — ``|v1 - v2| / max(|v1|, |v2|)``
+            * ``ABSOLUTE`` — ``|v1 - v2|``
+            * ``COMBINED`` — absolute or relative depending on magnitude
+            * ``ULPS_FLOAT`` / ``ULPS_DOUBLE`` — ULPs distance (float)
+            * ``EIGEN_*`` — same as above on magnitudes
+            * ``IGNORE`` — always ``0.0``
+
+        Examples
+        --------
+        >>> tol = Tolerance(mode=ToleranceMode.RELATIVE, value=1e-6)
+        >>> tol.delta(2.0, 2.1)
+        0.04999999999999982
+
+        >>> tol = Tolerance(mode=ToleranceMode.ABSOLUTE, value=0.01)
+        >>> tol.delta(5.0, 5.003)
+        0.002999999999999558
+
+        Both values at zero returns 0.0 for relative mode:
+
+        >>> tol = Tolerance(mode=ToleranceMode.RELATIVE, value=1e-6)
+        >>> tol.delta(0.0, 0.0)
+        0.0
         """
 
         if self.mode is ToleranceMode.IGNORE:
@@ -246,10 +460,41 @@ class Tolerance:
         Vectorized equivalent of :meth:`diff`: ``True`` where the two values
         differ by more than the tolerance.  This shares its definition with
         the scalar :meth:`diff` so that array and scalar comparison paths never
-        diverge.  NaN handling is intentionally left to callers (exodiff treats
-        NaN mismatches separately); pairs where either value is NaN are
-        reported as *not* differing here so that a dedicated NaN check can own
-        that semantics.
+        diverge.
+
+        Parameters
+        ----------
+        a : array_like
+            First array (or scalar).  Converted to ``float64``.
+        b : array_like
+            Second array (or scalar).  Converted to ``float64``.  Must be
+            broadcastable against ``a``.
+
+        Returns
+        -------
+        ndarray of bool
+            Boolean array with the same shape as ``numpy.broadcast(a, b)``.
+            Element ``[i]`` is ``True`` when ``a[i]`` and ``b[i]`` differ by
+            more than the tolerance.
+
+        Notes
+        -----
+        NaN handling is intentionally left to callers.  ``exodiff`` treats NaN
+        mismatches separately; pairs where either value is NaN are reported as
+        *not* differing here so that a dedicated NaN check can own that
+        semantics.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> tol = Tolerance(mode=ToleranceMode.ABSOLUTE, value=0.1)
+        >>> tol.diff_array([1.0, 2.0, 3.0], [1.05, 2.2, 3.0])
+        array([False,  True, False])
+
+        Scalar broadcast:
+
+        >>> tol.diff_array(np.zeros(4), 0.5)
+        array([ True,  True,  True,  True])
         """
 
         x = np.asarray(a, dtype=np.float64)
@@ -300,6 +545,35 @@ class Tolerance:
 
         Vectorized equivalent of :meth:`delta`, used for fast comparison of
         result-variable arrays.
+
+        Parameters
+        ----------
+        a : array_like
+            First array (or scalar).  Converted to ``float64``.
+        b : array_like
+            Second array (or scalar).  Converted to ``float64``.  Must be
+            broadcastable against ``a``.
+
+        Returns
+        -------
+        ndarray of float64
+            Array of the same shape as ``numpy.broadcast(a, b)`` containing
+            the mode-dependent difference magnitude for each element pair.
+            Elements where either value is below the floor (or mode is
+            ``IGNORE``) are set to ``0.0``.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> tol = Tolerance(mode=ToleranceMode.ABSOLUTE, value=0.1)
+        >>> tol.delta_array([1.0, 2.0], [1.05, 2.3])
+        array([0.05, 0.3 ])
+
+        Relative mode:
+
+        >>> tol = Tolerance(mode=ToleranceMode.RELATIVE, value=1e-3)
+        >>> tol.delta_array([100.0, 1.0], [101.0, 1.0])
+        array([0.00990099, 0.        ])
         """
 
         x = np.asarray(a, dtype=np.float64)

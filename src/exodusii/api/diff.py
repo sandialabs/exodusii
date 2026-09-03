@@ -68,7 +68,48 @@ _BLOCK_LOCATION = {
 
 @dataclass(frozen=True, slots=True)
 class VariableDiff:
-    """Worst difference found for a single variable at a single location."""
+    """Worst difference found for a single variable at a single location.
+
+    Each instance records the maximum scaled delta observed across all compared
+    time steps and mesh entries for one variable, together with the location
+    (time step, entry index, block or set id) at which that worst value
+    occurred.
+
+    Attributes
+    ----------
+    entity : str
+        Mesh entity type string (e.g. ``"element"``, ``"node"``,
+        ``"node_set"``).  Matches :attr:`exodusii.core.entities.Entity.value`.
+    name : str
+        Variable name as it appears in file-1.
+    max_delta : float
+        Largest scaled difference observed.  Set to ``inf`` when the arrays
+        have a shape mismatch or when a NaN-vs-finite mismatch is detected.
+    tolerance_mode : str
+        Tolerance mode string used for this comparison (e.g. ``"relative"``,
+        ``"absolute"``).  Matches
+        :attr:`exodusii.core.tolerance.ToleranceMode.value`.
+    exceeded : bool
+        ``True`` when ``max_delta`` exceeds the configured tolerance threshold.
+    time_index : int or None
+        Zero-based time-step index of the worst entry.  ``None`` for
+        global variables or when the location could not be determined.
+    entry_index : int or None
+        Zero-based index within the entity array (node index, element index,
+        etc.) of the worst entry.  ``None`` when not applicable.
+    block_id : int or None
+        Element-, edge-, or face-block id of the worst entry.  ``None`` for
+        non-block variables.
+    set_id : int or None
+        Node-set, side-set, edge-set, face-set, or element-set id of the worst
+        entry.  ``None`` for non-set variables.
+    value1 : float or None
+        Raw value from file-1 at the worst location.  ``None`` when
+        unavailable (e.g. shape mismatch).
+    value2 : float or None
+        Raw value from file-2 at the worst location.  ``None`` when
+        unavailable.
+    """
 
     entity: str
     name: str
@@ -86,7 +127,37 @@ class VariableDiff:
 
 @dataclass(slots=True)
 class DiffResult:
-    """Outcome of comparing two Exodus databases."""
+    """Outcome of comparing two Exodus databases.
+
+    Returned by :func:`diff`.  Evaluates as a bool (``True`` when the
+    databases are considered identical within tolerance).
+
+    Attributes
+    ----------
+    same : bool
+        ``True`` when no structural errors were found and no variable
+        exceeded its tolerance.  Set by :func:`diff` after all comparisons
+        are complete.
+    file1 : str
+        String path of the first database.
+    file2 : str
+        String path of the second database.
+    errors : list of str
+        Fatal structural mismatches: differing mesh dimensions, node or
+        element counts, missing variables, truth-table presence mismatches,
+        or coordinate shape differences.  Any non-empty errors list means
+        ``same`` is ``False``.
+    warnings : list of str
+        Non-fatal notes: differing time-step counts or time-value mismatches.
+        Warnings do not affect ``same``.
+    variable_diffs : list of VariableDiff
+        Per-variable worst-difference records.  By default only variables
+        that exceeded tolerance are included; pass ``show_all=True`` to
+        :class:`DiffOptions` to include all compared variables.
+    coordinate_max_delta : float or None
+        Maximum coordinate difference found during coordinate comparison,
+        or ``None`` when coordinate comparison was skipped.
+    """
 
     same: bool
     file1: str
@@ -102,6 +173,7 @@ class DiffResult:
     coordinate_max_delta: float | None = None
 
     def __bool__(self) -> bool:
+        """Return ``True`` when the comparison found no differences."""
         return self.same
 
 
@@ -263,7 +335,30 @@ class DiffOptions:
         return self._category_default(ent)
 
     def is_excluded(self, name: str) -> bool:
-        """Return true if ``name`` is excluded from comparison."""
+        """Return ``True`` if *name* is excluded from comparison.
+
+        Exclusion is case-insensitive when :attr:`ignore_case` is ``True``
+        (the default).
+
+        Parameters
+        ----------
+        name : str
+            Variable name to check against the :attr:`exclude` set.
+
+        Returns
+        -------
+        bool
+            ``True`` when *name* matches an entry in :attr:`exclude`
+            (respecting the :attr:`ignore_case` setting), ``False`` otherwise.
+
+        Examples
+        --------
+        >>> opts = DiffOptions(exclude=frozenset({"TEMP", "PRESS"}))
+        >>> opts.is_excluded("temp")
+        True
+        >>> opts.is_excluded("VELOCITY")
+        False
+        """
 
         if not self.exclude:
             return False
@@ -392,18 +487,48 @@ def diff(
 ) -> DiffResult:
     """Compare two Exodus databases exodiff-style (matched mesh ordering).
 
+    Performs a field-by-field comparison of two Exodus databases using the
+    same default tolerances and time-step selection logic as the SEACAS
+    ``exodiff`` tool.  Both files must share the same mesh topology (identical
+    node/element ordering); coordinate-based mesh matching is not performed.
+
     Parameters
     ----------
     file1, file2
-        Open :class:`ExodusFile` objects or paths.
+        Open :class:`ExodusFile` objects or paths to Exodus files.  If paths
+        are provided, the files are opened and closed automatically.
     options
-        Comparison options; defaults to :class:`DiffOptions`.
+        Comparison options; defaults to :class:`DiffOptions` (relative
+        tolerance 1e-6 for variables, absolute 1e-6 for coordinates).
 
     Returns
     -------
     DiffResult
-        Structured comparison outcome.  ``result.same`` is true when no
-        structural error and no variable exceeded tolerance.
+        Structured comparison outcome.  ``result.same`` is ``True`` when no
+        structural error was found and no variable exceeded tolerance.
+        Evaluates to a bool directly via ``__bool__``.
+
+    Examples
+    --------
+    Simple comparison with default tolerances:
+
+    >>> result = diff("run_a.exo", "run_b.exo")
+    >>> if not result:
+    ...     for vd in result.variable_diffs:
+    ...         print(vd.name, vd.max_delta)
+
+    Tighter tolerance on nodal variables:
+
+    >>> from exodusii.core.tolerance import Tolerance, ToleranceMode
+    >>> opts = DiffOptions(
+    ...     nodal_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1e-10, 0.0)
+    ... )
+    >>> result = diff("run_a.exo", "run_b.exo", options=opts)
+
+    Compare only the last time step using :class:`TimeSelection`:
+
+    >>> opts = DiffOptions(time_selection=TimeSelection(start=-1))
+    >>> result = diff("run_a.exo", "run_b.exo", options=opts)
     """
 
     opts = options or DiffOptions()

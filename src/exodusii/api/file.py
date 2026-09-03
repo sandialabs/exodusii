@@ -2,7 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Modern read API for Exodus databases."""
+"""Modern read API for Exodus databases.
+
+This module provides :class:`ExodusFile`, the primary interface for reading
+Exodus II finite-element database files.  It wraps a pluggable NetCDF backend
+and exposes typed accessors for mesh topology, result variables, sets, blocks,
+attributes, and metadata.  The class supports the context-manager protocol so
+files are closed automatically when used in a ``with`` statement.
+"""
 
 from pathlib import Path
 from typing import Any
@@ -39,10 +46,43 @@ from exodusii.io.netcdf4_backend import NetCDF4Backend
 class ExodusFile:
     """Modern Exodus database reader.
 
+    Provides read (and limited write) access to an Exodus II finite-element
+    database through a pluggable :class:`~exodusii.io.backend.NetCDFBackend`.
+    Immutable metadata such as time values, variable-name tables, and block/set
+    ID arrays are cached for the lifetime of the instance and invalidated on
+    :meth:`close` or :meth:`sync`.
+
     Parameters
     ----------
-    backend
-        NetCDF backend implementing :class:`exodusii.io.backend.NetCDFBackend`.
+    backend : NetCDFBackend
+        NetCDF backend implementing
+        :class:`exodusii.io.backend.NetCDFBackend`.
+
+    Notes
+    -----
+    The preferred usage pattern is as a context manager, which guarantees the
+    underlying file handle is closed even if an exception occurs::
+
+        with ExodusFile.open("results.exo") as f:
+            coords = f.coordinates()
+            temps = f.values("temperature", on="node")
+
+    For one-off interactive use :meth:`open` / :meth:`close` may also be called
+    directly.
+
+    Examples
+    --------
+    Open a file, read nodal coordinates, and close explicitly:
+
+    >>> f = ExodusFile.open("results.exo")
+    >>> coords = f.coordinates()
+    >>> f.close()
+
+    Use as a context manager (recommended):
+
+    >>> with ExodusFile.open("results.exo") as f:
+    ...     t = f.times()
+    ...     temp = f.values("temperature", on="node", time=t[-1])
     """
 
     def __init__(self, backend: NetCDFBackend) -> None:
@@ -56,7 +96,29 @@ class ExodusFile:
 
     @classmethod
     def open(cls, path: str | Path, mode: str = "r") -> "ExodusFile":
-        """Open an Exodus database."""
+        """Open an Exodus database file and return an :class:`ExodusFile`.
+
+        Parameters
+        ----------
+        path : str or Path
+            Filesystem path to the ``.exo`` / ``.e`` / ``.g`` database file.
+        mode : str, optional
+            File open mode.  Use ``"r"`` (default) for read-only access or
+            ``"r+"`` / ``"w"`` when write access is required.
+
+        Returns
+        -------
+        ExodusFile
+            A new :class:`ExodusFile` instance backed by a
+            :class:`~exodusii.io.netcdf4_backend.NetCDF4Backend`.
+
+        Examples
+        --------
+        >>> f = ExodusFile.open("results.exo")
+        >>> f.node_count
+        1024
+        >>> f.close()
+        """
 
         return cls(NetCDF4Backend(path, mode=mode))
 
@@ -79,13 +141,39 @@ class ExodusFile:
         return self._backend.mode
 
     def close(self) -> None:
-        """Close the database."""
+        """Close the database and release the file handle.
+
+        Notes
+        -----
+        The internal metadata cache is cleared before the backend is closed.
+        When using the context-manager protocol the file is closed
+        automatically; explicit calls to :meth:`close` are only needed for
+        non-context-manager usage.
+
+        Examples
+        --------
+        >>> f = ExodusFile.open("results.exo")
+        >>> f.close()
+        """
 
         self._cache.clear()
         self._backend.close()
 
     def sync(self) -> None:
-        """Flush pending writes."""
+        """Flush pending writes to disk.
+
+        Notes
+        -----
+        Clears the internal metadata cache as a safety measure so that any
+        data written through a companion writer is visible on the next read.
+        Prefer using the context-manager protocol over explicit
+        :meth:`sync` / :meth:`close` calls.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo", mode="r+") as f:
+        ...     f.sync()
+        """
 
         self._cache.clear()
         self._backend.sync()
@@ -98,27 +186,55 @@ class ExodusFile:
 
     @property
     def title(self) -> str:
-        """Database title."""
+        """Database title string stored in the file header.
+
+        Returns
+        -------
+        str
+            The title attribute of the Exodus database, or an empty string if
+            no title was recorded.
+        """
 
         return str(self._backend.attribute(AttributeName.TITLE.value, ""))
 
     @property
     def version(self) -> float | None:
-        """Exodus database version, if present."""
+        """Exodus database format version.
+
+        Returns
+        -------
+        float or None
+            The ``version`` global attribute cast to ``float``, or ``None`` if
+            the attribute is absent from the file.
+        """
 
         value = self._backend.attribute(AttributeName.VERSION.value, None)
         return None if value is None else float(value)
 
     @property
     def api_version(self) -> float | None:
-        """Exodus API version, if present."""
+        """Exodus API version used to write the file.
+
+        Returns
+        -------
+        float or None
+            The ``api_version`` global attribute cast to ``float``, or
+            ``None`` if absent.
+        """
 
         value = self._backend.attribute(AttributeName.API_VERSION.value, None)
         return None if value is None else float(value)
 
     @property
     def storage_type(self) -> str:
-        """Floating-point storage type: ``"f"`` for 4-byte, ``"d"`` for 8-byte."""
+        """Floating-point storage type code.
+
+        Returns
+        -------
+        str
+            ``"f"`` when nodal/element data are stored as 32-bit floats,
+            ``"d"`` when stored as 64-bit doubles.
+        """
 
         word_size = self._backend.attribute(AttributeName.FLOATING_POINT_WORD_SIZE.value, None)
         if word_size is None:
@@ -130,54 +246,117 @@ class ExodusFile:
 
     @property
     def dimension(self) -> int:
-        """Spatial dimension."""
+        """Spatial dimension of the mesh (1, 2, or 3).
+
+        Returns
+        -------
+        int
+            Number of spatial coordinates per node.  Returns ``0`` if the
+            dimension is not recorded in the file.
+        """
 
         return self.dimension_size(DimensionName.NUM_DIMENSIONS.value, default=0)
 
     @property
     def node_count(self) -> int:
-        """Number of nodes."""
+        """Total number of nodes in the mesh.
+
+        Returns
+        -------
+        int
+            Number of nodes, or ``0`` if not present in the file.
+        """
 
         return self.dimension_size(DimensionName.NUM_NODES.value, default=0)
 
     @property
     def edge_count(self) -> int:
-        """Number of edges."""
+        """Total number of edges in the mesh.
+
+        Returns
+        -------
+        int
+            Number of edges, or ``0`` if not present in the file.
+        """
 
         return self.dimension_size(DimensionName.NUM_EDGES.value, default=0)
 
     @property
     def face_count(self) -> int:
-        """Number of faces."""
+        """Total number of faces in the mesh.
+
+        Returns
+        -------
+        int
+            Number of faces, or ``0`` if not present in the file.
+        """
 
         return self.dimension_size(DimensionName.NUM_FACES.value, default=0)
 
     @property
     def element_count(self) -> int:
-        """Number of elements."""
+        """Total number of elements across all blocks.
+
+        Returns
+        -------
+        int
+            Number of elements, or ``0`` if not present in the file.
+        """
 
         return self.dimension_size(DimensionName.NUM_ELEMENTS.value, default=0)
 
     @property
     def element_block_count(self) -> int:
-        """Number of element blocks."""
+        """Number of element blocks.
+
+        Returns
+        -------
+        int
+            Count of element blocks, or ``0`` if none are present.
+        """
 
         return self.dimension_size(DimensionName.NUM_ELEMENT_BLOCKS.value, default=0)
 
     @property
     def node_set_count(self) -> int:
-        """Number of node sets."""
+        """Number of node sets.
+
+        Returns
+        -------
+        int
+            Count of node sets, or ``0`` if none are present.
+        """
 
         return self.dimension_size(DimensionName.NUM_NODE_SETS.value, default=0)
 
     @property
     def side_set_count(self) -> int:
-        """Number of side sets."""
+        """Number of side sets.
+
+        Returns
+        -------
+        int
+            Count of side sets, or ``0`` if none are present.
+        """
 
         return self.dimension_size(DimensionName.NUM_SIDE_SETS.value, default=0)
 
     def info_records(self) -> tuple[str, ...]:
-        """Return Exodus information records."""
+        """Return Exodus information records stored in the file.
+
+        Returns
+        -------
+        tuple of str
+            Each element is one information record string with trailing
+            whitespace and null bytes stripped.  Returns an empty tuple if no
+            information records are present.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     for line in f.info_records():
+        ...         print(line)
+        """
 
         values = self._backend.variable(VariableName.INFO_RECORDS.value, default=None)
         if values is None:
@@ -187,7 +366,21 @@ class ExodusFile:
         return tuple(str(value).rstrip(" \x00") for value in decoded)
 
     def qa_records(self) -> tuple[tuple[str, str, str, str], ...]:
-        """Return Exodus QA records."""
+        """Return Exodus QA records stored in the file.
+
+        Returns
+        -------
+        tuple of tuple of str
+            Each inner tuple contains four strings:
+            ``(code_name, code_qa, date, time)``.  Returns an empty tuple if
+            no QA records are present.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     for code, qa, date, time in f.qa_records():
+        ...         print(code, date)
+        """
 
         values = self._backend.variable(VariableName.QA_RECORDS.value, default=None)
         if values is None:
@@ -216,7 +409,31 @@ class ExodusFile:
         return ()
 
     def set_ids(self, on: Entity | str, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return set IDs for a set entity."""
+        """Return set IDs for a set entity type.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Set entity type.  Accepts :class:`~exodusii.core.entities.Entity`
+            values or string aliases such as ``"node_set"``, ``"side_set"``,
+            ``"ns"``, ``"ss"``, etc.
+        active_only : bool, optional
+            When ``True``, return only IDs whose status flag is non-zero.
+            Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of set IDs.  Returns an empty array if no sets of
+            the requested type exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     ids = f.set_ids("node_set")
+        ...     print(ids)
+        [1 2 5]
+        """
 
         spec = set_spec(on)
         cache_key = f"set_ids:{spec.entity.value}"
@@ -258,7 +475,41 @@ class ExodusFile:
         return bool(status[index - 1])
 
     def set(self, on: Entity | str, set_id: int) -> SetInfo:
-        """Return generic set metadata and entries."""
+        """Return metadata and entry arrays for a set.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Set entity type.  Accepts :class:`~exodusii.core.entities.Entity`
+            values or string aliases such as ``"node_set"`` or ``"side_set"``.
+        set_id : int
+            Exodus set ID (one-based, as stored in the file).
+
+        Returns
+        -------
+        SetInfo
+            A frozen dataclass with the following attributes:
+
+            * ``id`` — the Exodus set ID.
+            * ``index`` — one-based position in the file's set list.
+            * ``entity`` — the normalized :class:`~exodusii.core.entities.Entity`.
+            * ``count`` — number of entries.
+            * ``distribution_factors`` — number of distribution factor values.
+            * ``name`` — optional string name of the set.
+            * ``entries`` — ``int64`` array of primary entry IDs (node IDs for
+              node sets, element IDs for side sets).
+            * ``extra_entries`` — ``int64`` array of secondary entry IDs (side
+              numbers for side sets), or ``None``.
+            * ``distribution_values`` — ``float64`` distribution factor array,
+              or ``None``.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     ns = f.set("node_set", 10)
+        ...     print(ns.nodes)
+        [3 7 12 ...]
+        """
 
         spec = set_spec(on)
         set_index = self._set_index(spec.entity, set_id)
@@ -289,7 +540,25 @@ class ExodusFile:
         )
 
     def init_params(self) -> InitParams:
-        """Return top-level initialization parameters."""
+        """Return top-level initialization parameters for the database.
+
+        Returns
+        -------
+        InitParams
+            A frozen dataclass whose fields mirror the Exodus initialization
+            structure: ``title``, ``dimension``, ``nodes``, ``elements``,
+            ``element_blocks``, ``node_sets``, ``side_sets``, ``edges``,
+            ``edge_blocks``, ``edge_sets``, ``faces``, ``face_blocks``,
+            ``face_sets``, ``element_sets``, ``node_maps``, ``element_maps``,
+            ``edge_maps``, and ``face_maps``.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     p = f.init_params()
+        ...     print(p.nodes, p.elements, p.dimension)
+        1024 512 3
+        """
 
         return InitParams(
             title=self.title,
@@ -336,7 +605,23 @@ class ExodusFile:
         return self._backend.variable(name, default=default, raw=raw)
 
     def times(self) -> npt.NDArray[np.float64]:
-        """Return all time values."""
+        """Return all simulation time values stored in the database.
+
+        Results are cached after the first call.
+
+        Returns
+        -------
+        ndarray of float64, shape (n_steps,)
+            Monotonically increasing time values, one per output step.
+            Returns an empty array if the file has no time steps.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     t = f.times()
+        ...     print(t)
+        [0.   0.1  0.2  0.5  1.0]
+        """
 
         cached = self._cache.get("times")
         if cached is None:
@@ -347,7 +632,21 @@ class ExodusFile:
         return cached
 
     def coordinate_names(self) -> npt.NDArray[np.str_]:
-        """Return coordinate names."""
+        """Return the coordinate axis names stored in the file.
+
+        Returns
+        -------
+        ndarray of str, shape (dimension,)
+            Axis labels in file order (e.g. ``["x", "y", "z"]`` for a 3-D
+            mesh).  Falls back to ``["X", "Y", "Z"]`` when no names are
+            stored.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.coordinate_names())
+        ['x' 'y' 'z']
+        """
 
         default = np.asarray(["X", "Y", "Z"][: self.dimension], dtype=object)
         values = self._backend.variable(VariableName.COORDINATE_NAMES.value, default=default)
@@ -357,15 +656,51 @@ class ExodusFile:
     def coordinates(
         self, *, time: TimeSelector = None, displaced: bool = False
     ) -> npt.NDArray[np.float64]:
-        """Return nodal coordinates.
+        """Return nodal coordinates, optionally displaced at a time step.
 
-        Supports both large-model files (separate ``coordx``/``coordy``/``coordz``
-        variables, the modern default) and normal-model files (a combined 2D
-        ``coord`` variable with shape ``(num_dim, num_nodes)``), matching the
-        ``ex_large_model`` branching in the SEACAS C library (``ex_get_coord.c``).
+        Supports both large-model files (separate ``coordx``/``coordy``/
+        ``coordz`` variables, the modern default) and normal-model files (a
+        combined 2-D ``coord`` variable with shape ``(num_dim, num_nodes)``),
+        matching the ``ex_large_model`` branching in the SEACAS C library
+        (``ex_get_coord.c``).
 
-        If ``displaced`` is true, displacement variables are added at the selected
-        time.
+        If ``displaced`` is ``True``, displacement variables are added at the
+        selected time step.
+
+        Parameters
+        ----------
+        time : TimeSelector, optional
+            Time step selector used only when ``displaced=True``.  May be a
+            float (physical time), an integer step index, or ``None`` to use
+            the last available step.
+        displaced : bool, optional
+            When ``True``, add nodal displacement values (looked up via
+            :meth:`displacements`) to the reference coordinates before
+            returning.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of float64, shape (node_count, dimension)
+            Coordinate matrix with one row per node and one column per spatial
+            dimension.
+
+        Raises
+        ------
+        ValueError
+            If neither the per-component (``coordx``, …) nor the combined
+            ``coord`` variable is found in the file.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     xyz = f.coordinates()
+        ...     xyz.shape
+        (1024, 3)
+
+        Displaced coordinates at the last time step:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     xyz = f.coordinates(displaced=True)
         """
 
         # Try large-model format first (coordx / coordy / coordz).
@@ -392,7 +727,31 @@ class ExodusFile:
         return coords
 
     def displacement_variable_names(self) -> tuple[str, ...]:
-        """Return recognized displacement variable names."""
+        """Return the names of nodal displacement result variables.
+
+        Searches the nodal variable list for names matching common patterns
+        (``displx``/``disply``/``displz``, ``dispx``/``dispy``/``dispz``,
+        ``displ_x``/``displ_y``/``displ_z``).
+
+        Returns
+        -------
+        tuple of str
+            Ordered displacement variable names, one per spatial dimension
+            (e.g. ``("DISPLX", "DISPLY", "DISPLZ")`` for a 3-D mesh).
+            Returns an empty tuple when no displacement variables are found.
+
+        Raises
+        ------
+        ValueError
+            If displacement-like variable names are found but their count does
+            not equal :attr:`dimension`.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.displacement_variable_names())
+        ('DISPLX', 'DISPLY', 'DISPLZ')
+        """
 
         candidates = {
             f"{base}{axis}"
@@ -410,7 +769,28 @@ class ExodusFile:
         return found
 
     def displacements(self, *, time: TimeSelector = None) -> npt.NDArray[np.float64]:
-        """Return nodal displacements at a selected time."""
+        """Return nodal displacement vectors at a selected time step.
+
+        Parameters
+        ----------
+        time : TimeSelector, optional
+            Time step selector.  May be a float (physical time), an integer
+            step index, or ``None`` to select the last available step.
+
+        Returns
+        -------
+        ndarray of float64, shape (node_count, dimension)
+            Displacement matrix with one row per node and one column per
+            spatial dimension.  Returns an all-zeros array if no displacement
+            variables are present in the file.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     d = f.displacements(time=0.5)
+        ...     d.shape
+        (1024, 3)
+        """
 
         names = self.displacement_variable_names()
         if not names:
@@ -419,7 +799,32 @@ class ExodusFile:
         return np.column_stack([self.values(name, on=Entity.NODE, time=time) for name in names])
 
     def ids(self, on: Entity | str) -> npt.NDArray[np.int64]:
-        """Return Exodus IDs for an object, block, or set entity."""
+        """Return Exodus IDs for a mesh object or map entity.
+
+        For ``"node"`` and ``"element"`` entities the file may store explicit
+        node/element maps; if the map variable is absent a contiguous
+        ``[1, …, count]`` array is synthesised.  For block and set entities
+        the block/set ID arrays are returned.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Entity type.  Accepts :class:`~exodusii.core.entities.Entity`
+            values or string aliases such as ``"node"``, ``"element"``,
+            ``"element_block"``, ``"node_set"``, etc.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of Exodus IDs for the requested entity type.  Returns an
+            empty array when none exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     node_ids = f.ids("node")
+        ...     elem_ids = f.ids("element")
+        """
 
         ent = entity(on)
         name = ExodusNames.ids(ent)
@@ -443,12 +848,57 @@ class ExodusFile:
         return np.asarray(values, dtype=np.int64)
 
     def element_block_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return element block IDs."""
+        """Return all element block IDs.
+
+        Parameters
+        ----------
+        active_only : bool, optional
+            When ``True``, return only IDs whose block status flag is
+            non-zero.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of element block IDs.  Returns an empty array if no element
+            blocks are present.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.element_block_ids())
+        [1 2 3]
+        """
 
         return self.block_ids(Entity.ELEMENT_BLOCK, active_only=active_only)
 
     def block_ids(self, on: Entity | str, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return block IDs for an element, edge, or face block entity."""
+        """Return block IDs for an element, edge, or face block entity.
+
+        Results are cached after the first call for each entity type.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type.  Accepts
+            :class:`~exodusii.core.entities.Entity` values or string aliases
+            such as ``"element_block"``, ``"edge_block"``, ``"face_block"``,
+            ``"eb"``, etc.
+        active_only : bool, optional
+            When ``True``, return only IDs whose block status flag is
+            non-zero.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of block IDs in file order.  Returns an empty array if no
+            blocks of the requested type exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.block_ids("element_block"))
+        [10 20 30]
+        """
 
         spec = block_spec(on)
         cache_key = f"block_ids:{spec.entity.value}"
@@ -490,7 +940,40 @@ class ExodusFile:
         return bool(status[index - 1])
 
     def block(self, on: Entity | str, block_id: int) -> Block:
-        """Return generic block metadata."""
+        """Return metadata for a single block.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type.  Accepts
+            :class:`~exodusii.core.entities.Entity` values or string aliases
+            such as ``"element_block"``, ``"edge_block"``, ``"face_block"``.
+        block_id : int
+            Exodus block ID as stored in the file.
+
+        Returns
+        -------
+        Block
+            A frozen dataclass with the following attributes:
+
+            * ``id`` — the Exodus block ID.
+            * ``index`` — one-based position in the file's block list.
+            * ``entity`` — normalized :class:`~exodusii.core.entities.Entity`.
+            * ``element_type`` — element type string (e.g. ``"HEX8"``).
+            * ``count`` — number of elements (or edges/faces) in the block.
+            * ``nodes_per_entity`` — nodes per element.
+            * ``edges_per_entity`` — edges per element (0 if not stored).
+            * ``faces_per_entity`` — faces per element (0 if not stored).
+            * ``attributes`` — number of per-element attributes.
+            * ``name`` — optional string name.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     b = f.block("element_block", 1)
+        ...     print(b.element_type, b.count, b.nodes_per_entity)
+        HEX8 512 8
+        """
 
         spec = block_spec(on)
         block_index = self._block_index(spec.entity, block_id)
@@ -538,7 +1021,34 @@ class ExodusFile:
     def block_connectivity(
         self, on: Entity | str, block_id: int, *, zero_based: bool = False
     ) -> npt.NDArray[np.int64]:
-        """Return nodal connectivity for a block."""
+        """Return nodal connectivity for a block.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type (``"element_block"``, ``"edge_block"``, or
+            ``"face_block"``).
+        block_id : int
+            Exodus block ID as stored in the file.
+        zero_based : bool, optional
+            When ``True``, subtract 1 from all node indices so that the
+            returned array uses 0-based indexing compatible with NumPy array
+            indexing.  Default is ``False`` (Exodus 1-based convention).
+
+        Returns
+        -------
+        ndarray of int64, shape (n_elems, nodes_per_elem)
+            Connectivity table.  Each row lists the node IDs (1-based by
+            default) for one element.  Returns an empty ``(0, 0)`` array if
+            the block has no connectivity data.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     conn = f.block_connectivity("element_block", 1, zero_based=True)
+        ...     conn.shape
+        (512, 8)
+        """
 
         spec = block_spec(on)
         block_index = self._block_index(spec.entity, block_id)
@@ -587,49 +1097,161 @@ class ExodusFile:
         return array - 1 if zero_based else array
 
     def node_set_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return node set IDs."""
+        """Return all node set IDs.
+
+        Parameters
+        ----------
+        active_only : bool, optional
+            When ``True``, return only IDs whose status flag is non-zero.
+            Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of node set IDs.  Returns an empty array if none exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.node_set_ids())
+        [1 2]
+        """
 
         return self.set_ids(Entity.NODE_SET, active_only=active_only)
 
     def side_set_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return side set IDs."""
+        """Return all side set IDs.
+
+        Parameters
+        ----------
+        active_only : bool, optional
+            When ``True``, return only IDs whose status flag is non-zero.
+            Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of side set IDs.  Returns an empty array if none exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.side_set_ids())
+        [10 20]
+        """
 
         return self.set_ids(Entity.SIDE_SET, active_only=active_only)
 
     def edge_set_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return edge set IDs."""
+        """Return all edge set IDs."""
 
         return self.set_ids(Entity.EDGE_SET, active_only=active_only)
 
     def face_set_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return face set IDs."""
+        """Return all face set IDs."""
 
         return self.set_ids(Entity.FACE_SET, active_only=active_only)
 
     def element_set_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return element set IDs."""
+        """Return all element set IDs."""
 
         return self.set_ids(Entity.ELEMENT_SET, active_only=active_only)
 
     def element_block(self, block_id: int) -> Block:
-        """Return element block metadata."""
+        """Return metadata for an element block.
+
+        Parameters
+        ----------
+        block_id : int
+            Exodus element block ID.
+
+        Returns
+        -------
+        Block
+            Metadata dataclass; see :meth:`block` for field descriptions.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     b = f.element_block(1)
+        ...     print(b.element_type, b.count)
+        HEX8 512
+        """
 
         return self.block(Entity.ELEMENT_BLOCK, block_id)
 
     def edge_block(self, block_id: int) -> Block:
-        """Return edge block metadata."""
+        """Return metadata for an edge block.
+
+        Parameters
+        ----------
+        block_id : int
+            Exodus edge block ID.
+
+        Returns
+        -------
+        Block
+            Metadata dataclass; see :meth:`block` for field descriptions.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     b = f.edge_block(1)
+        ...     print(b.count)
+        128
+        """
 
         return self.block(Entity.EDGE_BLOCK, block_id)
 
     def face_block(self, block_id: int) -> Block:
-        """Return face block metadata."""
+        """Return metadata for a face block.
+
+        Parameters
+        ----------
+        block_id : int
+            Exodus face block ID.
+
+        Returns
+        -------
+        Block
+            Metadata dataclass; see :meth:`block` for field descriptions.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     b = f.face_block(1)
+        ...     print(b.count)
+        256
+        """
 
         return self.block(Entity.FACE_BLOCK, block_id)
 
     def element_connectivity(
         self, block_id: int, *, zero_based: bool = False
     ) -> npt.NDArray[np.int64]:
-        """Return element nodal connectivity for a block."""
+        """Return the nodal connectivity table for an element block.
+
+        Parameters
+        ----------
+        block_id : int
+            Exodus element block ID.
+        zero_based : bool, optional
+            When ``True``, node indices are shifted to 0-based so the array
+            can be used directly as NumPy indices.  Default is ``False``
+            (Exodus 1-based convention).
+
+        Returns
+        -------
+        ndarray of int64, shape (n_elems, nodes_per_elem)
+            Connectivity table; each row contains the node IDs of one element.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     conn = f.element_connectivity(1, zero_based=True)
+        ...     print(conn.shape)
+        (512, 8)
+        """
 
         return self.block_connectivity(Entity.ELEMENT_BLOCK, block_id, zero_based=zero_based)
 
@@ -648,12 +1270,62 @@ class ExodusFile:
         return self.block_connectivity(Entity.FACE_BLOCK, block_id, zero_based=zero_based)
 
     def node_set(self, set_id: int) -> SetInfo:
-        """Return node-set metadata and entries."""
+        """Return metadata and entries for a node set.
+
+        Parameters
+        ----------
+        set_id : int
+            Exodus node set ID.
+
+        Returns
+        -------
+        SetInfo
+            Frozen dataclass with the following useful attributes:
+
+            * ``nodes`` — ``int64`` array of node IDs belonging to the set.
+            * ``dist_facts`` — ``float64`` distribution factor array, or
+              ``None`` if no distribution factors are stored.
+            * ``count`` — number of nodes.
+            * ``name`` — optional string name of the set.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     ns = f.node_set(1)
+        ...     print(ns.nodes[:5])
+        [3 7 12 18 25]
+        """
 
         return self.set(Entity.NODE_SET, set_id)
 
     def side_set(self, set_id: int) -> SetInfo:
-        """Return side-set metadata and entries."""
+        """Return metadata and entries for a side set.
+
+        Parameters
+        ----------
+        set_id : int
+            Exodus side set ID.
+
+        Returns
+        -------
+        SetInfo
+            Frozen dataclass with the following useful attributes:
+
+            * ``elems`` — ``int64`` array of element IDs for each side.
+            * ``sides`` — ``int64`` array of local side numbers (one per
+              entry in ``elems``).
+            * ``dist_facts`` — ``float64`` distribution factor array, or
+              ``None`` if absent.
+            * ``count`` — number of sides.
+            * ``name`` — optional string name of the set.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     ss = f.side_set(10)
+        ...     print(ss.elems[:3], ss.sides[:3])
+        [5 6 7] [2 2 3]
+        """
 
         return self.set(Entity.SIDE_SET, set_id)
 
@@ -673,17 +1345,83 @@ class ExodusFile:
         return self.set(Entity.ELEMENT_SET, set_id)
 
     def edge_block_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return edge block IDs."""
+        """Return all edge block IDs.
+
+        Parameters
+        ----------
+        active_only : bool, optional
+            When ``True``, return only IDs whose status flag is non-zero.
+            Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of edge block IDs.  Returns an empty array if none exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.edge_block_ids())
+        [1]
+        """
 
         return self.block_ids(Entity.EDGE_BLOCK, active_only=active_only)
 
     def face_block_ids(self, *, active_only: bool = False) -> npt.NDArray[np.int64]:
-        """Return face block IDs."""
+        """Return all face block IDs.
+
+        Parameters
+        ----------
+        active_only : bool, optional
+            When ``True``, return only IDs whose status flag is non-zero.
+            Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64
+            Array of face block IDs.  Returns an empty array if none exist.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.face_block_ids())
+        [1]
+        """
 
         return self.block_ids(Entity.FACE_BLOCK, active_only=active_only)
 
     def property_names(self, on: Entity | str) -> tuple[str, ...]:
-        """Return property names for a block or set entity."""
+        """Return the names of user-defined properties for a block or set.
+
+        Properties are integer scalars attached to each block or set and are
+        accessed by name.  The first property is always ``"ID"`` (the Exodus
+        ID itself).
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block or set entity type.  Must be a block (``"element_block"``,
+            ``"edge_block"``, ``"face_block"``) or set (``"node_set"``,
+            ``"side_set"``, etc.) entity.
+
+        Returns
+        -------
+        tuple of str
+            Property names in file order.  Returns an empty tuple when no
+            property variables are found or the entity type does not support
+            properties.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a block or set entity type.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.property_names("element_block"))
+        ('ID', 'MATL', 'REGION')
+        """
 
         ent = entity(on)
 
@@ -719,7 +1457,33 @@ class ExodusFile:
         return tuple(names)
 
     def property_values(self, on: Entity | str, name: str) -> npt.NDArray[np.int64]:
-        """Return all values for one property."""
+        """Return all values for a named property across all blocks or sets.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block or set entity type.
+        name : str
+            Property name (case-insensitive).
+
+        Returns
+        -------
+        ndarray of int64
+            One value per block (or set), in file order.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a block or set entity.
+        ExodusLookupError
+            If *name* does not match any property name.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.property_values("element_block", "MATL"))
+        [101 102 102]
+        """
 
         ent = entity(on)
         property_index = self._property_index(ent, name)
@@ -740,7 +1504,36 @@ class ExodusFile:
         return np.asarray(self._backend.variable(variable_name, default=[]), dtype=np.int64)
 
     def property_value(self, on: Entity | str, id_value: int, name: str) -> int:
-        """Return one property value for a block or set ID."""
+        """Return the value of a named property for a single block or set ID.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block or set entity type.
+        id_value : int
+            Exodus block or set ID.
+        name : str
+            Property name (case-insensitive).
+
+        Returns
+        -------
+        int
+            The integer property value for the specified block/set ID.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a block or set entity.
+        ExodusLookupError
+            If *name* or *id_value* is not found.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     matl = f.property_value("element_block", 1, "MATL")
+        ...     print(matl)
+        101
+        """
 
         ent = entity(on)
         values = self.property_values(ent, name)
@@ -763,7 +1556,33 @@ class ExodusFile:
         raise ExodusLookupError(f"property {name!r} not found for {ent.value}")
 
     def variable_names(self, on: Entity | str) -> tuple[str, ...]:
-        """Return result variable names for a location."""
+        """Return result variable names for a given entity location.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Entity location.  Must be a variable location: ``"global"``,
+            ``"node"``, ``"element"``, ``"edge"``, ``"face"``,
+            ``"node_set"``, ``"side_set"``, ``"edge_set"``, ``"face_set"``,
+            or ``"element_set"``.
+
+        Returns
+        -------
+        tuple of str
+            Variable names in file order, empty strings stripped.  Returns an
+            empty tuple when no variables of that type exist.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a valid variable location.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.variable_names("node"))
+        ('temperature', 'pressure', 'DISPLX', 'DISPLY', 'DISPLZ')
+        """
 
         ent = entity(on)
         if not ent.is_variable_location:
@@ -789,15 +1608,49 @@ class ExodusFile:
     def variable_truth_table(
         self, on: Entity | str, *, id: int | None = None
     ) -> npt.NDArray[np.int64] | None:
-        """Return variable truth table for block/set variables.
+        """Return the variable truth table for block or set result variables.
 
-        When no explicit truth table is stored in the file, the table is derived
-        dynamically by probing whether each per-block/set result variable exists in
-        the NetCDF file — matching the behaviour of ``ex_get_truth_table`` in the
-        SEACAS C library (``ex_get_truth_table.c:162–178``).
+        When no explicit truth table is stored in the file, the table is
+        derived dynamically by probing whether each per-block/set result
+        variable exists in the NetCDF file — matching the behaviour of
+        ``ex_get_truth_table`` in the SEACAS C library
+        (``ex_get_truth_table.c:162–178``).
 
-        Returns ``None`` only when the entity type does not support a truth table
-        (e.g. ``Entity.GLOBAL``).
+        Returns ``None`` only when the entity type does not support a truth
+        table (e.g. ``Entity.GLOBAL``).
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block or set variable location (e.g. ``"element"``,
+            ``"node_set"``).
+        id : int, optional
+            When provided, return only the single row of the truth table
+            corresponding to the block or set with this Exodus ID.  When
+            omitted the full 2-D table is returned.
+
+        Returns
+        -------
+        ndarray of int64 or None
+            * Full table: shape ``(n_blocks_or_sets, n_vars)``, values 0 or 1.
+            * Single row (when *id* is given): shape ``(n_vars,)``.
+            * ``None`` when the entity type has no truth table.
+
+        Examples
+        --------
+        Return the full element truth table:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     tt = f.variable_truth_table("element")
+        ...     print(tt.shape)
+        (3, 5)
+
+        Return the row for a single element block:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     row = f.variable_truth_table("element", id=2)
+        ...     print(row)
+        [1 1 0 1 1]
         """
 
         ent = entity(on)
@@ -875,7 +1728,107 @@ class ExodusFile:
         block_id: int | None = None,
         set_id: int | None = None,
     ) -> npt.NDArray[np.float64]:
-        """Return result variable values."""
+        """Return result variable values for any entity location.
+
+        This is the primary method for reading simulation output.  It
+        dispatches to the appropriate internal reader based on *on* and
+        returns either a full time history or a snapshot at a single step.
+
+        Parameters
+        ----------
+        name : str
+            Variable name as it appears in the file (case-insensitive lookup
+            is attempted after an exact-match failure).
+        on : Entity or str
+            Entity location.  Accepted values: ``"global"``, ``"node"``,
+            ``"element"``, ``"edge"``, ``"face"``, ``"node_set"``,
+            ``"side_set"``, ``"edge_set"``, ``"face_set"``,
+            ``"element_set"``.
+        time : TimeSelector, optional
+            Time step selector.  May be:
+
+            * ``None`` (default) — return values for **all** time steps.
+            * A ``float`` — select the step whose time is nearest to this
+              physical value.
+            * An ``int`` — select by 0-based step index.
+        block_id : int, optional
+            For element/edge/face variables, restrict output to a single
+            block with this Exodus ID.  When omitted, values from all blocks
+            are concatenated along the entity axis.
+        block : int, optional
+            Alias for *block_id*.  If both are supplied, *block_id* takes
+            precedence.
+        set_id : int, optional
+            For set variables (node set, side set, etc.), restrict output to
+            a single set with this Exodus ID.  When omitted, values from all
+            sets are concatenated.
+
+        Returns
+        -------
+        ndarray of float64
+            Shape depends on the combination of arguments:
+
+            * **Global** — ``(n_steps,)`` (full history) or scalar-like
+              ``(1,)`` / ``float`` (single step).
+            * **Nodal / per-block / per-set with** ``time=None`` —
+              ``(n_steps, n_entities)`` where *n_entities* is the node count,
+              per-block element count, or set entry count.
+            * **Nodal / per-block / per-set at a single time** —
+              ``(n_entities,)``.
+            * **Multi-block concatenation** (no *block_id*) with
+              ``time=None`` — ``(n_steps, total_entities)``.
+            * **Multi-block concatenation** at a single time —
+              ``(total_entities,)``.
+
+        Notes
+        -----
+        *block* is a historical alias for *block_id*; new code should prefer
+        *block_id*.  All parameters after *name* are keyword-only.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *name* is not found in the variable list for *on*.
+        NotImplementedError
+            If values for the requested entity type are not yet implemented.
+
+        Examples
+        --------
+        Global variable — full history:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     ke = f.values("kinetic_energy", on="global")
+        ...     ke.shape
+        (50,)
+
+        Nodal temperature at a specific time:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     temp = f.values("temperature", on="node", time=0.5)
+        ...     temp.shape
+        (1024,)
+
+        Element stress in a single block, full history:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     sig = f.values("stress_xx", on="element", block_id=1)
+        ...     sig.shape
+        (50, 512)
+
+        Element stress concatenated across all blocks at time 1.0:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     sig = f.values("stress_xx", on="element", time=1.0)
+        ...     sig.shape
+        (2048,)
+
+        Node-set variable at a single time step:
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     flux = f.values("heat_flux", on="node_set", set_id=1, time=0.1)
+        ...     flux.shape
+        (64,)
+        """
 
         ent = entity(on)
 
@@ -899,7 +1852,34 @@ class ExodusFile:
         raise NotImplementedError(f"values for {ent.value!r} are not implemented yet")
 
     def attribute_names(self, on: Entity | str, block_id: int) -> tuple[str, ...]:
-        """Return block attribute names."""
+        """Return the names of per-element attributes for a block.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type (``"element_block"``, ``"edge_block"``, or
+            ``"face_block"``).
+        block_id : int
+            Exodus block ID.
+
+        Returns
+        -------
+        tuple of str
+            Attribute names in file order, empty strings omitted.  Returns an
+            empty tuple when no attribute name variable is present or the
+            block has no attributes.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a block entity.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     print(f.attribute_names("element_block", 1))
+        ('density', 'youngs_modulus')
+        """
 
         ent = entity(on)
         if not ent.is_block:
@@ -924,7 +1904,35 @@ class ExodusFile:
         return tuple(name for name in _decode_name_table(values, expected_count=expected) if name)
 
     def attributes(self, on: Entity | str, block_id: int) -> npt.NDArray[np.float64] | None:
-        """Return all block attributes as ``(entity_count, attribute_count)``."""
+        """Return all per-element attributes for a block as a 2-D array.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type (``"element_block"``, ``"edge_block"``, or
+            ``"face_block"``).
+        block_id : int
+            Exodus block ID.
+
+        Returns
+        -------
+        ndarray of float64, shape (entity_count, attribute_count) or None
+            Attribute matrix where rows correspond to elements (or
+            edges/faces) and columns correspond to named attributes.  Returns
+            ``None`` when the block has no attribute data.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is not a block entity.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     attrs = f.attributes("element_block", 1)
+        ...     attrs.shape
+        (512, 2)
+        """
 
         ent = entity(on)
         if not ent.is_block:
@@ -944,7 +1952,34 @@ class ExodusFile:
     def attribute_values(
         self, on: Entity | str, block_id: int, name: str
     ) -> npt.NDArray[np.float64]:
-        """Return one block attribute column by name."""
+        """Return the values of a single named attribute for all elements in a block.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type.
+        block_id : int
+            Exodus block ID.
+        name : str
+            Attribute name (case-insensitive).
+
+        Returns
+        -------
+        ndarray of float64, shape (entity_count,)
+            One value per element (or edge/face) in the block.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *name* does not match any attribute name for the block.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     rho = f.attribute_values("element_block", 1, "density")
+        ...     rho.shape
+        (512,)
+        """
 
         names = self.attribute_names(on, block_id)
         requested = name.lower()

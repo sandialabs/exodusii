@@ -2,7 +2,72 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Modern Python interface for Exodus II finite element databases."""
+"""Modern Python interface for Exodus II finite element databases.
+
+exodusii provides a clean, NumPy-based API for reading, writing, querying,
+comparing, and inspecting Sandia Exodus II finite-element databases, which are
+NetCDF files produced by simulation codes such as Sierra, Alegra, and many
+open-source solvers.
+
+Primary entry points
+--------------------
+:class:`ExodusFile`
+    Read an Exodus database: coordinates, connectivity, result variables,
+    sets, blocks, and time history.
+:class:`ExodusWriter`
+    Create a new Exodus database from NumPy arrays.
+:class:`ParallelExodusFile`
+    Aggregate decomposed parallel (Nemesis) component files into a single
+    logical database by merging global ID maps.
+:func:`diff`
+    Compare two databases with exodiff-style per-variable tolerance checking.
+:func:`query`
+    Extract result variables as structured NumPy arrays.
+:func:`allclose` / :func:`similar`
+    Quick data-equality and layout-similarity checks.
+:func:`copy` / :func:`copy_file`
+    Copy database contents between files.
+
+Quick start
+-----------
+Read a database and extract values::
+
+    import exodusii
+
+    with exodusii.ExodusFile.open("mesh.exo") as exo:
+        times  = exo.times()
+        coords = exo.coordinates()
+        temp   = exo.values("TEMP", on="node", time="last")
+
+Write a minimal mesh::
+
+    import numpy as np
+    import exodusii
+
+    coords = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+    with exodusii.ExodusWriter.create("out.exo") as w:
+        w.initialize("title", 2, 4, 1, element_blocks=1)
+        w.write_coordinates(coords)
+        w.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        w.define_node_variables(["TEMP"])
+        w.write_time(0.0)
+        w.write_node_values("TEMP", [100.0, 200.0, 300.0, 400.0])
+
+Compare two databases::
+
+    result = exodusii.diff("gold.exo", "test.exo")
+    if not result:
+        for vd in result.variable_diffs:
+            print(f"{vd.entity}/{vd.name}: max_delta={vd.max_delta:.3e}")
+
+Notes
+-----
+Requires Python >= 3.13 and the ``netCDF4`` package.
+
+Exodus II is a finite-element data model developed at Sandia National
+Laboratories.  For the binary format specification see the SEACAS project
+at https://github.com/sandialabs/seacas.
+"""
 
 import importlib
 from importlib.metadata import PackageNotFoundError

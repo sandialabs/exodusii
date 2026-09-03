@@ -2,7 +2,25 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Copy Exodus database contents between modern API objects."""
+"""Copy Exodus database contents between modern API objects.
+
+This module provides two public entry points:
+
+* :func:`copy` — copies supported Exodus contents from any source object
+  that exposes the standard exodusii read API into an open
+  :class:`~exodusii.api.writer.ExodusWriter`.
+* :func:`copy_file` — convenience wrapper that opens a source
+  :class:`~exodusii.api.file.ExodusFile` (or accepts an already-open one),
+  creates a new :class:`~exodusii.api.writer.ExodusWriter` at *target*, calls
+  :func:`copy`, and returns the target path string.
+
+Copied content includes nodal coordinates, element/edge/face block
+connectivity and attributes, node sets and side sets (and the higher-order
+edge-set, face-set, and element-set families when present), all result
+variables (global, nodal, element, edge, face, and set variables) across
+every time step, QA records, info records, block/set properties, and
+block/set active-status arrays.
+"""
 
 from pathlib import Path
 from typing import Any
@@ -16,7 +34,55 @@ from exodusii.core.schema import variable_spec
 
 
 def copy(source: Any, target: ExodusWriter) -> None:
-    """Copy supported Exodus contents from ``source`` to ``target``."""
+    """Copy supported Exodus contents from *source* into *target*.
+
+    Reads all mesh topology and result-variable data from *source* using the
+    standard exodusii read API and writes it to the already-opened *target*
+    writer.  The writer must not yet have been initialized; :func:`copy`
+    calls ``target.initialize`` internally.
+
+    Parameters
+    ----------
+    source : any
+        Any object that exposes the standard exodusii read API, including
+        :class:`~exodusii.api.file.ExodusFile` and legacy
+        ``ExodusIIFile`` instances.  The following attributes and methods
+        are required: ``title``, ``dimension``, ``node_count``,
+        ``element_count``, ``element_block_count``, ``node_set_count``,
+        ``side_set_count``, ``edge_count``, ``face_count``,
+        ``coordinates()``, ``coordinate_names()``,
+        ``element_block_ids()``, ``node_set_ids()``, ``side_set_ids()``,
+        ``variable_names(entity)``, ``variable_truth_table(entity)``,
+        ``values(name, on, ...)``, and ``times()``.
+    target : ExodusWriter
+        An open, not-yet-initialized writer object.  Typically obtained
+        via :meth:`ExodusWriter.create`.
+
+    Notes
+    -----
+    The following data are copied:
+
+    * Mesh initialization parameters (title, dimension, counts).
+    * Nodal coordinates and coordinate names.
+    * Node, element, edge, and face ID maps (when present).
+    * Element, edge, and face block definitions (type, connectivity,
+      per-block attributes, and attribute names).
+    * Node sets, side sets, edge sets, face sets, and element sets
+      (including entries, distribution factors, and names).
+    * Variable definitions and truth tables for all entity types.
+    * Complete time-step history for all result variables.
+    * Block and set active-status arrays.
+    * Info records and QA records.
+    * Block and set user-defined properties.
+
+    Examples
+    --------
+    >>> from exodusii.api.file import ExodusFile
+    >>> from exodusii.api.writer import ExodusWriter
+    >>> with ExodusFile.open("source.exo") as src:
+    ...     with ExodusWriter.create("dest.exo") as dst:
+    ...         copy(src, dst)
+    """
 
     target.initialize(
         source.title,
@@ -49,7 +115,33 @@ def copy(source: Any, target: ExodusWriter) -> None:
 
 
 def copy_file(source: str | Path | ExodusFile, target: str | Path) -> str:
-    """Copy a source Exodus file to ``target`` and return target path."""
+    """Copy a source Exodus file to *target* and return the target path string.
+
+    Opens *source* if it is not already an :class:`~exodusii.api.file.ExodusFile`,
+    creates a new Exodus file at *target*, copies all supported data using
+    :func:`copy`, and returns ``str(target)``.
+
+    Parameters
+    ----------
+    source : str or Path or ExodusFile
+        Source Exodus file.  A path string or :class:`~pathlib.Path` is
+        opened automatically; an already-open :class:`ExodusFile` is used
+        directly and is *not* closed by this function.
+    target : str or Path
+        Destination path for the new Exodus file.  The file is created (or
+        overwritten) by :meth:`ExodusWriter.create`.
+
+    Returns
+    -------
+    str
+        String representation of *target*.
+
+    Examples
+    --------
+    >>> out = copy_file("original.exo", "/tmp/copy.exo")
+    >>> print(out)
+    /tmp/copy.exo
+    """
 
     close_source = False
     if isinstance(source, ExodusFile):

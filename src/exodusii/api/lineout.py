@@ -2,7 +2,27 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Lineout filtering for tabular Exodus data."""
+"""Lineout filtering for tabular Exodus data.
+
+A *lineout* extracts a 1-D profile from multi-dimensional mesh data by
+restricting rows to those whose coordinates fall within a tolerance of a
+fixed value along one or more axes, then sorting the surviving rows along
+the free (unrestricted) axis.
+
+The primary interface is the :class:`Lineout` dataclass.  The
+:func:`lineout` factory function provides a convenient lower-case alias
+for constructing one.
+
+Typical usage with :func:`~exodusii.api.query.query`:
+
+.. code-block:: python
+
+    from exodusii.api.lineout import Lineout
+    from exodusii.api.query import query
+
+    lo = Lineout(y=0.5)          # fix y = 0.5, sweep along x
+    result = query(exo, "n/TEMP", time="last", lineout=lo)
+"""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -14,13 +34,51 @@ import numpy.typing as npt
 
 @dataclass(slots=True)
 class Lineout:
-    """Restrict rows to points along a line parallel to an axis.
+    """Restrict rows to points along a line parallel to a coordinate axis.
 
-    Coordinate specifications may be:
+    A :class:`Lineout` holds one specification per spatial axis (``x``,
+    ``y``, ``z``).  Each specification is either:
 
-    - ``"x"``, ``"y"``, ``"z"`` for free material coordinates
-    - ``"X"``, ``"Y"``, ``"Z"`` for free displaced coordinates
-    - floats for restricted coordinates
+    * A ``float`` — the axis is *restricted*: only rows within *tol* of
+      that value are retained, and the corresponding coordinate column is
+      removed from the output.
+    * The lowercase axis name string (``"x"``, ``"y"``, ``"z"``) — the
+      axis is *free*: rows are sorted along this axis (ascending) and the
+      coordinate column is kept.
+    * The uppercase axis name string (``"X"``, ``"Y"``, ``"Z"``) — same as
+      lowercase but uses *displaced* coordinates (material coordinates plus
+      displacements).
+    * ``None`` — axis is not present or irrelevant.
+
+    Parameters
+    ----------
+    x : float or str or None, optional
+        Specification for the x-axis.  A float fixes x; ``"x"`` or ``"X"``
+        marks x as the free sweep axis.  Default ``None``.
+    y : float or str or None, optional
+        Specification for the y-axis.  Default ``None``.
+    z : float or str or None, optional
+        Specification for the z-axis.  Default ``None``.
+    tol : float or None, optional
+        Absolute spatial tolerance used when filtering restricted axes.
+        If ``None`` (default), a tolerance is computed automatically from
+        the bounding box of the restricted coordinate column(s):
+        ``tol = 1e-4 * max(upper - lower, 1e-30)``.
+
+    Examples
+    --------
+    Fix y at 0.5, sweep along x (2-D mesh):
+
+    >>> lo = Lineout(y=0.5)
+    >>> result = lo.apply(structured_array)
+
+    Fix x = 1.0 and z = 0.0, sweep along displaced y (3-D):
+
+    >>> lo = Lineout(x=1.0, y="Y", z=0.0)
+
+    Fix y = 0.5 with explicit tolerance:
+
+    >>> lo = Lineout(y=0.5, tol=1e-3)
     """
 
     x: float | str | None = None
@@ -75,7 +133,42 @@ class Lineout:
 
     @staticmethod
     def read_spatial_spec(spec: str | None, coord: str) -> float | str | None:
-        """Parse one spatial specifier."""
+        """Parse one spatial specifier string into a float or axis name.
+
+        Parameters
+        ----------
+        spec : str or None
+            The raw specifier token from the command-line string.  ``None``
+            is passed through unchanged.  A token that can be converted to
+            a ``float`` is returned as a float (restricted axis).  A token
+            equal to *coord* or its uppercase counterpart is returned as-is
+            (free axis, material or displaced coordinates respectively).
+        coord : str
+            The expected lowercase axis name for this position, e.g.
+            ``"x"``, ``"y"``, or ``"z"``.
+
+        Returns
+        -------
+        float or str or None
+            * ``float`` — restricted axis value.
+            * ``str`` — free-axis marker (``coord`` or ``coord.upper()``).
+            * ``None`` — when *spec* is ``None``.
+
+        Raises
+        ------
+        ValueError
+            When *spec* is not ``None``, not parseable as a float, and not
+            equal (case-insensitively) to *coord*.
+
+        Examples
+        --------
+        >>> Lineout.read_spatial_spec("1.5", "x")
+        1.5
+        >>> Lineout.read_spatial_spec("y", "y")
+        'y'
+        >>> Lineout.read_spatial_spec("Y", "y")
+        'Y'
+        """
 
         if spec is None:
             return None
@@ -179,7 +272,25 @@ class Lineout:
         return output_header, output_data
 
     def compute_tol_from_bounding_box(self, data: npt.ArrayLike) -> float:
-        """Compute default tolerance from restricted coordinate extents."""
+        """Compute a default spatial tolerance from the extent of restricted axes.
+
+        For each restricted axis (those whose specification is a ``float``),
+        the coordinate range is computed and the tolerance is set to
+        ``1e-4 * max(upper - lower, 1e-30)``.  The minimum across all
+        restricted axes is returned.
+
+        Parameters
+        ----------
+        data : array_like
+            Two-dimensional array of shape ``(n_rows, n_dims)`` containing
+            the coordinate columns that correspond to :attr:`spec`.
+
+        Returns
+        -------
+        float
+            Computed tolerance.  Returns ``0.0`` when *data* is empty or no
+            axis has a float specification.
+        """
 
         array = np.asarray(data, dtype=np.float64)
         if array.ndim != 2:
@@ -204,7 +315,40 @@ def lineout(
     z: float | str | None = None,
     tol: float | None = None,
 ) -> Lineout:
-    """Factory preserving the old lowercase constructor name."""
+    """Create a :class:`Lineout` using keyword arguments.
+
+    Factory function that preserves the original lowercase constructor name
+    and provides a convenient keyword-only interface.
+
+    Parameters
+    ----------
+    x : float or str or None, optional
+        X-axis specification.  A float restricts to that x value; ``"x"``
+        or ``"X"`` marks x as the free sweep axis (displaced for uppercase).
+        Default ``None``.
+    y : float or str or None, optional
+        Y-axis specification.  Default ``None``.
+    z : float or str or None, optional
+        Z-axis specification.  Default ``None``.
+    tol : float or None, optional
+        Explicit spatial tolerance.  If ``None`` (default), the tolerance
+        is derived automatically from the bounding box.
+
+    Returns
+    -------
+    Lineout
+        A new :class:`Lineout` instance.
+
+    Examples
+    --------
+    Sweep along x, fix y = 0.25 in a 2-D mesh:
+
+    >>> lo = lineout(y=0.25)
+
+    Sweep along y, fix x = 1.0 and z = 0.0 with an explicit tolerance:
+
+    >>> lo = lineout(x=1.0, z=0.0, tol=5e-4)
+    """
 
     return Lineout(x=x, y=y, z=z, tol=tol)
 

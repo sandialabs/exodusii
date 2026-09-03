@@ -2,7 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Exodus entity types and string normalization."""
+"""Exodus entity types and string normalization.
+
+Defines the :class:`Entity` enumeration that identifies every object and
+variable-storage location in an Exodus database, together with the
+:func:`entity` normalization function that converts the many accepted string
+aliases to their canonical :class:`Entity` member.
+"""
 
 from enum import StrEnum
 
@@ -12,8 +18,66 @@ from exodusii.core.errors import ExodusInvalidEntityError
 class Entity(StrEnum):
     """Exodus entity locations.
 
-    The public API accepts strings for ease of use. Internally, strings should be
-    normalized to this enum.
+    The public API accepts strings for ease of use.  Internally, strings
+    should be normalized to this enum using :func:`entity`.  Because
+    :class:`Entity` inherits from :class:`~enum.StrEnum`, members compare
+    equal to their string values (e.g. ``Entity.NODE == "node"``).
+
+    Notes
+    -----
+    Full list of members and their roles:
+
+    GLOBAL
+        Database-wide scalar variables; not associated with any mesh object.
+    NODE
+        Nodal locations; variable storage and object counting.
+    ELEMENT
+        Element locations.
+    EDGE
+        Edge locations.
+    FACE
+        Face locations.
+    ELEMENT_BLOCK
+        Element block descriptor; groups elements of the same topology.
+    EDGE_BLOCK
+        Edge block descriptor.
+    FACE_BLOCK
+        Face block descriptor.
+    NODE_SET
+        Named collection of node IDs.
+    SIDE_SET
+        Named collection of (element, side) pairs.
+    EDGE_SET
+        Named collection of edge IDs.
+    FACE_SET
+        Named collection of face IDs.
+    ELEMENT_SET
+        Named collection of element IDs.
+    NODE_MAP
+        Optional renumbering map for nodes.
+    ELEMENT_MAP
+        Optional renumbering map for elements.
+    EDGE_MAP
+        Optional renumbering map for edges.
+    FACE_MAP
+        Optional renumbering map for faces.
+
+    Examples
+    --------
+    Direct member access:
+
+    >>> Entity.NODE
+    <Entity.NODE: 'node'>
+    >>> Entity.NODE == "node"
+    True
+
+    Parse from a string alias via :func:`entity`:
+
+    >>> from exodusii.core.entities import entity
+    >>> entity("elem")
+    <Entity.ELEMENT: 'element'>
+    >>> entity("side_set")
+    <Entity.SIDE_SET: 'side_set'>
     """
 
     GLOBAL = "global"
@@ -39,37 +103,81 @@ class Entity(StrEnum):
 
     @property
     def short_name(self) -> str:
-        """Return the compact one-letter selector used by the legacy API."""
+        """Return the compact one-letter selector used by the legacy API.
+
+        Returns
+        -------
+        str
+            A short string identifier for this entity, such as ``"n"`` for
+            nodes, ``"e"`` for elements, ``"ss"`` for side sets, etc.
+            These match the prefixes used by legacy Exodus selector strings
+            (e.g. ``"n/DISPLX"``).
+        """
 
         return _ENTITY_SHORT_NAMES[self]
 
     @property
     def is_variable_location(self) -> bool:
-        """Return whether variables can naturally be stored on this entity."""
+        """Return ``True`` if variables can naturally be stored on this entity.
+
+        Returns
+        -------
+        bool
+            ``True`` for ``GLOBAL``, ``NODE``, ``ELEMENT``, ``EDGE``,
+            ``FACE``, ``NODE_SET``, ``SIDE_SET``, ``EDGE_SET``, ``FACE_SET``,
+            and ``ELEMENT_SET``; ``False`` for block and map entities.
+        """
 
         return self in _VARIABLE_LOCATIONS
 
     @property
     def is_object(self) -> bool:
-        """Return whether this entity is a mesh object location."""
+        """Return ``True`` if this entity is a mesh object location.
+
+        Returns
+        -------
+        bool
+            ``True`` for ``NODE``, ``ELEMENT``, ``EDGE``, and ``FACE``.
+        """
 
         return self in _OBJECT_ENTITIES
 
     @property
     def is_block(self) -> bool:
-        """Return whether this entity is a block entity."""
+        """Return ``True`` if this entity is a block entity.
+
+        Returns
+        -------
+        bool
+            ``True`` for ``ELEMENT_BLOCK``, ``EDGE_BLOCK``, and
+            ``FACE_BLOCK``.
+        """
 
         return self in _BLOCK_ENTITIES
 
     @property
     def is_set(self) -> bool:
-        """Return whether this entity is a set entity."""
+        """Return ``True`` if this entity is a set entity.
+
+        Returns
+        -------
+        bool
+            ``True`` for ``NODE_SET``, ``SIDE_SET``, ``EDGE_SET``,
+            ``FACE_SET``, and ``ELEMENT_SET``.
+        """
 
         return self in _SET_ENTITIES
 
     @property
     def is_map(self) -> bool:
-        """Return whether this entity is a map entity."""
+        """Return ``True`` if this entity is a map entity.
+
+        Returns
+        -------
+        bool
+            ``True`` for ``NODE_MAP``, ``ELEMENT_MAP``, ``EDGE_MAP``, and
+            ``FACE_MAP``.
+        """
 
         return self in _MAP_ENTITIES
 
@@ -234,19 +342,42 @@ def entity(value: Entity | str) -> Entity:
 
     Parameters
     ----------
-    value
+    value : Entity or str
         An :class:`Entity` or a string alias such as ``"node"``, ``"n"``,
         ``"element"``, ``"elem"``, ``"side set"``, or ``"side_set"``.
+        String lookup is case-insensitive; hyphens and spaces are treated
+        as underscores.
 
     Returns
     -------
     Entity
-        The normalized entity enum.
+        The normalized entity enum member.
 
     Raises
     ------
     ExodusInvalidEntityError
-        If the entity is not recognized.
+        If the entity is not recognized, or if ``value`` is neither an
+        :class:`Entity` nor a ``str``.
+
+    Examples
+    --------
+    Pass-through for an existing :class:`Entity`:
+
+    >>> entity(Entity.NODE)
+    <Entity.NODE: 'node'>
+
+    Normalize common string aliases:
+
+    >>> entity("n")
+    <Entity.NODE: 'node'>
+    >>> entity("elem")
+    <Entity.ELEMENT: 'element'>
+    >>> entity("side set")
+    <Entity.SIDE_SET: 'side_set'>
+    >>> entity("NODE_SET")
+    <Entity.NODE_SET: 'node_set'>
+    >>> entity("edb")
+    <Entity.EDGE_BLOCK: 'edge_block'>
     """
 
     if isinstance(value, Entity):
@@ -268,7 +399,24 @@ def entity(value: Entity | str) -> Entity:
 
 
 def entity_aliases() -> dict[str, Entity]:
-    """Return a copy of the known entity aliases."""
+    """Return a copy of the known entity aliases.
+
+    Returns
+    -------
+    dict of {str: Entity}
+        Mapping from every recognized alias string (lower-cased, with
+        underscores) to its canonical :class:`Entity` member.  The returned
+        dict is a shallow copy; modifying it does not affect the internal
+        alias table.
+
+    Examples
+    --------
+    >>> aliases = entity_aliases()
+    >>> aliases["n"]
+    <Entity.NODE: 'node'>
+    >>> aliases["sset"]
+    <Entity.SIDE_SET: 'side_set'>
+    """
 
     return dict(_ENTITY_ALIASES)
 

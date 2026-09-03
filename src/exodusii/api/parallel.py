@@ -38,15 +38,53 @@ class _FileMaps:
 
 
 class ParallelExodusFile:
-    """Aggregate multiple Exodus files as one logical Exodus database.
+    """Aggregate multiple decomposed Exodus files as one logical Exodus database.
 
-    The aggregation uses Exodus global ID maps where present:
+    Each component file represents a spatial partition of the mesh.
+    Global identity of nodes and elements is recovered from the per-file
+    ``node_num_map`` (``node_id_map``) and ``elem_num_map``
+    (``element_id_map``) variables written by Nemesis decomposers such as
+    ``nem_slice``.  When a map is absent a `UserWarning` is emitted and a
+    sequential fallback is used, which is only correct for non-overlapping
+    partitions without shared border nodes.
 
-    - ``node_num_map`` for node identity
-    - ``elem_num_map`` for element identity
+    The logical output ordering of nodes and elements is determined by
+    sorting their unique global IDs and re-labelling them contiguously
+    starting from 1, matching the layout of a serial joined Exodus file.
 
-    Logical output ordering is sorted by global ID and then re-labeled
-    contiguously for serial-style arrays/connectivity.
+    Parameters
+    ----------
+    *files : str or Path or ExodusFile
+        Component files to aggregate.  Plain path arguments are sorted
+        lexicographically before opening (preserving the behaviour of the
+        legacy ``parallel_exodusii_file`` API).  Already-open
+        :class:`~exodusii.api.file.ExodusFile` instances are used as-is and
+        are *not* closed when the aggregator is closed.
+
+    Raises
+    ------
+    ValueError
+        If no files are supplied.
+    ExodusConsistencyError
+        If spatial dimension, time values, coordinate names, or global/nodal/
+        element variable names differ across component files, or if a map
+        length does not match the declared per-file entity count.
+
+    Examples
+    --------
+    Open two Nemesis component files and read global coordinates:
+
+    >>> pef = ParallelExodusFile("mesh.e.2.0", "mesh.e.2.1")
+    >>> coords = pef.coordinates()
+    >>> coords.shape
+    (1024, 3)
+    >>> pef.close()
+
+    Using the context-manager form:
+
+    >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+    ...     print(pef.node_count)
+    1024
     """
 
     def __init__(self, *files: str | Path | ExodusFile) -> None:
@@ -91,97 +129,244 @@ class ParallelExodusFile:
 
     @classmethod
     def open(cls, *files: str | Path | ExodusFile) -> "ParallelExodusFile":
-        """Open multiple Exodus files."""
+        """Open and aggregate multiple Exodus component files.
+
+        This is the preferred factory method.  It is equivalent to calling
+        the constructor directly but reads more naturally in application code.
+
+        Parameters
+        ----------
+        *files : str or Path or ExodusFile
+            Paths to Exodus/Nemesis component files, or already-open
+            :class:`~exodusii.api.file.ExodusFile` instances.  Path arguments
+            are sorted lexicographically before opening.
+
+        Returns
+        -------
+        ParallelExodusFile
+            Aggregated logical database backed by the supplied component files.
+
+        Examples
+        --------
+        >>> pef = ParallelExodusFile.open("mesh.e.4.0", "mesh.e.4.1",
+        ...                               "mesh.e.4.2", "mesh.e.4.3")
+        >>> pef.node_count
+        4096
+        >>> pef.close()
+        """
 
         return cls(*files)
 
     @property
     def files(self) -> tuple[ExodusFile, ...]:
-        """Component files."""
+        """Component files backing this aggregated database.
+
+        Returns
+        -------
+        tuple of ExodusFile
+            Ordered tuple of :class:`~exodusii.api.file.ExodusFile` instances,
+            one per component file, in the order they were opened (lexicographic
+            for path arguments).
+        """
 
         return tuple(self._files)
 
     @property
     def path(self) -> str:
-        """Comma-separated component paths."""
+        """Comma-separated paths of all component files.
+
+        Returns
+        -------
+        str
+            A single string of the form ``"part0.exo,part1.exo,..."`` built
+            from the :attr:`~exodusii.api.file.ExodusFile.path` attribute of
+            each component file.
+        """
 
         return ",".join(str(file.path) for file in self._files)
 
     @property
     def filename(self) -> str:
-        """Legacy alias for :attr:`path`."""
+        """Legacy alias for :attr:`path`.
+
+        Returns
+        -------
+        str
+            Same value as :attr:`path`.
+        """
 
         return self.path
 
     @property
     def title(self) -> str:
-        """Logical title."""
+        """Logical title of the aggregated database.
+
+        Returns
+        -------
+        str
+            The longest title string found among all component files.  When
+            all component files carry the same title this is that common title.
+        """
 
         return max((file.title for file in self._files), key=len)
 
     @property
     def dimension(self) -> int:
-        """Spatial dimension."""
+        """Spatial dimension of the mesh (2 or 3).
+
+        Returns
+        -------
+        int
+            Spatial dimension taken from the first component file.  All
+            component files are required to share the same spatial dimension;
+            a :exc:`~exodusii.core.errors.ExodusConsistencyError` is raised
+            during construction if they differ.
+        """
 
         return self._files[0].dimension
 
     @property
     def node_count(self) -> int:
-        """Number of unique global nodes."""
+        """Number of unique global nodes across all component files.
+
+        Returns
+        -------
+        int
+            When the Nemesis global dimension ``num_nodes_global`` is present
+            in the first component file that value is returned directly.
+            Otherwise the count is derived from the number of distinct global
+            node IDs assembled from all ``node_num_map`` arrays.
+
+        Notes
+        -----
+        Shared border nodes that appear in more than one component file are
+        counted only once.
+        """
 
         value = self._global_dimension(DimensionName.NUM_NODES_GLOBAL.value)
         return int(value) if value is not None else len(self._node_gid_to_index)
 
     @property
     def edge_count(self) -> int:
-        """Number of edges.
+        """Number of unique global edges across all component files.
 
-        Edge global map support will be added with edge-block support.
+        Returns
+        -------
+        int
+            Number of distinct global edge IDs assembled from all component
+            file ``edge_num_map`` arrays.  Returns 0 when no component file
+            contains edge data.
+
+        Notes
+        -----
+        When ``edge_num_map`` is absent from a component file that has edges a
+        `UserWarning` is emitted and a sequential fallback is used.  The
+        fallback count is only correct for non-overlapping partitions.
         """
         return len(self._edge_gid_to_index)
 
     @property
     def face_count(self) -> int:
-        """Number of faces.
+        """Number of unique global faces across all component files.
 
-        Face global map support will be added with face-block support.
+        Returns
+        -------
+        int
+            Number of distinct global face IDs assembled from all component
+            file ``face_num_map`` arrays.  Returns 0 when no component file
+            contains face data.
+
+        Notes
+        -----
+        When ``face_num_map`` is absent from a component file that has faces a
+        `UserWarning` is emitted and a sequential fallback is used.  The
+        fallback count is only correct for non-overlapping partitions.
         """
         return len(self._face_gid_to_index)
 
     @property
     def element_count(self) -> int:
-        """Number of unique global elements."""
+        """Number of unique global elements across all component files.
+
+        Returns
+        -------
+        int
+            When the Nemesis global dimension ``num_elem_global`` is present in
+            the first component file that value is returned directly.  Otherwise
+            the count is derived from the number of distinct global element IDs
+            assembled from all ``elem_num_map`` arrays.
+        """
 
         value = self._global_dimension(DimensionName.NUM_ELEMENTS_GLOBAL.value)
         return int(value) if value is not None else len(self._element_gid_to_index)
 
     @property
     def element_block_count(self) -> int:
-        """Number of unique element blocks."""
+        """Number of unique element blocks across all component files.
+
+        Returns
+        -------
+        int
+            When the Nemesis global dimension ``num_el_blk_global`` is present
+            in the first component file that value is returned directly.
+            Otherwise ``len(self.element_block_ids())`` is used.
+        """
 
         value = self._global_dimension(DimensionName.NUM_ELEMENT_BLOCKS_GLOBAL.value)
         return int(value) if value is not None else len(self.element_block_ids())
 
     @property
     def node_set_count(self) -> int:
-        """Number of unique node sets."""
+        """Number of unique node sets across all component files.
+
+        Returns
+        -------
+        int
+            When the Nemesis global dimension ``num_ns_global`` is present in
+            the first component file that value is returned directly.  Otherwise
+            ``len(self.node_set_ids())`` is used.
+        """
 
         value = self._global_dimension(DimensionName.NUM_NODE_SETS_GLOBAL.value)
         return int(value) if value is not None else len(self.node_set_ids())
 
     @property
     def side_set_count(self) -> int:
-        """Number of unique side sets."""
+        """Number of unique side sets across all component files.
+
+        Returns
+        -------
+        int
+            When the Nemesis global dimension ``num_ss_global`` is present in
+            the first component file that value is returned directly.  Otherwise
+            ``len(self.side_set_ids())`` is used.
+        """
 
         value = self._global_dimension(DimensionName.NUM_SIDE_SETS_GLOBAL.value)
         return int(value) if value is not None else len(self.side_set_ids())
 
     @property
     def edge_block_count(self) -> int:
+        """Number of unique edge blocks across all component files.
+
+        Returns
+        -------
+        int
+            ``len(self.edge_block_ids())``.  Returns 0 when no component file
+            contains edge-block data.
+        """
         return len(self.edge_block_ids())
 
     @property
     def face_block_count(self) -> int:
+        """Number of unique face blocks across all component files.
+
+        Returns
+        -------
+        int
+            ``len(self.face_block_ids())``.  Returns 0 when no component file
+            contains face-block data.
+        """
         return len(self.face_block_ids())
 
     @property
@@ -191,7 +376,17 @@ class ParallelExodusFile:
         return self._files[0].storage_type
 
     def close(self) -> None:
-        """Close owned component files."""
+        """Close component files that were opened by this instance.
+
+        Notes
+        -----
+        Only files opened internally (i.e. constructed from path arguments) are
+        closed.  :class:`~exodusii.api.file.ExodusFile` instances that were
+        passed in directly by the caller are left open.
+
+        This method is called automatically when the instance is used as a
+        context manager (``with`` statement).
+        """
 
         for file in self._owned:
             file.close()
@@ -203,12 +398,28 @@ class ParallelExodusFile:
         self.close()
 
     def info_records(self) -> tuple[str, ...]:
-        """Return info records from the first component file."""
+        """Return informational text records from the first component file.
+
+        Returns
+        -------
+        tuple of str
+            Each element is one informational record string, as stored in the
+            ``info_records`` variable of the first component file.  Returns an
+            empty tuple when no records are present.
+        """
 
         return self._files[0].info_records()
 
     def qa_records(self) -> tuple[tuple[str, str, str, str], ...]:
-        """Return QA records from the first component file."""
+        """Return quality-assurance records from the first component file.
+
+        Returns
+        -------
+        tuple of tuple of str
+            Each inner tuple contains four strings:
+            ``(code_name, code_version, date, time)``.  Returns an empty tuple
+            when no QA records are present.
+        """
 
         return self._files[0].qa_records()
 
@@ -241,6 +452,25 @@ class ParallelExodusFile:
         return np.asarray(values, dtype=np.int64)
 
     def block_ids(self, on: Entity | str) -> npt.NDArray[np.int64]:
+        """Return unique block IDs for the requested block entity type.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type.  Must be one of ``Entity.ELEMENT_BLOCK``,
+            ``Entity.EDGE_BLOCK``, or ``Entity.FACE_BLOCK`` (or the
+            corresponding string values).
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique block IDs found across all component files.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* does not refer to a block entity type.
+        """
         location = entity(on)
         if location is Entity.ELEMENT_BLOCK:
             return self.element_block_ids()
@@ -251,14 +481,55 @@ class ParallelExodusFile:
         raise ExodusInvalidEntityError(f"{location.value!r} is not a block entity")
 
     def edge_block_ids(self) -> npt.NDArray[np.int64]:
+        """Return unique edge block IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique edge block IDs.  Returns an empty array of
+            shape ``(0,)`` when no component file contains edge blocks.
+        """
         ids = [file.edge_block_ids() for file in self._files if file.edge_count]
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def face_block_ids(self) -> npt.NDArray[np.int64]:
+        """Return unique face block IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique face block IDs.  Returns an empty array of
+            shape ``(0,)`` when no component file contains face blocks.
+        """
         ids = [file.face_block_ids() for file in self._files if file.face_count]
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def block(self, on: Entity | str, block_id: int) -> Block:
+        """Return the logical block descriptor for the given entity type and ID.
+
+        The returned :class:`~exodusii.core.models.Block` reflects the global
+        aggregated state: its ``count`` is the number of unique global objects
+        (elements, edges, or faces) in the block, and its ``index`` is the
+        one-based position of *block_id* within :meth:`block_ids`.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type (``Entity.ELEMENT_BLOCK``, ``Entity.EDGE_BLOCK``,
+            or ``Entity.FACE_BLOCK``).
+        block_id : int
+            Global block ID.
+
+        Returns
+        -------
+        Block
+            Aggregated block descriptor with global object count.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *block_id* is not found in any component file.
+        """
         location = entity(on)
         blocks = [
             file.block(location, block_id)
@@ -293,6 +564,34 @@ class ParallelExodusFile:
     def block_connectivity(
         self, on: Entity | str, block_id: int, *, zero_based: bool = False, labels: bool = False
     ) -> npt.NDArray[np.int64]:
+        """Return the nodal connectivity for a block assembled from all component files.
+
+        Local node IDs from each component file are translated to global node
+        IDs via the per-file ``node_num_map``, then mapped to contiguous
+        one-based indices that correspond to the row ordering of
+        :meth:`coordinates`.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Block entity type (``Entity.ELEMENT_BLOCK``, ``Entity.EDGE_BLOCK``,
+            or ``Entity.FACE_BLOCK``).
+        block_id : int
+            Global block ID.
+        zero_based : bool, optional
+            If ``True``, return zero-based node indices.  Ignored when
+            *labels* is ``True``.  Default is ``False``.
+        labels : bool, optional
+            If ``True``, return raw global node IDs (labels) instead of
+            contiguous positional indices.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64, shape (n_objects, nodes_per_entity)
+            Connectivity table where rows correspond to global objects ordered
+            by ascending global object ID and columns are node indices (or
+            labels when *labels* is ``True``).
+        """
         location = entity(on)
         spec = block_spec(location)
 
@@ -327,6 +626,26 @@ class ParallelExodusFile:
     def edge_connectivity(
         self, block_id: int, *, zero_based: bool = False, labels: bool = False
     ) -> npt.NDArray[np.int64]:
+        """Return the nodal connectivity for an edge block.
+
+        Delegates to :meth:`block_connectivity` with ``on=Entity.EDGE_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global edge block ID.
+        zero_based : bool, optional
+            If ``True``, return zero-based node indices.  Ignored when
+            *labels* is ``True``.  Default is ``False``.
+        labels : bool, optional
+            If ``True``, return raw global node IDs instead of contiguous
+            positional indices.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64, shape (n_edges, nodes_per_edge)
+            Connectivity table for the requested edge block.
+        """
         return self.block_connectivity(
             Entity.EDGE_BLOCK, block_id, zero_based=zero_based, labels=labels
         )
@@ -334,30 +653,146 @@ class ParallelExodusFile:
     def face_connectivity(
         self, block_id: int, *, zero_based: bool = False, labels: bool = False
     ) -> npt.NDArray[np.int64]:
+        """Return the nodal connectivity for a face block.
+
+        Delegates to :meth:`block_connectivity` with ``on=Entity.FACE_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global face block ID.
+        zero_based : bool, optional
+            If ``True``, return zero-based node indices.  Ignored when
+            *labels* is ``True``.  Default is ``False``.
+        labels : bool, optional
+            If ``True``, return raw global node IDs instead of contiguous
+            positional indices.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64, shape (n_faces, nodes_per_face)
+            Connectivity table for the requested face block.
+        """
         return self.block_connectivity(
             Entity.FACE_BLOCK, block_id, zero_based=zero_based, labels=labels
         )
 
     def edge_block(self, block_id: int) -> Block:
+        """Return the logical block descriptor for an edge block.
+
+        Delegates to :meth:`block` with ``on=Entity.EDGE_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global edge block ID.
+
+        Returns
+        -------
+        Block
+            Aggregated edge block descriptor with global edge count.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *block_id* is not found in any component file.
+        """
         return self.block(Entity.EDGE_BLOCK, block_id)
 
     def face_block(self, block_id: int) -> Block:
+        """Return the logical block descriptor for a face block.
+
+        Delegates to :meth:`block` with ``on=Entity.FACE_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global face block ID.
+
+        Returns
+        -------
+        Block
+            Aggregated face block descriptor with global face count.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *block_id* is not found in any component file.
+        """
         return self.block(Entity.FACE_BLOCK, block_id)
 
     def times(self) -> npt.NDArray[np.float64]:
-        """Return shared time values."""
+        """Return the simulation time values shared by all component files.
+
+        Returns
+        -------
+        ndarray of float64, shape (n_steps,)
+            Array of simulation times, one entry per time step.  All component
+            files are required to carry identical time sequences; a
+            :exc:`~exodusii.core.errors.ExodusConsistencyError` is raised
+            during construction when they differ.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     t = pef.times()
+        ...     print(t)
+        [0.   0.1  0.2  0.3]
+        """
 
         return self._files[0].times()
 
     def coordinate_names(self) -> npt.NDArray[np.str_]:
-        """Return coordinate names."""
+        """Return the coordinate axis names.
+
+        Returns
+        -------
+        ndarray of str_, shape (dimension,)
+            Axis labels such as ``["x", "y", "z"]`` or
+            ``["coordx", "coordy", "coordz"]``.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     pef.coordinate_names()
+        array(['x', 'y', 'z'], dtype='<U1')
+        """
 
         return self._files[0].coordinate_names()
 
     def coordinates(
         self, *, time: TimeSelector = None, displaced: bool = False
     ) -> npt.NDArray[np.float64]:
-        """Return coordinates ordered by contiguous global node index."""
+        """Return nodal coordinates ordered by contiguous global node index.
+
+        Local node positions from each component file are placed into the
+        output array using the per-file ``node_num_map`` to resolve global
+        IDs, then the global-to-contiguous-index map to determine output rows.
+
+        Parameters
+        ----------
+        time : TimeSelector, optional
+            Time at which to evaluate displaced coordinates.  Only relevant
+            when *displaced* is ``True``.  ``None`` returns reference
+            (undeformed) coordinates.
+        displaced : bool, optional
+            If ``True``, add displacement variable values to the reference
+            coordinates to return the deformed configuration.  Requires
+            displacement variables to be present.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of float64, shape (node_count, dimension)
+            Nodal coordinate array where row *i* corresponds to the node with
+            contiguous global index *i+1*.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     xyz = pef.coordinates()
+        ...     xyz.shape
+        (1024, 3)
+        """
 
         coords = np.zeros((self.node_count, self.dimension), dtype=np.float64)
 
@@ -372,12 +807,35 @@ class ParallelExodusFile:
         return coords
 
     def displacement_variable_names(self) -> tuple[str, ...]:
-        """Return recognized displacement variable names."""
+        """Return the names of recognized displacement variables.
+
+        Returns
+        -------
+        tuple of str
+            Variable names (e.g. ``("disp_x", "disp_y", "disp_z")``) that the
+            first component file identifies as displacement variables.  Returns
+            an empty tuple when no displacement variables are present.
+        """
 
         return self._files[0].displacement_variable_names()
 
     def displacements(self, *, time: TimeSelector = None) -> npt.NDArray[np.float64]:
-        """Return aggregate nodal displacements."""
+        """Return aggregate nodal displacement vectors.
+
+        Parameters
+        ----------
+        time : TimeSelector, optional
+            Time selector.  ``None`` returns the full time history as a
+            3-D array of shape ``(n_steps, node_count, dimension)``.
+            A specific time value or step index returns a 2-D array of shape
+            ``(node_count, dimension)``.
+
+        Returns
+        -------
+        ndarray of float64, shape (node_count, dimension) or (n_steps, node_count, dimension)
+            Displacement vectors assembled from nodal displacement variables.
+            Returns a zero array when no displacement variables are found.
+        """
 
         names = self.displacement_variable_names()
         if not names:
@@ -386,12 +844,57 @@ class ParallelExodusFile:
         return np.column_stack([self.values(name, on=Entity.NODE, time=time) for name in names])
 
     def variable_names(self, on: Entity | str) -> tuple[str, ...]:
-        """Return variable names for an entity."""
+        """Return the result variable names defined for an entity type.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Entity type whose variable names are requested (e.g.
+            ``Entity.NODE``, ``Entity.ELEMENT``, ``"node"``, ``"element"``).
+
+        Returns
+        -------
+        tuple of str
+            Variable names in the order they are stored in the first component
+            file.  All component files are required to define the same
+            global, nodal, and element variable names; a
+            :exc:`~exodusii.core.errors.ExodusConsistencyError` is raised
+            during construction when they differ.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     pef.variable_names("node")
+        ('disp_x', 'disp_y', 'disp_z', 'velocity_x', 'velocity_y')
+        """
 
         return self._files[0].variable_names(on)
 
     def ids(self, on: Entity | str) -> npt.NDArray[np.int64]:
-        """Return logical IDs for node/element/block/set entities."""
+        """Return logical global IDs for nodes, elements, blocks, or sets.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Entity type.  Supported values: ``Entity.NODE``,
+            ``Entity.ELEMENT``, ``Entity.ELEMENT_BLOCK``,
+            ``Entity.NODE_SET``, ``Entity.SIDE_SET``, ``Entity.EDGE``,
+            ``Entity.FACE``.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of global IDs.  For nodes and elements these are the
+            raw global IDs from the ``node_num_map`` / ``elem_num_map``
+            variables.  For blocks and sets these are the unique block/set IDs
+            across all component files.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* is an entity type for which parallel ID assembly is not
+            implemented.
+        """
 
         location = entity(on)
 
@@ -413,7 +916,22 @@ class ParallelExodusFile:
         raise ExodusInvalidEntityError(f"parallel IDs for {location.value!r} are not implemented")
 
     def element_block_ids(self) -> npt.NDArray[np.int64]:
-        """Return unique element block IDs."""
+        """Return unique element block IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique element block IDs.  When the Nemesis global
+            variable ``eb_prop1_global`` is present it is returned directly;
+            otherwise block IDs are collected from all component files and
+            deduplicated.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     pef.element_block_ids()
+        array([1, 2, 3], dtype=int64)
+        """
 
         global_ids = self._global_variable(VariableName.ELEMENT_BLOCK_IDS_GLOBAL.value)
         if global_ids is not None:
@@ -423,7 +941,20 @@ class ParallelExodusFile:
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def node_set_ids(self) -> npt.NDArray[np.int64]:
-        """Return unique node set IDs."""
+        """Return unique node set IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique node set IDs.  When the Nemesis global
+            variable ``ns_prop1_global`` is present it is returned directly.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     pef.node_set_ids()
+        array([10, 20], dtype=int64)
+        """
 
         global_ids = self._global_variable(VariableName.NODE_SET_IDS_GLOBAL.value)
         if global_ids is not None:
@@ -433,7 +964,20 @@ class ParallelExodusFile:
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def side_set_ids(self) -> npt.NDArray[np.int64]:
-        """Return unique side set IDs."""
+        """Return unique side set IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique side set IDs.  When the Nemesis global
+            variable ``ss_prop1_global`` is present it is returned directly.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     pef.side_set_ids()
+        array([100], dtype=int64)
+        """
 
         global_ids = self._global_variable(VariableName.SIDE_SET_IDS_GLOBAL.value)
         if global_ids is not None:
@@ -443,17 +987,92 @@ class ParallelExodusFile:
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def element_block(self, block_id: int) -> Block:
+        """Return the logical block descriptor for an element block.
+
+        Delegates to :meth:`block` with ``on=Entity.ELEMENT_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global element block ID.
+
+        Returns
+        -------
+        Block
+            Aggregated element block descriptor with global element count.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *block_id* is not found in any component file.
+        """
         return self.block(Entity.ELEMENT_BLOCK, block_id)
 
     def element_connectivity(
         self, block_id: int, *, zero_based: bool = False, labels: bool = False
     ) -> npt.NDArray[np.int64]:
+        """Return the nodal connectivity for an element block.
+
+        Delegates to :meth:`block_connectivity` with
+        ``on=Entity.ELEMENT_BLOCK``.
+
+        Parameters
+        ----------
+        block_id : int
+            Global element block ID.
+        zero_based : bool, optional
+            If ``True``, return zero-based node indices.  Ignored when
+            *labels* is ``True``.  Default is ``False``.
+        labels : bool, optional
+            If ``True``, return raw global node IDs instead of contiguous
+            positional indices.  Default is ``False``.
+
+        Returns
+        -------
+        ndarray of int64, shape (n_elements, nodes_per_element)
+            Connectivity table for the requested element block.
+        """
         return self.block_connectivity(
             Entity.ELEMENT_BLOCK, block_id, zero_based=zero_based, labels=labels
         )
 
     def node_set(self, set_id: int) -> SetInfo:
-        """Return aggregate node set using global node labels."""
+        """Return the aggregated node set using global node labels.
+
+        Node IDs from each component file are translated to global IDs via the
+        per-file ``node_num_map``.  Global IDs that appear in more than one
+        component file (shared border nodes) are deduplicated; the distribution
+        factor for the first occurrence of each global node ID is retained.
+
+        Parameters
+        ----------
+        set_id : int
+            Global node set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated node set.  ``SetInfo.entries`` contains the sorted
+            unique global node IDs.  ``SetInfo.distribution_values`` is
+            ``None`` when no component file stores distribution factors.
+
+        Notes
+        -----
+        Shared border nodes that appear in multiple component files are counted
+        and reported only once.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     ns = pef.node_set(10)
+        ...     ns.count
+        64
+        """
 
         node_gids: list[int] = []
         factors_by_gid: dict[int, float] = {}
@@ -499,13 +1118,46 @@ class ParallelExodusFile:
         )
 
     def side_set(self, set_id: int) -> SetInfo:
-        """Return aggregate side set using global element labels.
+        """Return the aggregated side set using global element labels.
 
-        Duplicate ``(element_gid, side)`` pairs that arise from border elements
-        shared across processor boundaries are deduplicated, consistent with the
-        behaviour of :meth:`node_set` which deduplicates shared node GIDs.
-        Distribution factors for the first occurrence of each unique pair are
-        retained.
+        Element IDs from each component file are translated to global IDs via
+        the per-file ``elem_num_map``.  Duplicate ``(element_gid, side)`` pairs
+        that arise from border elements shared across processor boundaries are
+        deduplicated; the distribution factor for the first occurrence of each
+        unique pair is retained.
+
+        Parameters
+        ----------
+        set_id : int
+            Global side set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated side set.  ``SetInfo.entries`` contains the global
+            element IDs and ``SetInfo.extra_entries`` the corresponding side
+            ordinals.  ``SetInfo.distribution_values`` is ``None`` when no
+            component file stores distribution factors.
+
+        Notes
+        -----
+        Duplicate ``(element_gid, side)`` pairs that occur when a boundary
+        element is present in more than one component file are removed,
+        keeping the entry from the first component file that contains it.
+        This is consistent with the deduplication performed by :meth:`node_set`
+        for shared border nodes.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     ss = pef.side_set(100)
+        ...     ss.count
+        32
         """
 
         # Use an ordered dict to deduplicate (elem_gid, side) pairs while
@@ -571,19 +1223,48 @@ class ParallelExodusFile:
 
         Parameters
         ----------
-        name
+        name : str
             Result variable name.
-        on
-            Variable location.
-        time
-            Time selector. ``None`` returns the full time history.
-        block
-            Backward-compatible alias for ``block_id``.
-        block_id
-            Block ID for element, edge, or face variables.
-        set_id
+        on : Entity or str
+            Variable location (e.g. ``Entity.NODE``, ``Entity.ELEMENT``,
+            ``"node"``, ``"element"``).
+        time : TimeSelector, optional
+            Time selector.  ``None`` returns the full time history.  An
+            integer is interpreted as a one-based time-step index.  A float
+            is matched to the nearest available time value.
+        block : int, optional
+            Backward-compatible alias for *block_id*.  Ignored when *block_id*
+            is also supplied.
+        block_id : int, optional
+            Block ID for element, edge, or face variables.  When ``None`` and
+            the location is a block-based entity, values are concatenated
+            across all blocks in block-ID order.
+        set_id : int, optional
             Set ID for node-set, side-set, edge-set, face-set, or element-set
-            variables.
+            variables.  When ``None`` values are concatenated across all sets.
+
+        Returns
+        -------
+        ndarray of float64
+            For a specific time step: shape ``(n_objects,)`` for nodal /
+            element / set variables, or ``(n_time_steps, n_objects)`` when
+            *time* is ``None``.
+
+        Examples
+        --------
+        Read all nodal ``disp_x`` values at the final time step:
+
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     u = pef.values("disp_x", on="node", time=-1)
+        ...     u.shape
+        (1024,)
+
+        Read the complete time history of element stress in block 1:
+
+        >>> with ParallelExodusFile.open("mesh.e.2.0", "mesh.e.2.1") as pef:
+        ...     s = pef.values("stress_xx", on="element", block_id=1)
+        ...     s.shape
+        (50, 256)
         """
 
         location = entity(on)
@@ -721,6 +1402,25 @@ class ParallelExodusFile:
         return output
 
     def set_ids(self, on: Entity | str) -> npt.NDArray[np.int64]:
+        """Return unique set IDs for the requested set entity type.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Set entity type.  Must be one of ``Entity.NODE_SET``,
+            ``Entity.SIDE_SET``, ``Entity.EDGE_SET``, ``Entity.FACE_SET``,
+            or ``Entity.ELEMENT_SET`` (or the corresponding string values).
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique set IDs found across all component files.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* does not refer to a set entity type.
+        """
         location = entity(on)
 
         if location is Entity.NODE_SET:
@@ -737,24 +1437,100 @@ class ParallelExodusFile:
         raise ExodusInvalidEntityError(f"{location.value!r} is not a set entity")
 
     def edge_set_ids(self) -> npt.NDArray[np.int64]:
+        """Return unique edge set IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique edge set IDs.  Returns an empty array of
+            shape ``(0,)`` when no component file contains edge sets.
+        """
         ids = [file.edge_set_ids() for file in self._files if len(file.edge_set_ids())]
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def face_set_ids(self) -> npt.NDArray[np.int64]:
+        """Return unique face set IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique face set IDs.  Returns an empty array of
+            shape ``(0,)`` when no component file contains face sets.
+        """
         ids = [file.face_set_ids() for file in self._files if len(file.face_set_ids())]
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def element_set_ids(self) -> npt.NDArray[np.int64]:
+        """Return unique element set IDs across all component files.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted array of unique element set IDs.  Returns an empty array of
+            shape ``(0,)`` when no component file contains element sets.
+        """
         ids = [file.element_set_ids() for file in self._files if len(file.element_set_ids())]
         return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
 
     def edge_set(self, set_id: int) -> SetInfo:
+        """Return the aggregated edge set for the given ID.
+
+        Parameters
+        ----------
+        set_id : int
+            Global edge set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated edge set with global edge IDs in ``SetInfo.entries``.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+        """
         return self._object_set(Entity.EDGE_SET, set_id)
 
     def face_set(self, set_id: int) -> SetInfo:
+        """Return the aggregated face set for the given ID.
+
+        Parameters
+        ----------
+        set_id : int
+            Global face set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated face set with global face IDs in ``SetInfo.entries``.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+        """
         return self._object_set(Entity.FACE_SET, set_id)
 
     def element_set(self, set_id: int) -> SetInfo:
+        """Return the aggregated element set for the given ID.
+
+        Parameters
+        ----------
+        set_id : int
+            Global element set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated element set with global element IDs in
+            ``SetInfo.entries``.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+        """
         return self._object_set(Entity.ELEMENT_SET, set_id)
 
     def element_edge_connectivity(
@@ -930,6 +1706,31 @@ class ParallelExodusFile:
         )
 
     def set(self, on: Entity | str, set_id: int) -> SetInfo:
+        """Return the aggregated set for the given entity type and ID.
+
+        Dispatches to the appropriate typed set method based on *on*.
+
+        Parameters
+        ----------
+        on : Entity or str
+            Set entity type.  Must be one of ``Entity.NODE_SET``,
+            ``Entity.SIDE_SET``, ``Entity.EDGE_SET``, ``Entity.FACE_SET``,
+            or ``Entity.ELEMENT_SET``.
+        set_id : int
+            Global set ID.
+
+        Returns
+        -------
+        SetInfo
+            Aggregated set descriptor with global object IDs.
+
+        Raises
+        ------
+        ExodusInvalidEntityError
+            If *on* does not refer to a set entity type.
+        ExodusLookupError
+            If *set_id* is not found in any component file.
+        """
         location = entity(on)
 
         if location is Entity.NODE_SET:
@@ -946,7 +1747,31 @@ class ParallelExodusFile:
         raise ExodusInvalidEntityError(f"{location.value!r} is not a set entity")
 
     def write(self, filename: str | Path) -> str:
-        """Write the aggregate database to a serial Exodus file."""
+        """Write the aggregated logical database to a serial Exodus file.
+
+        All blocks, sets, coordinate data, and result variable histories are
+        assembled from the component files and written to a single joined
+        Exodus file.  The output file layout matches what a serial Exodus
+        reader would produce for the equivalent non-decomposed mesh.
+
+        Parameters
+        ----------
+        filename : str or Path
+            Destination path for the joined serial Exodus file.
+
+        Returns
+        -------
+        str
+            String form of *filename*, identical to ``str(filename)``.
+
+        Examples
+        --------
+        >>> with ParallelExodusFile.open("mesh.e.4.0", "mesh.e.4.1",
+        ...                              "mesh.e.4.2", "mesh.e.4.3") as pef:
+        ...     out = pef.write("joined.exo")
+        ...     print(out)
+        joined.exo
+        """
 
         with ExodusWriter.create(filename) as writer:
             self._write_to(writer)
@@ -955,7 +1780,48 @@ class ParallelExodusFile:
     def get_mapping(
         self, name: Any, invert: bool = False, contiguous: bool = False
     ) -> dict[Any, Any]:
-        """Legacy mapping helper for common map enum values."""
+        """Return a legacy local-to-global ID mapping dictionary.
+
+        Parameters
+        ----------
+        name : enum or str
+            Mapping name.  Recognised values (as ``name.name`` or the plain
+            string):
+
+            ``"node_local_to_global"``
+                Maps ``(file_index, local_node_index)`` to the global node ID.
+            ``"elem_local_to_global"``
+                Maps ``(file_index, local_element_index)`` to the global
+                element ID.
+            ``"elem_block_elem_local_to_global"``
+                Maps ``(file_index, block_id, local_index_within_block)`` to
+                the global element ID.
+        invert : bool, optional
+            If ``True``, return the inverse mapping (global ID → local key).
+            Default is ``False``.
+        contiguous : bool, optional
+            If ``True``, replace raw global IDs with contiguous one-based
+            indices before returning (or inverting).  Default is ``False``.
+
+        Returns
+        -------
+        dict
+            Mapping dictionary.  Keys are tuples as described above; values
+            are global IDs (or contiguous indices when *contiguous* is
+            ``True``).  When *invert* is ``True`` keys and values are swapped.
+
+        Notes
+        -----
+        This method exists to support legacy callers that expect the dict-based
+        mapping interface of the old ``parallel_exodusii_file`` API.  New code
+        should prefer :attr:`files` and the per-file ``node_num_map`` /
+        ``elem_num_map`` arrays directly.
+
+        Raises
+        ------
+        ValueError
+            If *name* is not one of the recognised mapping names.
+        """
 
         map_name = getattr(name, "name", str(name))
 
@@ -1526,7 +2392,29 @@ class ParallelExodusFile:
             )
 
     def get_time_step(self, target: float, pcttol: float = 1.0e-5) -> int:
-        """Legacy API: return one-based nearest time-step index."""
+        """Return the one-based index of the time step nearest to *target*.
+
+        Parameters
+        ----------
+        target : float
+            Desired simulation time value.
+        pcttol : float, optional
+            Relative tolerance for warning about a mismatch between *target*
+            and the nearest available time.  A logging warning is emitted when
+            ``abs(t_nearest - target) / abs(target) > pcttol``.
+            Default is ``1e-5``.
+
+        Returns
+        -------
+        int
+            One-based index of the time step whose time value is closest to
+            *target*.
+
+        Raises
+        ------
+        ValueError
+            If the database contains no time steps.
+        """
 
         times = np.asarray(self.times(), dtype=np.float64)
         if times.size == 0:
