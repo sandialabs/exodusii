@@ -5,10 +5,10 @@
 """Exodiff-style comparison of two Exodus databases.
 
 This is a pure-Python, exodusii-based counterpart to the SEACAS ``exodiff``
-tool.  It supports files whose mesh entities are in the same order (no
-coordinate-based mesh matching) and compares mesh metadata, coordinates,
-element attributes, and result variables (global, nodal, element, edge, face,
-and set variables) using the :mod:`exodusii.core.tolerance` model.
+tool.  It supports both matched mesh ordering and coordinate-based mesh
+matching (Phase 4), and compares mesh metadata, coordinates, element
+attributes, and result variables (global, nodal, element, edge, face, and set
+variables) using the :mod:`exodusii.core.tolerance` model.
 
 The comparison is truth-table aware for block and set variables, reports
 NaN mismatches as differences (matching exodiff's default ``ignore_nans``
@@ -27,6 +27,17 @@ Time-step selection semantics mirror SEACAS exodiff:
 * ``exclude_steps`` is a set of 1-based file-2 step numbers to skip.
 * When ``interpolating`` is true, file-2 values at each file-1 time are
   obtained by linear interpolation between the two nearest file-2 steps.
+
+Coordinate-based mesh matching (Phase 4):
+
+* When ``DiffOptions.coordinate_matching`` is ``True``, a
+  :class:`~exodusii.mesh.matching.MeshMap` is built before comparison by
+  matching element centroids and nodes by spatial proximity.
+* The matching algorithm mirrors SEACAS ``exodiff`` ``map.C``: centroid
+  matching using a sorted-axis binary search, node map derivation from
+  matched element local nodes, and a free-node fallback pass.
+* Sideset face ordinals are checked after element remapping; mismatches
+  are emitted as warnings (not fatal errors).
 """
 
 from __future__ import annotations
@@ -43,6 +54,10 @@ from exodusii.api.file import ExodusFile
 from exodusii.core.entities import Entity
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
+from exodusii.mesh.matching import MeshMap
+from exodusii.mesh.matching import MeshMatchError  # noqa: F401 – re-exported for callers
+from exodusii.mesh.matching import build_mesh_map
+from exodusii.mesh.matching import check_sideset_ordinals
 
 __all__ = ["DiffOptions", "DiffResult", "TimeSelection", "VariableDiff", "diff"]
 
@@ -171,6 +186,10 @@ class DiffResult:
     variable_diffs: list[VariableDiff] = field(default_factory=list)
     # Coordinate worst difference, if compared.
     coordinate_max_delta: float | None = None
+    # Mesh-map summary, when coordinate_matching was requested.
+    mesh_map_built: bool = False
+    unmatched_nodes: int = 0
+    unmatched_elems: int = 0
 
     def __bool__(self) -> bool:
         """Return ``True`` when the comparison found no differences."""
@@ -264,6 +283,24 @@ class DiffOptions:
     show_all
         If true, retain a record for every compared variable, not only those
         exceeding tolerance.
+    coordinate_matching
+        If true, build a coordinate-based :class:`~exodusii.mesh.matching.MeshMap`
+        before comparison.  This allows comparing files whose nodes and
+        elements are in different orders but describe the same physical mesh.
+        Default: ``False`` (matched-ordering mode, existing behavior).
+    matching_tolerance
+        Spatial tolerance used when building the mesh map.  Controls the
+        maximum per-axis coordinate distance between two nodes for them to be
+        considered the same physical node.  Independent of
+        ``coordinate_tolerance`` (which governs reported coordinate
+        *differences* after matching).  Only used when
+        ``coordinate_matching=True``.  Default: absolute ``1e-6``.
+    require_unique_mapping
+        When ``True`` (default), raise
+        :class:`~exodusii.mesh.matching.MeshMatchError` if any node or
+        element cannot be uniquely matched within ``matching_tolerance``.
+        When ``False``, issue a warning and continue with a partial map.
+        Only used when ``coordinate_matching=True``.
     """
 
     default_tolerance: Tolerance = field(
@@ -294,6 +331,10 @@ class DiffOptions:
     compare_coordinates: bool = True
     compare_attributes: bool = True
     show_all: bool = False
+    # ── Phase 4: coordinate-based mesh matching ───────────────────────────
+    coordinate_matching: bool = False
+    matching_tolerance: float = 1.0e-6
+    require_unique_mapping: bool = True
 
     def _effective_time_selection(self) -> TimeSelection:
         """Return the active :class:`TimeSelection`, merging legacy offset."""
@@ -485,12 +526,17 @@ def _compare_variable_series(
 def diff(
     file1: ExodusFileLike, file2: ExodusFileLike, options: DiffOptions | None = None
 ) -> DiffResult:
-    """Compare two Exodus databases exodiff-style (matched mesh ordering).
+    """Compare two Exodus databases exodiff-style.
 
     Performs a field-by-field comparison of two Exodus databases using the
     same default tolerances and time-step selection logic as the SEACAS
-    ``exodiff`` tool.  Both files must share the same mesh topology (identical
-    node/element ordering); coordinate-based mesh matching is not performed.
+    ``exodiff`` tool.
+
+    By default both files must share the same mesh topology (identical
+    node/element ordering).  Pass ``DiffOptions(coordinate_matching=True)``
+    to enable coordinate-based mesh matching, which builds a permutation map
+    from spatial coordinates before comparison and allows comparing files
+    whose nodes and elements are in different orders.
 
     Parameters
     ----------
@@ -529,6 +575,11 @@ def diff(
 
     >>> opts = DiffOptions(time_selection=TimeSelection(start=-1))
     >>> result = diff("run_a.exo", "run_b.exo", options=opts)
+
+    Coordinate-based mesh matching (files with different node/element ordering):
+
+    >>> opts = DiffOptions(coordinate_matching=True, matching_tolerance=1e-8)
+    >>> result = diff("gold.exo", "permuted.exo", options=opts)
     """
 
     opts = options or DiffOptions()
@@ -539,13 +590,30 @@ def diff(
     result = DiffResult(same=True, file1=str(exo1.path), file2=str(exo2.path))
 
     try:
-        _compare_mesh_metadata(exo1, exo2, result)
+        _compare_mesh_metadata(exo1, exo2, result, opts)
+
+        # Build coordinate-based mesh map when requested.
+        mesh_map: MeshMap | None = None
+        if opts.coordinate_matching and not result.errors:
+            try:
+                mesh_map = build_mesh_map(
+                    exo1,
+                    exo2,
+                    matching_tolerance=opts.matching_tolerance,
+                    require_unique_mapping=opts.require_unique_mapping,
+                )
+                result.mesh_map_built = True
+                result.unmatched_nodes = mesh_map.unmatched_nodes
+                result.unmatched_elems = mesh_map.unmatched_elems
+            except (MeshMatchError, ValueError) as exc:
+                result.errors.append(f"mesh matching failed: {exc}")
+
         if opts.compare_coordinates:
-            _compare_coordinates(exo1, exo2, opts, result)
+            _compare_coordinates(exo1, exo2, opts, result, mesh_map)
         _compare_times(exo1, exo2, opts, result)
         if opts.compare_attributes:
-            _compare_attributes(exo1, exo2, opts, result)
-        _compare_all_variables(exo1, exo2, opts, result)
+            _compare_attributes(exo1, exo2, opts, result, mesh_map)
+        _compare_all_variables(exo1, exo2, opts, result, mesh_map)
     finally:
         if close1:
             exo1.close()
@@ -556,7 +624,9 @@ def diff(
     return result
 
 
-def _compare_mesh_metadata(exo1: ExodusFile, exo2: ExodusFile, result: DiffResult) -> None:
+def _compare_mesh_metadata(
+    exo1: ExodusFile, exo2: ExodusFile, result: DiffResult, opts: DiffOptions
+) -> None:
     if exo1.dimension != exo2.dimension:
         result.errors.append(f"dimension differs: {exo1.dimension} != {exo2.dimension}")
     if exo1.node_count != exo2.node_count:
@@ -566,11 +636,24 @@ def _compare_mesh_metadata(exo1: ExodusFile, exo2: ExodusFile, result: DiffResul
     ids1 = exo1.element_block_ids().tolist()
     ids2 = exo2.element_block_ids().tolist()
     if ids1 != ids2:
-        result.errors.append(f"element block ids differ: {ids1} != {ids2}")
+        # When coordinate matching is enabled, block IDs may differ; we
+        # demote this from a fatal error to a warning and let the matching
+        # algorithm reconcile the block assignment.
+        if opts.coordinate_matching:
+            result.warnings.append(
+                f"element block ids differ: {ids1} != {ids2} "
+                f"(coordinate matching will attempt to reconcile)"
+            )
+        else:
+            result.errors.append(f"element block ids differ: {ids1} != {ids2}")
 
 
 def _compare_coordinates(
-    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    mesh_map: MeshMap | None = None,
 ) -> None:
     if opts.coordinate_tolerance.mode is ToleranceMode.IGNORE:
         return
@@ -581,6 +664,10 @@ def _compare_coordinates(
     if coords1.shape != coords2.shape:
         result.errors.append("coordinate shapes differ")
         return
+    # When a mesh map is available, reorder file-2 coordinates into file-1
+    # node ordering before comparison.
+    if mesh_map is not None:
+        coords2 = coords2[mesh_map.node_map_inv]
     delta = opts.coordinate_tolerance.delta_array(coords1, coords2)
     max_delta, _ = _worst(delta)
     result.coordinate_max_delta = max_delta
@@ -719,7 +806,11 @@ def _steps_to_compare(
 
 
 def _compare_attributes(
-    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    mesh_map: MeshMap | None = None,
 ) -> None:
     tol = opts.attribute_tolerance or opts.default_tolerance
     if tol.mode is ToleranceMode.IGNORE:
@@ -731,9 +822,15 @@ def _compare_attributes(
     ):
         ids1 = exo1.block_ids(block_entity).tolist()
         for block_id in ids1:
+            # When mesh mapping is active, look up corresponding file-2 block id.
+            block_id2 = block_id
+            if mesh_map is not None and block_entity is Entity.ELEMENT_BLOCK:
+                # block_map maps file-2 id → file-1 id; invert to get file-2 id for file-1 id.
+                inv_block = {v: k for k, v in mesh_map.block_map.items()}
+                block_id2 = inv_block.get(block_id, block_id)
             try:
                 names1 = exo1.attribute_names(block_entity, block_id)
-                names2 = exo2.attribute_names(block_entity, block_id)
+                names2 = exo2.attribute_names(block_entity, block_id2)
             except Exception:
                 continue
             common, _only1, _only2 = _match_names(names1, names2, ignore_case=opts.ignore_case)
@@ -742,10 +839,21 @@ def _compare_attributes(
                     continue
                 try:
                     col1 = exo1.attribute_values(block_entity, block_id, attr_name)
-                    col2 = exo2.attribute_values(block_entity, block_id, attr_name)
+                    col2 = exo2.attribute_values(block_entity, block_id2, attr_name)
                 except Exception as exc:
                     result.errors.append(f"attribute {attr_name!r} block {block_id}: {exc}")
                     continue
+                # Reorder file-2 attribute rows (one per element) into file-1 order.
+                if mesh_map is not None and block_entity is Entity.ELEMENT_BLOCK:
+                    try:
+                        _perm, perm_inv = mesh_map.block_elem_perm(block_id2)
+                        col2 = np.asarray(col2, dtype=np.float64)
+                        if col2.ndim == 1:
+                            col2 = col2[perm_inv]
+                        else:
+                            col2 = col2[perm_inv, :]
+                    except Exception:
+                        pass  # skip reorder if block offsets unavailable
                 vd = _compare_variable_series(
                     col1,
                     col2,
@@ -759,16 +867,26 @@ def _compare_attributes(
 
 
 def _compare_all_variables(
-    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+    mesh_map: MeshMap | None = None,
 ) -> None:
     steps = _steps_to_compare(exo1, exo2, opts, result)
 
+    # When coordinate matching is active, check sideset face ordinals and
+    # emit warnings for any that changed after element remapping.
+    if mesh_map is not None:
+        sideset_warns = check_sideset_ordinals(exo1, exo2, mesh_map)
+        result.warnings.extend(sideset_warns)
+
     _compare_global_variables(exo1, exo2, opts, result, steps)
-    _compare_nodal_variables(exo1, exo2, opts, result, steps)
+    _compare_nodal_variables(exo1, exo2, opts, result, steps, mesh_map)
     for ent in _BLOCK_VAR_ENTITIES:
-        _compare_block_variables(exo1, exo2, opts, result, steps, ent)
+        _compare_block_variables(exo1, exo2, opts, result, steps, ent, mesh_map)
     for ent in _SET_VAR_ENTITIES:
-        _compare_set_variables(exo1, exo2, opts, result, steps, ent)
+        _compare_set_variables(exo1, exo2, opts, result, steps, ent, mesh_map)
 
 
 def _record(result: DiffResult, opts: DiffOptions, vd: VariableDiff | None) -> None:
@@ -852,6 +970,7 @@ def _compare_nodal_variables(
     opts: DiffOptions,
     result: DiffResult,
     steps: list[StepTriple],
+    mesh_map: MeshMap | None = None,
 ) -> None:
     for name in _names_to_compare(exo1, exo2, Entity.NODE, opts, result):
         tol = opts.tolerance_for(name, Entity.NODE)
@@ -860,9 +979,13 @@ def _compare_nodal_variables(
             _interp_values(exo2, name, on=Entity.NODE, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p)
             for _i1, lo, p in steps
         ]
+        arr2 = np.array(rows2)
+        # Reorder file-2 nodal array columns into file-1 node ordering.
+        if mesh_map is not None:
+            arr2 = arr2[:, mesh_map.node_map_inv]
         vd = _compare_variable_series(
             np.array(rows1),
-            np.array(rows2),
+            arr2,
             tol,
             ent=Entity.NODE,
             name=name,
@@ -912,6 +1035,7 @@ def _compare_block_variables(
     result: DiffResult,
     steps: list[StepTriple],
     ent: Entity,
+    mesh_map: MeshMap | None = None,
 ) -> None:
     names = _names_to_compare(exo1, exo2, ent, opts, result)
     if not names:
@@ -920,13 +1044,21 @@ def _compare_block_variables(
     block_ids = exo1.block_ids(block_entity).tolist()
     names1 = exo1.variable_names(ent)
     names2 = exo2.variable_names(ent)
+
+    # Build inverse block map: file-1 block id → file-2 block id.
+    inv_block_map: dict[int, int] = {}
+    if mesh_map is not None and block_entity is Entity.ELEMENT_BLOCK:
+        inv_block_map = {v: k for k, v in mesh_map.block_map.items()}
+
     for name in names:
         tol = opts.tolerance_for(name, ent)
         idx1 = _name_index(names1, name, ignore_case=opts.ignore_case)
         idx2 = _name_index(names2, name, ignore_case=opts.ignore_case)
         for block_id in block_ids:
+            # Resolve the corresponding file-2 block id.
+            block_id2 = inv_block_map.get(block_id, block_id) if inv_block_map else block_id
             present1 = _variable_present(exo1, ent, name, block_id, idx1)
-            present2 = _variable_present(exo2, ent, name, block_id, idx2)
+            present2 = _variable_present(exo2, ent, name, block_id2, idx2)
             if not present1 and not present2:
                 continue
             if present1 != present2:
@@ -941,16 +1073,24 @@ def _compare_block_variables(
                 rows2 = [
                     _interp_values(
                         exo2, name, on=ent, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p,
-                        block_id=block_id,
+                        block_id=block_id2,
                     )
                     for _i1, lo, p in steps
                 ]
             except Exception as exc:
                 result.errors.append(f"{ent.value} variable {name!r} block {block_id}: {exc}")
                 continue
+            arr2 = np.array(rows2)
+            # Reorder file-2 element array columns into file-1 element ordering.
+            if mesh_map is not None and block_entity is Entity.ELEMENT_BLOCK:
+                try:
+                    _perm, perm_inv = mesh_map.block_elem_perm(block_id2)
+                    arr2 = arr2[:, perm_inv]
+                except Exception:
+                    pass  # skip reorder if block offsets unavailable
             vd = _compare_variable_series(
                 np.array(rows1),
-                np.array(rows2),
+                arr2,
                 tol,
                 ent=ent,
                 name=name,
@@ -967,6 +1107,7 @@ def _compare_set_variables(
     result: DiffResult,
     steps: list[StepTriple],
     ent: Entity,
+    mesh_map: MeshMap | None = None,
 ) -> None:
     names = _names_to_compare(exo1, exo2, ent, opts, result)
     if not names:
@@ -1002,9 +1143,21 @@ def _compare_set_variables(
             except Exception as exc:
                 result.errors.append(f"{ent.value} variable {name!r} set {set_id}: {exc}")
                 continue
+
+            arr1 = np.array(rows1)
+            arr2 = np.array(rows2)
+
+            # When a mesh map is available, reorder file-2 set entries to
+            # align with file-1's set entry ordering.
+            if mesh_map is not None:
+                order1, order2 = _align_set_entries(exo1, exo2, ent, set_id, mesh_map, result)
+                if order1 is not None and order2 is not None:
+                    arr1 = arr1[:, order1]
+                    arr2 = arr2[:, order2]
+
             vd = _compare_variable_series(
-                np.array(rows1),
-                np.array(rows2),
+                arr1,
+                arr2,
                 tol,
                 ent=ent,
                 name=name,
@@ -1012,3 +1165,121 @@ def _compare_set_variables(
                 set_id=set_id,
             )
             _record(result, opts, vd)
+
+
+def _align_set_entries(
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    ent: Entity,
+    set_id: int,
+    mesh_map: MeshMap,
+    result: DiffResult,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Return (order1, order2) sort indices that align file-2 set entries with file-1.
+
+    For **node sets**, translates file-2 node IDs through the node map and
+    sorts both sets by the resulting file-1 node index so that element-wise
+    comparison is valid.
+
+    For **side sets**, translates file-2 element IDs through the element map
+    and sorts both sets by ``(mapped_element_id, side_ordinal)``.  This
+    handles element reordering but does **not** correct face-ordinal rotation
+    from connectivity permutation; such mismatches are already reported as
+    warnings by :func:`~exodusii.mesh.matching.check_sideset_ordinals`.
+
+    For all other set types the original ordering is returned unchanged
+    (``None, None`` signals "no reordering possible").
+
+    Parameters
+    ----------
+    exo1, exo2 : ExodusFile
+    ent : Entity
+        The set entity type.
+    set_id : int
+        The set id to align.
+    mesh_map : MeshMap
+    result : DiffResult
+        Used to append warnings when entry counts differ after mapping.
+
+    Returns
+    -------
+    order1, order2 : ndarray of int64 or None
+        Sort indices into the set-entry arrays, or ``None`` when alignment
+        is not possible.
+    """
+
+    try:
+        si1 = exo1.set(ent, set_id)
+        si2 = exo2.set(ent, set_id)
+    except Exception:
+        return None, None
+
+    entries1 = getattr(si1, "entries", None)
+    entries2 = getattr(si2, "entries", None)
+    if entries1 is None or entries2 is None:
+        return None, None
+
+    entries1 = np.asarray(entries1, dtype=np.int64)
+    entries2 = np.asarray(entries2, dtype=np.int64)
+
+    if entries1.shape != entries2.shape:
+        result.warnings.append(
+            f"{ent.value} set {set_id}: entry count differs ({len(entries1)} vs "
+            f"{len(entries2)}); set alignment skipped"
+        )
+        return None, None
+
+    if ent is Entity.NODE_SET:
+        # Translate file-2 1-based node IDs through the node map.
+        n_nodes = mesh_map.node_map.shape[0]
+        e2_0based = entries2 - 1
+        valid = (e2_0based >= 0) & (e2_0based < n_nodes)
+        mapped = np.where(
+            valid,
+            mesh_map.node_map[np.clip(e2_0based, 0, n_nodes - 1)] + 1,
+            entries2,
+        )
+        # Sort both by file-1 node ID.
+        order1 = np.argsort(entries1, stable=True).astype(np.int64)
+        order2 = np.argsort(mapped, stable=True).astype(np.int64)
+        return order1, order2
+
+    if ent is Entity.SIDE_SET:
+        sides1 = getattr(si1, "extra_entries", None)
+        sides2 = getattr(si2, "extra_entries", None)
+        if sides1 is None or sides2 is None:
+            return None, None
+        sides1 = np.asarray(sides1, dtype=np.int64)
+        sides2 = np.asarray(sides2, dtype=np.int64)
+        # Translate file-2 element IDs through the element map.
+        n_elems = mesh_map.elem_map.shape[0]
+        e2_0based = entries2 - 1
+        valid = (e2_0based >= 0) & (e2_0based < n_elems)
+        mapped_entries = np.where(
+            valid,
+            mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1,
+            entries2,
+        )
+        # Sort by (mapped_element_id, side_ordinal).
+        keys1 = entries1 * 10000 + sides1   # composite sort key (assuming sides < 10000)
+        keys2 = mapped_entries * 10000 + sides2
+        order1 = np.argsort(keys1, stable=True).astype(np.int64)
+        order2 = np.argsort(keys2, stable=True).astype(np.int64)
+        return order1, order2
+
+    # For other set types (edge sets, face sets, element sets) translate
+    # entries through the element map where applicable.
+    if ent in (Entity.ELEMENT_SET,):
+        n_elems = mesh_map.elem_map.shape[0]
+        e2_0based = entries2 - 1
+        valid = (e2_0based >= 0) & (e2_0based < n_elems)
+        mapped_entries = np.where(
+            valid,
+            mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1,
+            entries2,
+        )
+        order1 = np.argsort(entries1, stable=True).astype(np.int64)
+        order2 = np.argsort(mapped_entries, stable=True).astype(np.int64)
+        return order1, order2
+
+    return None, None

@@ -246,12 +246,14 @@ exodusii.similar("baseline.exo", "candidate.exo")
 
 ## Exodiff-style comparison
 
-A pure-Python counterpart to the SEACAS `exodiff` tool compares two databases
-that share the same mesh ordering (matched node/element ids). It compares mesh
-metadata, nodal coordinates, block attributes, time steps, and all result
-variables (global, nodal, element, edge, face, and set variables), and is
-truth-table aware for block/set variables. NaN mismatches are reported as
-differences.
+A pure-Python counterpart to the SEACAS `exodiff` tool compares two databases.
+It compares mesh metadata, nodal coordinates, block attributes, time steps, and
+all result variables (global, nodal, element, edge, face, and set variables),
+and is truth-table aware for block/set variables. NaN mismatches are reported
+as differences.
+
+Both matched mesh ordering (same node/element ids) and coordinate-based mesh
+matching (different ordering, same physical mesh) are supported.
 
 ```python
 from exodusii import diff, DiffOptions, Tolerance, ToleranceMode
@@ -281,6 +283,25 @@ result = diff("gold.exo", "test.exo", options)
 Supported tolerance modes mirror SEACAS `exodiff`: `relative`, `absolute`,
 `combined`, `ignore`, `eigenrel`, `eigenabs`, `eigencom`, `ulps_float`, and
 `ulps_double`.
+
+### Coordinate-based mesh matching
+
+When comparing files whose nodes and elements are in different orders (e.g.
+two meshes of the same geometry produced by different mesh generators or
+reordering tools), enable coordinate-based matching:
+
+```python
+opts = DiffOptions(
+    coordinate_matching=True,
+    matching_tolerance=1e-8,   # spatial proximity tolerance for the map
+)
+result = diff("gold.exo", "reordered.exo", opts)
+```
+
+The matching algorithm mirrors SEACAS `exodiff map.C`: elements are matched
+by centroid proximity, nodes are derived from matched element local nodes, and
+a free-node fallback handles disconnected nodes.  Sideset face ordinals are
+checked after element remapping; mismatches are emitted as warnings.
 
 ### Time-step selection
 
@@ -322,11 +343,15 @@ exodiff --start 3 --stop 10 --increment 2 gold.exo test.exo
 exodiff --start LAST gold.exo test.exo
 exodiff --exclude-steps 2,5 gold.exo test.exo
 exodiff --interpolate --time-scale 0.5 gold.exo test.exo
+
+# Coordinate-based mesh matching (Phase 4)
+exodiff --match-coordinates gold.exo reordered.exo
+exodiff --match-coordinates --matching-tolerance 1e-8 gold.exo reordered.exo
+exodiff --match-coordinates --allow-partial-match gold.exo reordered.exo
 ```
 
-Note: `exodiff` covers the common matched-ordering workflow. Coordinate-based
-mesh matching, nodeset/sideset nodelist matching, and connectivity permutation
-from the reference tool are not yet implemented.
+Sideset face ordinals that change due to element reordering are emitted as
+warnings but do not constitute a fatal diff error.
 
 ---
 

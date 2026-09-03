@@ -4,6 +4,10 @@
 
 """Mesh geometry helpers."""
 
+from exodusii.mesh.matching import MeshMap
+from exodusii.mesh.matching import MeshMatchError
+from exodusii.mesh.matching import build_mesh_map
+from exodusii.mesh.matching import check_sideset_ordinals
 from exodusii.mesh.elements import Element
 from exodusii.mesh.elements import Hex8
 from exodusii.mesh.elements import Quad4
@@ -37,6 +41,10 @@ from exodusii.mesh.regions import unbounded_time_domain
 
 __all__ = [
     "BoundedTimeDomain",
+    "MeshMap",
+    "MeshMatchError",
+    "build_mesh_map",
+    "check_sideset_ordinals",
     "Circle",
     "Cylinder",
     "Element",

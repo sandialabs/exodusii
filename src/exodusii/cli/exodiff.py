@@ -5,9 +5,10 @@
 """Command-line interface for exodiff-style comparison.
 
 Provides ``exodiff``-like behavior on top of :mod:`exodusii.api.diff`.
-Supports matched mesh ordering (no coordinate-based mesh matching) and offers
-both a human-readable and a JSON output mode.  Time-step selection and linear
-interpolation (Phase 2) are fully supported.
+Supports matched mesh ordering and coordinate-based mesh matching
+(``--match-coordinates``), and offers both a human-readable and a JSON
+output mode.  Time-step selection and linear interpolation (Phase 2) are
+fully supported.
 
 Return codes follow the SEACAS ``exodiff`` convention:
 
@@ -43,8 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="exodiff",
         description=(
-            "Compare two ExodusII databases (matched mesh ordering). "
-            "A pure-Python, exodusii-based counterpart to SEACAS exodiff."
+            "Compare two ExodusII databases. "
+            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
+            "Supports both matched mesh ordering (default) and coordinate-based "
+            "mesh matching (--match-coordinates)."
         ),
     )
     parser.add_argument("file1", help="First Exodus database path.")
@@ -221,6 +224,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    mm = parser.add_argument_group("mesh matching")
+    mm.add_argument(
+        "--match-coordinates",
+        action="store_true",
+        help=(
+            "Enable coordinate-based mesh matching.  Builds a permutation map "
+            "from spatial coordinates before comparison, allowing files whose "
+            "nodes and elements are in different orders to be compared correctly."
+        ),
+    )
+    mm.add_argument(
+        "--matching-tolerance",
+        type=float,
+        default=1.0e-6,
+        metavar="VALUE",
+        help=(
+            "Per-axis spatial tolerance used when building the mesh map "
+            "(default: 1e-6).  Independent of --coordinate-tolerance."
+        ),
+    )
+    mm.add_argument(
+        "--allow-partial-match",
+        action="store_true",
+        help=(
+            "When coordinate matching cannot find a unique match for every "
+            "node or element, issue a warning rather than aborting.  "
+            "By default, a failed match is a fatal error."
+        ),
+    )
+
     out = parser.add_argument_group("output")
     out.add_argument(
         "--format", choices=("text", "json"), default="text", help="Output format (default: text)."
@@ -291,6 +324,9 @@ def _options_from_args(args: argparse.Namespace) -> DiffOptions:
         compare_coordinates=not args.no_coordinates,
         compare_attributes=not args.no_attributes,
         show_all=bool(args.show_all),
+        coordinate_matching=bool(args.match_coordinates),
+        matching_tolerance=float(args.matching_tolerance),
+        require_unique_mapping=not bool(args.allow_partial_match),
     )
 
 
@@ -302,6 +338,9 @@ def _result_to_json(result: DiffResult) -> dict[str, object]:
         "errors": list(result.errors),
         "warnings": list(result.warnings),
         "coordinate_max_delta": result.coordinate_max_delta,
+        "mesh_map_built": result.mesh_map_built,
+        "unmatched_nodes": result.unmatched_nodes,
+        "unmatched_elems": result.unmatched_elems,
         "variable_diffs": [
             {
                 "entity": vd.entity,
