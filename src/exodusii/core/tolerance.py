@@ -267,10 +267,10 @@ class Tolerance:
 
         Examples
         --------
-        >>> Tolerance.make("rel", value=1e-4)
-        Tolerance(mode=<ToleranceMode.RELATIVE: 'relative'>, value=0.0001, floor=0.0, use_old_floor=False)
-        >>> Tolerance.make("abs", value=0.001, floor=1e-10)
-        Tolerance(mode=<ToleranceMode.ABSOLUTE: 'absolute'>, value=0.001, floor=1e-10, use_old_floor=False)
+        >>> Tolerance.make("rel", value=1e-4)  # doctest: +ELLIPSIS
+        Tolerance(mode=<ToleranceMode.RELATIVE: 'relative'>, value=0.0001, ...)
+        >>> Tolerance.make("abs", value=0.001, floor=1e-10)  # doctest: +ELLIPSIS
+        Tolerance(mode=<ToleranceMode.ABSOLUTE: 'absolute'>, value=0.001, ...)
         """
 
         return cls(

@@ -710,7 +710,7 @@ class ExodusFile:
             coords = np.column_stack(components).astype(np.float64)
         else:
             # Fall back to normal-model combined ``coord`` variable
-            # (shape: num_dim × num_nodes, stored row-major).
+            # (shape: num_dim x num_nodes, stored row-major).
             combined = self._backend.variable(VariableName.COORDINATES.value, default=None)
             if combined is None:
                 raise ValueError(
@@ -1613,7 +1613,7 @@ class ExodusFile:
         derived dynamically by probing whether each per-block/set result
         variable exists in the NetCDF file — matching the behaviour of
         ``ex_get_truth_table`` in the SEACAS C library
-        (``ex_get_truth_table.c:162–178``).
+        (``ex_get_truth_table.c:162-178``).
 
         Returns ``None`` only when the entity type does not support a truth
         table (e.g. ``Entity.GLOBAL``).

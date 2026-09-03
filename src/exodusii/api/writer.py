@@ -791,7 +791,7 @@ class ExodusWriter:
             of columns must equal ``dimension``.
         names : sequence of str, optional
             Axis labels, length ``dimension``.  Defaults to ``["X"]``,
-            ``["X", "Y"]``, or ``["X", "Y", "Z"]`` for dimensions 1–3.
+            ``["X", "Y"]``, or ``["X", "Y", "Z"]`` for dimensions 1-3.
 
         Raises
         ------
@@ -871,7 +871,7 @@ class ExodusWriter:
 
         Examples
         --------
-        >>> # Four nodes mapped to global IDs 101–104
+        >>> # Four nodes mapped to global IDs 101-104
         >>> w.write_id_map(Entity.NODE, [101, 102, 103, 104])
         """
 

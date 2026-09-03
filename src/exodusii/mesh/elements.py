@@ -244,7 +244,7 @@ class Quad4:
         """Return the centroid of each sub-quadrilateral.
 
         Divides the element into ``intervals**2`` sub-quadrilaterals by
-        sampling the bilinear map on a regular ``intervals × intervals``
+        sampling the bilinear map on a regular ``intervals x intervals``
         grid of cell centres.
 
         Parameters
@@ -282,7 +282,7 @@ class Quad4:
     def subcoord(self, intervals: int) -> FloatArray:
         """Return nodal coordinates for the sub-element mesh.
 
-        Produces an ``(intervals+1) × (intervals+1)`` grid of physical
+        Produces an ``(intervals+1) x (intervals+1)`` grid of physical
         nodes by evaluating the bilinear map at each parametric grid point.
 
         Parameters
@@ -385,7 +385,7 @@ class Quad4:
 class Hex8:
     """Eight-node hexahedron using Exodus node ordering.
 
-    Nodes 0–3 form the bottom face and nodes 4–7 form the top face, both
+    Nodes 0-3 form the bottom face and nodes 4-7 form the top face, both
     ordered counter-clockwise when viewed from outside the element.
 
     Parameters
@@ -475,7 +475,7 @@ class Hex8:
         """Return the centroid of each sub-hexahedron.
 
         Divides the element into ``intervals**3`` sub-hexahedra by sampling
-        the trilinear map on a regular ``intervals × intervals × intervals``
+        the trilinear map on a regular ``intervals x intervals x intervals``
         grid of cell centres.
 
         Parameters
@@ -809,7 +809,7 @@ class Tri3:
 class Tet4:
     """Four-node tetrahedron using Exodus node ordering.
 
-    Nodes 0–2 form the base face (counter-clockwise when viewed from
+    Nodes 0-2 form the base face (counter-clockwise when viewed from
     outside) and node 3 is the apex.
 
     Parameters
@@ -990,8 +990,8 @@ class Tet4:
 class Wedge6:
     """Six-node wedge (triangular prism) using Exodus node ordering.
 
-    Nodes 0–2 form the triangular bottom face (counter-clockwise when
-    viewed from below) and nodes 3–5 form the corresponding top face.
+    Nodes 0-2 form the triangular bottom face (counter-clockwise when
+    viewed from below) and nodes 3-5 form the corresponding top face.
 
     Parameters
     ----------

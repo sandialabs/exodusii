@@ -1193,9 +1193,7 @@ class ParallelExodusFile:
 
         elements = np.asarray([k[0] for k in seen], dtype=np.int64)
         sides = np.asarray([k[1] for k in seen], dtype=np.int64)
-        dist_facts = (
-            np.asarray([v for v in seen.values()], dtype=np.float64) if has_factors else None
-        )
+        dist_facts = np.asarray(list(seen.values()), dtype=np.float64) if has_factors else None
 
         return SetInfo(
             id=set_id,
@@ -2133,7 +2131,8 @@ class ParallelExodusFile:
                 warnings.warn(
                     f"{file.path}: 'node_num_map' not found; using sequential fallback. "
                     "This is only correct for non-overlapping partitions with no shared nodes. "
-                    "Real Nemesis files with shared border/external nodes must include node_num_map.",
+                    "Real Nemesis files with shared border/external nodes must include "
+                    "node_num_map.",
                     stacklevel=2,
                 )
                 node_map = np.arange(node_offset + 1, node_offset + file.node_count + 1)
