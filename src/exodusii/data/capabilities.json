@@ -1,6 +1,6 @@
 {
   "capabilities": {
-    "schema_version": "1.0.0",
+    "schema_version": "1.1.0",
     "dataset": "capabilities",
     "audience": "AI coding agents and automation tools that need to discover how to use exodusii without loading the full documentation corpus.",
     "format": {
@@ -15,8 +15,9 @@
         "Inspect mesh and result metadata from finite-element simulations.",
         "Read nodal, element, global, edge, face, and set variables.",
         "Query result variables at selected time steps.",
+        "Compare two Exodus databases with exodiff-style tolerance checking.",
         "Aggregate decomposed parallel Exodus/Nemesis files.",
-        "Write or copy supported Exodus databases.",
+        "Write or copy Exodus databases.",
         "Compute simple mesh geometry quantities such as centers, volumes, and nodal volumes.",
         "Expose JSON output for AI agents and automation tools."
       ],
@@ -25,9 +26,13 @@
         "database_inspection": ".commands.inspect",
         "database_query": ".commands.query",
         "summaries": ".commands.stats",
+        "database_comparison": ".commands.exodiff",
         "python_api": ".python_api",
+        "diff_api": ".python_api.diff",
+        "writer_api": ".python_api.writer",
         "variable_selectors": ".query.selectors",
         "time_selectors": ".query.time_selectors",
+        "entity_aliases": ".concepts.entity_aliases",
         "legacy_compatibility": ".legacy"
       },
       "common_agent_queries": [
@@ -35,11 +40,14 @@
         "python -m exodusii learn -c commands",
         "python -m exodusii learn -c query",
         "python -m exodusii learn -c python_api",
+        "python -m exodusii learn -c python_api.diff",
+        "python -m exodusii learn -c python_api.writer",
         "python -m exodusii learn --skill list",
         "python -m exodusii inspect mesh.exo",
         "python -m exodusii variables mesh.exo",
         "python -m exodusii query mesh.exo --select n/TEMP --time last",
-        "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block"
+        "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block",
+        "exodiff gold.exo test.exo"
       ]
     },
     "concepts": {
@@ -59,10 +67,25 @@
         "face_set": "A set of faces, optionally with orientations and distribution factors.",
         "element_set": "A set of elements, optionally with distribution factors."
       },
+      "entity_aliases": {
+        "summary": "All entity-accepting API methods pass the string through a normalizer that strips, lowercases, and replaces hyphens/spaces with underscores. The following aliases are accepted.",
+        "global": ["g", "global", "globals", "global_variable", "global_variables"],
+        "node": ["n", "node", "nodes", "nodal"],
+        "element": ["e", "el", "elem", "elems", "element", "elements"],
+        "edge": ["d", "edge", "edges"],
+        "face": ["f", "face", "faces"],
+        "element_block": ["eb", "block", "blocks", "elem_block", "element_block", "element_blocks"],
+        "node_set": ["ns", "nset", "nodeset", "node_set", "node_sets"],
+        "side_set": ["ss", "sset", "sideset", "side_set", "side_sets"],
+        "edge_set": ["es", "eset", "edgeset", "edge_set", "edge_sets"],
+        "face_set": ["fs", "fset", "faceset", "face_set", "face_sets"],
+        "element_set": ["els", "elset", "elemset", "elementset", "element_set", "element_sets"]
+      },
       "time_indexing": {
         "python_api": "Modern API time indexes are zero-based when integers are used.",
         "legacy_api": "Legacy ExodusIIFile-style methods usually use one-based time_step arguments.",
-        "cli": "The agent CLI accepts first, last, index:N, step:N, or a physical float time."
+        "cli": "The agent CLI accepts first, last, index:N, step:N, or a physical float time.",
+        "time_selector_type": "The TimeSelector type (core/time.py) accepts: None (full history), 'first', 'last', int (zero-based index), or float (nearest physical time)."
       },
       "connectivity_indexing": {
         "file_storage": "Exodus connectivity is conventionally one-based.",
@@ -71,7 +94,7 @@
       }
     },
     "commands": {
-      "summary": "The agent-oriented CLI is available through python -m exodusii and prints JSON by default with indent=2. Use --terse for compact JSON.",
+      "summary": "Two types of CLI are available. (1) The agent-oriented subcommand CLI: 'python -m exodusii COMMAND ...', prints JSON by default. (2) Two registered console scripts: 'exodiff' and 'exoread'.",
       "learn": {
         "purpose": "Query static exodusii capabilities and skills for self-learning.",
         "examples": [
@@ -138,12 +161,64 @@
         "purpose": "Compute compact numeric summaries for selected variables.",
         "examples": [
           "python -m exodusii stats mesh.exo --select n/TEMP --time last",
-          "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block"
+          "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block",
+          "python -m exodusii stats mesh.exo --select ns/NSVAR --time last --by-set"
         ]
       },
       "examples": {
         "purpose": "Print database-specific Python snippets.",
         "example": "python -m exodusii examples mesh.exo"
+      },
+      "exodiff": {
+        "purpose": "Compare two Exodus databases with exodiff-style tolerance checking. Registered console script (not a subcommand of 'python -m exodusii'). Returns POSIX exit codes: 0 same, 1 error, 2 different.",
+        "usage": "exodiff [OPTIONS] FILE1 FILE2",
+        "tolerance_flags": {
+          "--relative": "Use relative tolerance (default).",
+          "--absolute": "Use absolute tolerance.",
+          "--combined": "Use combined tolerance.",
+          "--eigen-relative / --eigen-absolute / --eigen-combined": "Eigenvalue tolerance modes.",
+          "--ulps-float / --ulps-double": "ULPs-based tolerance.",
+          "-t / --tolerance VALUE": "Tolerance value (default 1e-6).",
+          "--floor VALUE": "Floor below which values are treated as equal.",
+          "--coordinate-tolerance VALUE": "Absolute tolerance for coordinates (default 1e-6)."
+        },
+        "selection_flags": {
+          "-x / --exclude NAME": "Exclude a variable by name (repeatable).",
+          "--no-coordinates": "Skip coordinate comparison.",
+          "--no-attributes": "Skip block attribute comparison.",
+          "--case-sensitive": "Case-sensitive variable name matching."
+        },
+        "time_flags": {
+          "--start N|LAST": "First file-2 step to compare (1-based). 'LAST' compares only the final step on each file.",
+          "--stop N": "Last file-2 step to compare (inclusive).",
+          "--increment N": "Step stride (default 1).",
+          "-T / --time-step-offset N": "file1_step = file2_step + N.",
+          "--exclude-steps N[,N...]": "Comma-separated 1-based steps to skip.",
+          "--time-scale S": "Multiply file-1 times by S before matching.",
+          "--time-offset O": "Add O to file-1 times before matching.",
+          "--interpolate": "Linearly interpolate file-2 values to each file-1 time."
+        },
+        "output_flags": {
+          "--format text|json": "Output format (default: text).",
+          "--terse": "Compact JSON.",
+          "--show-all": "Report every compared variable, not only those exceeding tolerance.",
+          "-q / --quiet": "Suppress per-variable listing."
+        },
+        "examples": [
+          "exodiff gold.exo test.exo",
+          "exodiff --absolute -t 1e-8 gold.exo test.exo",
+          "exodiff -x TIME --no-coordinates gold.exo test.exo",
+          "exodiff --format json --terse gold.exo test.exo",
+          "exodiff --start 3 --stop 10 --increment 2 gold.exo test.exo",
+          "exodiff --start LAST gold.exo test.exo",
+          "exodiff --interpolate --time-scale 0.5 gold.exo test.exo"
+        ],
+        "limitation": "Requires matched mesh ordering (same node/element IDs in both files). No coordinate-based mesh matching."
+      },
+      "exoread": {
+        "purpose": "Interactive extraction of named variables by entity. Registered console script.",
+        "usage": "exoread [OPTIONS] FILE",
+        "note": "Use 'exoread --help' for full flag list. Supports -g/-e/-n/-f/-d entity selectors, -t time, -i index, and -L lineout options."
       },
       "json_format": {
         "default": "Indented JSON with indent=2.",
@@ -203,7 +278,7 @@
       }
     },
     "python_api": {
-      "summary": "The modern API is centered on ExodusFile for reading, ExodusWriter for writing, and ParallelExodusFile for aggregating decomposed files.",
+      "summary": "The modern API is centered on ExodusFile for reading, ExodusWriter for writing, ParallelExodusFile for aggregating decomposed files, and diff/DiffOptions for comparison.",
       "open": {
         "import": "from exodusii.api.file import ExodusFile",
         "example": "with ExodusFile.open('mesh.exo') as exo:\n    print(exo.title)\n    print(exo.dimension)"
@@ -227,56 +302,198 @@
           "exo.variable_names('node')",
           "exo.element_block_ids()",
           "exo.node_set_ids()",
-          "exo.side_set_ids()"
+          "exo.side_set_ids()",
+          "exo.variable_truth_table('element', id=block_id)  # returns (num_vars,) int64 row or (num_blocks, num_vars) full table"
         ]
       },
       "values": {
-        "method": "exo.values(name, on=ENTITY, time=None, block_id=None, set_id=None)",
-        "global": "exo.values('TOTAL_ENERGY', on='global') returns a time history.",
-        "node": "exo.values('TEMP', on='node', time='last') returns nodal values at one time.",
-        "element": "exo.values('ENERGY', on='element', block_id=1, time='last') returns values for one block.",
-        "all_element_blocks": "exo.values('ENERGY', on='element', time='last') concatenates block values.",
-        "set_variable": "exo.values('VAR', on='node_set', set_id=10, time='last') reads one set variable."
+        "signature": "exo.values(name, *, on, time=None, block_id=None, block=None, set_id=None)",
+        "notes": [
+          "All parameters after 'name' are keyword-only.",
+          "'on' is required and accepts any entity alias string (see .concepts.entity_aliases).",
+          "'block' is an alias for 'block_id'; if both are given, 'block_id' wins.",
+          "time=None returns full time history; shape depends on entity.",
+          "For element variables with block_id=None, values across all blocks are concatenated."
+        ],
+        "return_shapes": {
+          "global_with_time": "(num_steps,) — full history",
+          "global_at_time": "scalar float",
+          "node_with_time": "(num_steps, num_nodes)",
+          "node_at_time": "(num_nodes,)",
+          "element_one_block_at_time": "(num_elements_in_block,)",
+          "element_all_blocks_at_time": "(total_elements,) concatenated"
+        },
+        "examples": [
+          "exo.values('TOTAL_ENERGY', on='global')  # full history",
+          "exo.values('TEMP', on='node', time='last')",
+          "exo.values('ENERGY', on='element', block_id=1, time='last')",
+          "exo.values('ENERGY', on='element', time='last')  # all blocks concatenated",
+          "exo.values('VAR', on='node_set', set_id=10, time='last')"
+        ]
       },
       "coordinates": {
-        "material": "exo.coordinates()",
+        "material": "exo.coordinates()  # shape (num_nodes, dimension)",
         "displaced": "exo.coordinates(time='last', displaced=True)",
         "displacements": "exo.displacements(time='last')",
-        "displacement_names": "exo.displacement_variable_names()"
+        "displacement_names": "exo.displacement_variable_names()",
+        "storage_note": "Supports both large-model (coordx/coordy/coordz) and normal-model (combined 'coord' variable) NetCDF storage formats."
       },
       "blocks": {
         "ids": "exo.element_block_ids()",
         "metadata": "exo.element_block(block_id)",
-        "connectivity": "exo.element_connectivity(block_id)",
+        "connectivity": "exo.element_connectivity(block_id)  # one-based by default",
         "zero_based": "exo.element_connectivity(block_id, zero_based=True)"
       },
       "sets": {
         "node_sets": [
           "exo.node_set_ids()",
-          "exo.node_set(set_id)"
+          "exo.node_set(set_id)  # returns SetInfo with .nodes, .dist_facts, .name"
         ],
         "side_sets": [
           "exo.side_set_ids()",
-          "exo.side_set(set_id)"
+          "exo.side_set(set_id)  # returns SetInfo with .elems, .sides, .dist_facts"
+        ]
+      },
+      "truth_table": {
+        "method": "exo.variable_truth_table(on, *, id=None)",
+        "behavior": "Returns a (num_blocks, num_vars) int64 array when id is None, or a (num_vars,) row for one block when id is given. When no explicit truth table is stored, the table is derived dynamically by probing per-block NetCDF variables (matches SEACAS ex_get_truth_table.c behavior). Returns None only for entity types that do not support a truth table (e.g. global).",
+        "examples": [
+          "table = exo.variable_truth_table('element')  # full (num_blocks, num_vars) table",
+          "row = exo.variable_truth_table('element', id=10)  # row for block 10"
         ]
       },
       "parallel": {
         "import": "from exodusii.api.parallel import ParallelExodusFile",
-        "example": "with ParallelExodusFile.open('mesh.e.2.0', 'mesh.e.2.1') as exo:\n    coords = exo.coordinates()\n    values = exo.values('TEMP', on='node', time='last')"
+        "example": "with ParallelExodusFile.open('mesh.e.2.0', 'mesh.e.2.1') as exo:\n    coords = exo.coordinates()\n    values = exo.values('TEMP', on='node', time='last')",
+        "id_maps": "Aggregation uses node_num_map / elem_num_map / edge_num_map / face_num_map from each component file. If a map is absent, a sequential fallback is used and a UserWarning is emitted. The fallback is correct only for non-overlapping partitions; real Nemesis files with shared nodes must include node_num_map."
       },
       "writer": {
         "import": "from exodusii.api.writer import ExodusWriter",
-        "purpose": "Create new Exodus databases from arrays.",
-        "note": "Initialize first, define coordinates/blocks/sets, define variables, then write time and values."
+        "creation": "ExodusWriter.create(path)  # classmethod, use as context manager",
+        "workflow_order": [
+          "1. writer.initialize(title, dimension, node_count, element_count, element_blocks=N, node_sets=M, side_sets=K, ...)  # MUST be first; declares all upfront counts",
+          "2. writer.write_coordinates(coords)  # shape (node_count, dimension)",
+          "3. writer.write_node_id_map(array)  # optional; 1-based global node IDs",
+          "4. writer.write_element_id_map(array)  # optional; 1-based global element IDs",
+          "5. writer.define_element_block(block_id, element_type, connectivity)  # for each block",
+          "6. writer.define_node_set(set_id, nodes, distribution_factors=None)  # for each node set",
+          "7. writer.define_side_set(set_id, elements, sides, distribution_factors=None)  # for each side set",
+          "8. writer.define_global_variables(['VAR1', 'VAR2'])  # before writing time steps",
+          "9. writer.define_node_variables(['TEMP'])  # before writing time steps",
+          "10. writer.define_element_variables(['ENERGY'], truth_table=None)  # before writing time steps",
+          "11. writer.write_time(t)  # call once per time step; returns 1-based step number",
+          "12. writer.write_global_values([v1, v2])  # all globals at once per step",
+          "13. writer.write_node_values('TEMP', array)  # shape (node_count,)",
+          "14. writer.write_element_values('ENERGY', array, block_id=bid)  # per block"
+        ],
+        "initialize_signature": "writer.initialize(title, dimension, node_count, element_count, *, element_blocks=0, node_sets=0, side_sets=0, edge_count=0, edge_blocks=0, face_count=0, face_blocks=0, edge_sets=0, face_sets=0, element_sets=0, floating_point_word_size=8)",
+        "critical_constraint": "The counts passed to initialize() (element_blocks, node_sets, etc.) must exactly match the number of blocks/sets subsequently defined. NetCDF4 dimensions cannot be resized after creation. Passing the wrong count raises ExodusWriteError.",
+        "define_element_block_signature": "writer.define_element_block(block_id, element_type, connectivity, *, name='', zero_based=False, active=True)",
+        "element_types": ["quad", "quad4", "hex", "hex8", "tri3", "tet4", "wedge6", "shell4", "and others"],
+        "set_variable_methods": [
+          "writer.define_node_set_variables(['NSV'], truth_table=None)",
+          "writer.define_side_set_variables(['SSV'], truth_table=None)",
+          "writer.write_node_set_values('NSV', array, set_id=sid)",
+          "writer.write_values('SSV', array, on='side_set', set_id=sid)"
+        ],
+        "other_methods": [
+          "writer.write_info_records(['line1', 'line2'])",
+          "writer.write_qa_records([['code', 'ver', 'date', 'time']])",
+          "writer.write_block_attributes(on, block_id, values_2d, names=['A','B'])",
+          "writer.define_property(on, 'PROP_NAME', values_array)",
+          "writer.sync()  # flush without closing"
+        ],
+        "minimal_example": "with ExodusWriter.create('out.exo') as w:\n    w.initialize('title', 2, 4, 1, element_blocks=1)\n    w.write_coordinates([[0,0],[1,0],[1,1],[0,1]])\n    w.define_element_block(10, 'quad', [[1,2,3,4]])\n    w.define_node_variables(['TEMP'])\n    w.write_time(0.0)\n    w.write_node_values('TEMP', [100, 200, 300, 400])"
+      },
+      "diff": {
+        "summary": "The diff API compares two Exodus databases with exodiff-style tolerance semantics. All symbols are importable from the top-level exodusii package.",
+        "import": "from exodusii import diff, DiffOptions, DiffResult, VariableDiff, TimeSelection, Tolerance, ToleranceMode",
+        "diff_function": "diff(file1, file2, options=None) -> DiffResult",
+        "diff_accepts": "file1 and file2 can be paths (str or Path) or open ExodusFile objects.",
+        "DiffResult": {
+          "fields": {
+            "same": "bool — True when no structural error and no variable exceeded tolerance.",
+            "file1": "str path",
+            "file2": "str path",
+            "errors": "list[str] — fatal structural mismatches (node count, missing variables, etc.)",
+            "warnings": "list[str] — non-fatal notices (time step count mismatch, time value differences)",
+            "variable_diffs": "list[VariableDiff] — one record per variable/location that exceeded tolerance (or all if show_all=True)",
+            "coordinate_max_delta": "float | None — worst coordinate difference if coordinates were compared"
+          },
+          "bool_behavior": "bool(result) is True when result.same is True."
+        },
+        "VariableDiff": {
+          "fields": {
+            "entity": "str — entity type string (e.g. 'element', 'node')",
+            "name": "str — variable name",
+            "max_delta": "float — worst delta found; inf for NaN mismatch or shape mismatch",
+            "tolerance_mode": "str — tolerance mode string",
+            "exceeded": "bool — True when tolerance was exceeded",
+            "time_index": "int | None — zero-based time step of worst value",
+            "entry_index": "int | None — entry position of worst value",
+            "block_id": "int | None",
+            "set_id": "int | None",
+            "value1": "float | None — file1 value at worst location",
+            "value2": "float | None — file2 value at worst location"
+          }
+        },
+        "DiffOptions": {
+          "summary": "Frozen dataclass controlling all comparison behavior.",
+          "key_fields": {
+            "default_tolerance": "Tolerance — applied when no per-category or per-variable override exists. Default: Tolerance(RELATIVE, 1e-6).",
+            "coordinate_tolerance": "Tolerance — for coordinates. Default: Tolerance(ABSOLUTE, 1e-6).",
+            "time_tolerance": "Tolerance — for time value matching. Default: Tolerance(RELATIVE, 1e-6, floor=1e-15).",
+            "nodal_tolerance / element_tolerance / ...": "Tolerance | None — per-category overrides; None falls back to default_tolerance.",
+            "variable_tolerances": "Mapping[str, Tolerance] — per-variable name overrides, highest priority.",
+            "exclude": "frozenset[str] — variable names to skip.",
+            "ignore_case": "bool — case-insensitive variable name matching (default True).",
+            "time_step_offset": "int — legacy scalar offset; prefer time_selection for full control.",
+            "time_selection": "TimeSelection | None — full time-step selection and interpolation settings.",
+            "compare_coordinates": "bool — default True.",
+            "compare_attributes": "bool — compare block element attributes (default True).",
+            "show_all": "bool — include within-tolerance records in variable_diffs (default False)."
+          }
+        },
+        "Tolerance": {
+          "constructor": "Tolerance(mode, value, floor=0.0, use_old_floor=False)",
+          "factory": "Tolerance.make('relative', 1e-6, floor=1e-15)  # parses mode string",
+          "modes_via_ToleranceMode_enum": ["RELATIVE", "ABSOLUTE", "COMBINED", "IGNORE", "EIGEN_RELATIVE", "EIGEN_ABSOLUTE", "EIGEN_COMBINED", "ULPS_FLOAT", "ULPS_DOUBLE"],
+          "mode_strings": ["relative", "absolute", "combined", "ignore", "eigenrel", "eigenabs", "eigencom", "ulps_float", "ulps_double"]
+        },
+        "TimeSelection": {
+          "summary": "Frozen dataclass for time-step range and interpolation control. All step numbers are 1-based and refer to file-2.",
+          "fields": {
+            "start": "int — first file-2 step (1-based, default 1). -1 = LAST: compare only the final step on each file.",
+            "stop": "int — last file-2 step inclusive (-1 = all, default -1).",
+            "increment": "int — step stride (default 1).",
+            "time_step_offset": "int — file1_step = file2_step + offset (default 0).",
+            "exclude_steps": "frozenset[int] — 1-based file-2 steps to skip.",
+            "time_value_scale": "float — multiply file-1 times before matching (default 1.0).",
+            "time_value_offset": "float — add to file-1 times before matching (default 0.0).",
+            "interpolating": "bool — linearly interpolate file-2 values to each file-1 time (default False). Steps outside file-2 time range are skipped."
+          }
+        },
+        "examples": [
+          "result = diff('gold.exo', 'test.exo')",
+          "if not result:\n    for vd in result.variable_diffs:\n        print(vd.entity, vd.name, vd.max_delta)",
+          "opts = DiffOptions(default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1e-8))\nresult = diff('gold.exo', 'test.exo', opts)",
+          "opts = DiffOptions(\n    nodal_tolerance=Tolerance(ToleranceMode.RELATIVE, 1e-6),\n    variable_tolerances={'PRESSURE': Tolerance(ToleranceMode.ABSOLUTE, 1e-4)},\n    exclude=frozenset({'TIME'})\n)\nresult = diff('gold.exo', 'test.exo', opts)",
+          "opts = DiffOptions(time_selection=TimeSelection(start=3, stop=10, increment=2))\nresult = diff('gold.exo', 'test.exo', opts)",
+          "opts = DiffOptions(time_selection=TimeSelection(start=-1))  # LAST only",
+          "opts = DiffOptions(time_selection=TimeSelection(interpolating=True, time_value_scale=0.5))"
+        ],
+        "limitation": "Requires matched mesh ordering (same node/element IDs in both files). Coordinate-based mesh matching is not implemented."
       },
       "copy": {
         "import": "from exodusii.api.copy import copy_file",
         "example": "copy_file('input.exo', 'output.exo')"
       },
       "compare": {
+        "summary": "Simple mesh/value similarity checks (not full exodiff-style tolerance comparison).",
         "import": "from exodusii.api.compare import allclose, similar",
         "allclose": "Data-wise equality within tolerances.",
-        "similar": "Mesh and variable layout similarity."
+        "similar": "Mesh and variable layout similarity.",
+        "note": "For full per-variable tolerance checking with result reporting, use diff() instead."
       }
     },
     "mesh_geometry": {
@@ -288,13 +505,14 @@
         "connected_average": "Average nodal values over connectivity.",
         "bounding_box": "Compute coordinate bounding box."
       },
-      "elements": [
-        "Quad4",
-        "Hex8",
-        "Tri3",
-        "Tet4",
-        "Wedge6"
-      ]
+      "elements": ["Quad4", "Hex8", "Tri3", "Tet4", "Wedge6"],
+      "element_type_aliases": {
+        "Quad4": ["quad", "quad4", "shell4"],
+        "Hex8": ["hex", "hex8"],
+        "Tri3": ["tri", "tri3", "triangle", "triangle3"],
+        "Tet4": ["tet", "tet4", "tetra", "tetra4"],
+        "Wedge6": ["wedge", "wedge6"]
+      }
     },
     "legacy": {
       "summary": "The compatibility layer preserves much of the historical ExodusIIFile-style API.",
@@ -312,18 +530,18 @@
       ]
     },
     "limitations": {
+      "python_version": "Requires Python >= 3.13.",
+      "dependencies": "Requires netCDF4.",
+      "exodiff_mesh_matching": "The Python exodiff (both CLI and diff() API) only supports matched mesh ordering. Files with the same mesh in different node/element ID order will report differences. Coordinate-based mesh matching (as in SEACAS exodiff --map) is not implemented.",
+      "writer_upfront_counts": "ExodusWriter requires exact block/set counts to be declared in initialize() before any blocks or sets are defined. NetCDF4 dimensions cannot be resized after creation. Passing a wrong count raises ExodusWriteError.",
+      "parallel_id_maps": "ParallelExodusFile correctness depends on node_num_map / elem_num_map being present in each component file. If absent, a sequential fallback is used and UserWarning is emitted. The fallback is correct only for non-overlapping partitions; files with shared border/external nodes will produce wrong coordinates and connectivity without the maps.",
       "query_cli": [
         "Large arrays are truncated by default; use --limit -1 carefully.",
-        "The JSON database query command depends on the capabilities of exodusii.api.query.",
         "Some advanced Exodus entities may require direct Python API access if not exposed through the CLI."
       ],
       "static_capabilities": [
         "The static capability dataset is a compact guide, not a full API reference.",
         "Source code and generated API documentation remain authoritative for exact signatures."
-      ],
-      "file_support": [
-        "Requires netCDF4.",
-        "Supports common Exodus II NetCDF structures; unusual files may require additional compatibility work."
       ]
     }
   }
