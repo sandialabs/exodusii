@@ -5,14 +5,28 @@
 """Exodiff-style comparison of two Exodus databases.
 
 This is a pure-Python, exodusii-based counterpart to the SEACAS ``exodiff``
-tool.  Phase 1 supports files whose mesh entities are in the same order
-(no coordinate-based mesh matching): it compares mesh metadata, coordinates,
+tool.  It supports files whose mesh entities are in the same order (no
+coordinate-based mesh matching) and compares mesh metadata, coordinates,
 element attributes, and result variables (global, nodal, element, edge, face,
-and set variables) using the :mod:`exodusii.core.tolerance` model, reporting
-the worst difference per variable.
+and set variables) using the :mod:`exodusii.core.tolerance` model.
 
-The comparison is truth-table aware for block and set variables, and reports
-NaN mismatches as differences (matching exodiff's default ``ignore_nans`` off).
+The comparison is truth-table aware for block and set variables, reports
+NaN mismatches as differences (matching exodiff's default ``ignore_nans``
+off), and supports full time-step selection and linear interpolation
+(Phase 2).
+
+Time-step selection semantics mirror SEACAS exodiff:
+
+* ``time_step_start`` / ``time_step_stop`` / ``time_step_increment`` select
+  a range from file-2 (1-based; ``LAST`` sentinel ``-1`` for start selects
+  the last step on both files).
+* ``time_step_offset`` shifts file-2 step numbers by a constant to obtain the
+  corresponding file-1 step (``file1_step = file2_step + offset``).
+* ``time_value_scale`` / ``time_value_offset`` adjust file-1 time values
+  before matching: ``t1_adj = t1 * scale + offset``.
+* ``exclude_steps`` is a set of 1-based file-2 step numbers to skip.
+* When ``interpolating`` is true, file-2 values at each file-1 time are
+  obtained by linear interpolation between the two nearest file-2 steps.
 """
 
 from __future__ import annotations
@@ -30,7 +44,7 @@ from exodusii.core.entities import Entity
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
 
-__all__ = ["DiffOptions", "DiffResult", "VariableDiff", "diff"]
+__all__ = ["DiffOptions", "DiffResult", "TimeSelection", "VariableDiff", "diff"]
 
 ExodusFileLike = ExodusFile | str | Path
 
@@ -92,6 +106,51 @@ class DiffResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TimeSelection:
+    """Time-step selection and interpolation settings for :func:`diff`.
+
+    All step numbers are **1-based** (matching SEACAS exodiff conventions).
+    They refer to file-2 step indices; the corresponding file-1 step is
+    ``file2_step + time_step_offset``.
+
+    Parameters
+    ----------
+    start
+        First file-2 step to compare (1-based, default 1).  The sentinel
+        ``-1`` means "last step only" (``LAST``): the last step of both
+        files is compared regardless of their indices.
+    stop
+        Last file-2 step to compare (inclusive, default ``-1`` = all).
+    increment
+        Step-index stride (default 1).
+    time_step_offset
+        Added to each selected file-2 step to obtain the file-1 step.
+        ``file1_step = file2_step + time_step_offset``.
+    exclude_steps
+        Set of 1-based file-2 step numbers to skip entirely.
+    time_value_scale
+        Multiplier applied to file-1 time values before matching
+        (``t1_adj = t1 * scale + offset``).
+    time_value_offset
+        Additive offset applied to file-1 time values before matching.
+    interpolating
+        If true, file-2 values at each selected file-1 time are obtained
+        by linear interpolation between the surrounding file-2 steps.
+        Steps whose file-1 time falls outside the file-2 time range are
+        skipped.
+    """
+
+    start: int = 1
+    stop: int = -1
+    increment: int = 1
+    time_step_offset: int = 0
+    exclude_steps: frozenset[int] = field(default_factory=frozenset)
+    time_value_scale: float = 1.0
+    time_value_offset: float = 0.0
+    interpolating: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class DiffOptions:
     """Options controlling a :func:`diff`.
 
@@ -119,7 +178,13 @@ class DiffOptions:
     ignore_case
         If true, variable-name matching is case-insensitive (exodiff default).
     time_step_offset
-        Offset added to file-1 step indices when matching file-2 steps.
+        Offset added to file-2 step indices to obtain file-1 step indices.
+        Kept for backward compatibility; prefer ``time_selection.time_step_offset``.
+        If both are set, ``time_selection.time_step_offset`` takes precedence.
+    time_selection
+        Full time-step selection and interpolation settings.  If ``None``
+        (default), a :class:`TimeSelection` with ``time_step_offset`` applied
+        is used.
     compare_coordinates
         If true, compare nodal coordinates.
     compare_attributes
@@ -153,9 +218,16 @@ class DiffOptions:
     exclude: frozenset[str] = field(default_factory=frozenset)
     ignore_case: bool = True
     time_step_offset: int = 0
+    time_selection: TimeSelection | None = None
     compare_coordinates: bool = True
     compare_attributes: bool = True
     show_all: bool = False
+
+    def _effective_time_selection(self) -> TimeSelection:
+        """Return the active :class:`TimeSelection`, merging legacy offset."""
+        if self.time_selection is not None:
+            return self.time_selection
+        return TimeSelection(time_step_offset=self.time_step_offset)
 
     def _category_default(self, ent: Entity) -> Tolerance:
         mapping = {
@@ -394,35 +466,131 @@ def _compare_coordinates(
 def _compare_times(
     exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
 ) -> None:
+    """Warn when time step counts or matched time values differ."""
     times1 = exo1.times()
     times2 = exo2.times()
     n1 = len(times1)
     n2 = len(times2)
-    offset = opts.time_step_offset
     if n1 != n2:
         result.warnings.append(f"time step count differs: {n1} != {n2}")
-    for i in range(n1):
-        j = i + offset
-        if j < 0 or j >= n2:
-            continue
-        if opts.time_tolerance.diff(float(times1[i]), float(times2[j])):
+
+    ts = opts._effective_time_selection()
+    steps = _steps_to_compare(exo1, exo2, opts, result)
+    if ts.interpolating:
+        # When interpolating, time-value warnings are suppressed: file-1 times
+        # are matched to arbitrary file-2 times; mismatches are expected.
+        return
+    for i1, i2, _prop in steps:
+        t1 = float(times1[i1]) * ts.time_value_scale + ts.time_value_offset
+        t2 = float(times2[i2])
+        if opts.time_tolerance.diff(t1, t2):
             result.warnings.append(
-                f"time value differs at step {i}: {times1[i]:.6e} != {times2[j]:.6e}"
+                f"time value differs at step {i1 + 1}: {times1[i1]:.6e} != {times2[i2]:.6e}"
             )
 
 
+def _surrounding_steps(
+    t: float, times2: np.ndarray
+) -> tuple[int, int, float]:
+    """Return ``(lo, hi, proportion)`` bracketing ``t`` in ``times2``.
+
+    ``proportion`` satisfies ``times2[lo] + proportion * (times2[hi] - times2[lo]) == t``.
+    Returns ``(-1, -1, 0.0)`` when ``t`` is outside the range.
+    ``lo == hi`` when ``t`` exactly matches a step.
+    """
+    n = len(times2)
+    if n == 0:
+        return -1, -1, 0.0
+    if t < float(times2[0]):
+        return -1, -1, 0.0
+    if t > float(times2[-1]):
+        return -1, -1, 0.0
+
+    # Binary search for bracketing interval.
+    lo, hi = 0, n - 1
+    while lo < hi - 1:
+        mid = (lo + hi) // 2
+        if float(times2[mid]) <= t:
+            lo = mid
+        else:
+            hi = mid
+
+    t_lo = float(times2[lo])
+    t_hi = float(times2[hi])
+    if lo == hi or t_hi == t_lo:
+        return lo, lo, 0.0
+    if t == t_lo:
+        return lo, lo, 0.0
+    if t == t_hi:
+        return hi, hi, 0.0
+    prop = (t - t_lo) / (t_hi - t_lo)
+    return lo, hi, prop
+
+
+# A step triple is (file1_0based_index, file2_0based_index_or_lo, proportion).
+# proportion == 0.0  -> exact match (use file2 step at index directly).
+# proportion  > 0.0  -> interpolate between file2[index] and file2[index+1].
+StepTriple = tuple[int, int, float]
+
+
 def _steps_to_compare(
-    exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions
-) -> list[tuple[int, int]]:
-    n1 = len(exo1.times())
-    n2 = len(exo2.times())
-    offset = opts.time_step_offset
-    pairs: list[tuple[int, int]] = []
-    for i in range(n1):
-        j = i + offset
-        if 0 <= j < n2:
-            pairs.append((i, j))
-    return pairs
+    exo1: ExodusFile,
+    exo2: ExodusFile,
+    opts: DiffOptions,
+    result: DiffResult,
+) -> list[StepTriple]:
+    """Return the list of (file1_idx, file2_lo_idx, proportion) triples.
+
+    Implements full SEACAS exodiff time-step selection logic.
+    """
+    times1 = exo1.times()
+    times2 = exo2.times()
+    n1 = len(times1)
+    n2 = len(times2)
+    ts = opts._effective_time_selection()
+
+    # ---- LAST sentinel: compare only the final step on each file.
+    if ts.start == -1:
+        if n1 == 0 or n2 == 0:
+            result.warnings.append("no time steps to compare (LAST requested but files empty)")
+            return []
+        return [(n1 - 1, n2 - 1, 0.0)]
+
+    # ---- Determine file-2 range [start2, stop2] (1-based, inclusive).
+    start2 = max(1, ts.start)
+    stop2 = ts.stop if ts.stop > 0 else n2
+    stop2 = min(stop2, n2)
+    offset = ts.time_step_offset
+
+    if start2 > stop2:
+        result.warnings.append(
+            f"time step selection [{ts.start}, {ts.stop}] results in no steps to compare"
+        )
+        return []
+
+    triples: list[StepTriple] = []
+    step2 = start2
+    while step2 <= stop2:
+        if step2 not in ts.exclude_steps:
+            step1 = step2 + offset  # 1-based file-1 step
+            if 1 <= step1 <= n1:
+                i1 = step1 - 1  # 0-based
+                i2 = step2 - 1  # 0-based
+
+                if ts.interpolating:
+                    # Find surrounding file-2 steps for the (possibly scaled) file-1 time.
+                    t1_adj = float(times1[i1]) * ts.time_value_scale + ts.time_value_offset
+                    lo, hi, prop = _surrounding_steps(t1_adj, times2)
+                    if lo == -1:
+                        # Outside file-2 time range: skip.
+                        step2 += ts.increment
+                        continue
+                    triples.append((i1, lo, prop if lo != hi else 0.0))
+                else:
+                    triples.append((i1, i2, 0.0))
+        step2 += ts.increment
+
+    return triples
 
 
 def _compare_attributes(
@@ -468,7 +636,7 @@ def _compare_attributes(
 def _compare_all_variables(
     exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
 ) -> None:
-    steps = _steps_to_compare(exo1, exo2, opts)
+    steps = _steps_to_compare(exo1, exo2, opts, result)
 
     _compare_global_variables(exo1, exo2, opts, result, steps)
     _compare_nodal_variables(exo1, exo2, opts, result, steps)
@@ -483,6 +651,35 @@ def _record(result: DiffResult, opts: DiffOptions, vd: VariableDiff | None) -> N
         return
     if vd.exceeded or opts.show_all:
         result.variable_diffs.append(vd)
+
+
+def _interp_values(
+    exo: ExodusFile,
+    name: str,
+    *,
+    on: Entity,
+    lo: int,
+    hi: int,
+    prop: float,
+    block_id: int | None = None,
+    set_id: int | None = None,
+) -> np.ndarray:
+    """Fetch values at a (possibly interpolated) step in ``exo``.
+
+    When ``prop == 0``, returns the values at step ``lo`` directly.
+    When ``prop > 0``, linearly interpolates between steps ``lo`` and ``hi``.
+    """
+    kw: dict = {"on": on, "time": lo}
+    if block_id is not None:
+        kw["block_id"] = block_id
+    if set_id is not None:
+        kw["set_id"] = set_id
+    v_lo = np.asarray(exo.values(name, **kw), dtype=np.float64)
+    if prop == 0.0 or lo == hi:
+        return v_lo
+    kw["time"] = hi
+    v_hi = np.asarray(exo.values(name, **kw), dtype=np.float64)
+    return v_lo + prop * (v_hi - v_lo)
 
 
 def _names_to_compare(
@@ -505,12 +702,19 @@ def _compare_global_variables(
     exo2: ExodusFile,
     opts: DiffOptions,
     result: DiffResult,
-    steps: list[tuple[int, int]],
+    steps: list[StepTriple],
 ) -> None:
     for name in _names_to_compare(exo1, exo2, Entity.GLOBAL, opts, result):
         tol = opts.tolerance_for(name, Entity.GLOBAL)
-        values1 = np.array([float(exo1.values(name, on=Entity.GLOBAL, time=i)) for i, _ in steps])
-        values2 = np.array([float(exo2.values(name, on=Entity.GLOBAL, time=j)) for _, j in steps])
+        values1 = np.array(
+            [float(exo1.values(name, on=Entity.GLOBAL, time=i1)) for i1, _lo, _p in steps]
+        )
+        values2 = np.array(
+            [
+                float(_interp_values(exo2, name, on=Entity.GLOBAL, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p))
+                for _i1, lo, p in steps
+            ]
+        )
         vd = _compare_variable_series(
             values1, values2, tol, ent=Entity.GLOBAL, name=name, block_id=None, set_id=None
         )
@@ -522,12 +726,15 @@ def _compare_nodal_variables(
     exo2: ExodusFile,
     opts: DiffOptions,
     result: DiffResult,
-    steps: list[tuple[int, int]],
+    steps: list[StepTriple],
 ) -> None:
     for name in _names_to_compare(exo1, exo2, Entity.NODE, opts, result):
         tol = opts.tolerance_for(name, Entity.NODE)
-        rows1 = [exo1.values(name, on=Entity.NODE, time=i) for i, _ in steps]
-        rows2 = [exo2.values(name, on=Entity.NODE, time=j) for _, j in steps]
+        rows1 = [exo1.values(name, on=Entity.NODE, time=i1) for i1, _lo, _p in steps]
+        rows2 = [
+            _interp_values(exo2, name, on=Entity.NODE, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p)
+            for _i1, lo, p in steps
+        ]
         vd = _compare_variable_series(
             np.array(rows1),
             np.array(rows2),
@@ -578,7 +785,7 @@ def _compare_block_variables(
     exo2: ExodusFile,
     opts: DiffOptions,
     result: DiffResult,
-    steps: list[tuple[int, int]],
+    steps: list[StepTriple],
     ent: Entity,
 ) -> None:
     names = _names_to_compare(exo1, exo2, ent, opts, result)
@@ -603,8 +810,16 @@ def _compare_block_variables(
                 )
                 continue
             try:
-                rows1 = [exo1.values(name, on=ent, block_id=block_id, time=i) for i, _ in steps]
-                rows2 = [exo2.values(name, on=ent, block_id=block_id, time=j) for _, j in steps]
+                rows1 = [
+                    exo1.values(name, on=ent, block_id=block_id, time=i1) for i1, _lo, _p in steps
+                ]
+                rows2 = [
+                    _interp_values(
+                        exo2, name, on=ent, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p,
+                        block_id=block_id,
+                    )
+                    for _i1, lo, p in steps
+                ]
             except Exception as exc:
                 result.errors.append(f"{ent.value} variable {name!r} block {block_id}: {exc}")
                 continue
@@ -625,7 +840,7 @@ def _compare_set_variables(
     exo2: ExodusFile,
     opts: DiffOptions,
     result: DiffResult,
-    steps: list[tuple[int, int]],
+    steps: list[StepTriple],
     ent: Entity,
 ) -> None:
     names = _names_to_compare(exo1, exo2, ent, opts, result)
@@ -649,8 +864,16 @@ def _compare_set_variables(
                 )
                 continue
             try:
-                rows1 = [exo1.values(name, on=ent, set_id=set_id, time=i) for i, _ in steps]
-                rows2 = [exo2.values(name, on=ent, set_id=set_id, time=j) for _, j in steps]
+                rows1 = [
+                    exo1.values(name, on=ent, set_id=set_id, time=i1) for i1, _lo, _p in steps
+                ]
+                rows2 = [
+                    _interp_values(
+                        exo2, name, on=ent, lo=lo, hi=lo + (1 if p > 0 else 0), prop=p,
+                        set_id=set_id,
+                    )
+                    for _i1, lo, p in steps
+                ]
             except Exception as exc:
                 result.errors.append(f"{ent.value} variable {name!r} set {set_id}: {exc}")
                 continue

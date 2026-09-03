@@ -192,3 +192,105 @@ def test_parser_builds() -> None:
     assert args.file2 == "two.exo"
     assert args.mode == "absolute"
     assert args.tolerance == 1e-3
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — time-step selection flags (CLI)
+# ---------------------------------------------------------------------------
+
+
+def _write_ms(path: Path, *, n_steps: int = 4, temp_fn=None) -> None:
+    """Write a minimal 4-node multi-step file."""
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(path) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(n_steps):
+            writer.write_time(float(s))
+            val = temp_fn(s) if temp_fn else float(s)
+            writer.write_node_values("TEMP", np.full(4, val))
+
+
+def test_start_flag(tmp_path: Path) -> None:
+    """--start 3 skips steps 1-2 even when they differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_ms(a, n_steps=4)
+    # Steps 0-1 (1-based 1-2) differ; steps 2-3 (1-based 3-4) match.
+    _write_ms(b, n_steps=4, temp_fn=lambda s: float(s) if s >= 2 else float(s) + 100.0)
+    stream = StringIO()
+    assert main(["--start", "3", str(a), str(b)], file=stream) == _SAME
+
+
+def test_stop_flag(tmp_path: Path) -> None:
+    """--stop 2 compares only steps 1-2; later differing steps are ignored."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_ms(a, n_steps=4)
+    _write_ms(b, n_steps=4, temp_fn=lambda s: float(s) if s < 2 else float(s) + 100.0)
+    stream = StringIO()
+    assert main(["--stop", "2", str(a), str(b)], file=stream) == _SAME
+
+
+def test_increment_flag(tmp_path: Path) -> None:
+    """--increment 2 skips even-indexed steps (1-based 2, 4) that differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_ms(a, n_steps=4)
+    _write_ms(b, n_steps=4, temp_fn=lambda s: float(s) if s % 2 == 0 else float(s) + 100.0)
+    stream = StringIO()
+    assert main(["--increment", "2", str(a), str(b)], file=stream) == _SAME
+
+
+def test_last_flag(tmp_path: Path) -> None:
+    """--start LAST compares only the final step on each file."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_ms(a, n_steps=3)
+    _write_ms(b, n_steps=3, temp_fn=lambda s: float(s) if s == 2 else float(s) + 50.0)
+    stream = StringIO()
+    assert main(["--start", "LAST", str(a), str(b)], file=stream) == _SAME
+
+
+def test_exclude_steps_flag(tmp_path: Path) -> None:
+    """--exclude-steps 2,4 skips those steps even when they differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_ms(a, n_steps=4)
+    _write_ms(b, n_steps=4, temp_fn=lambda s: float(s) if s in (0, 2) else float(s) + 200.0)
+    stream = StringIO()
+    assert main(["--exclude-steps", "2,4", str(a), str(b)], file=stream) == _SAME
+
+
+def test_interpolate_flag(tmp_path: Path) -> None:
+    """--interpolate with midpoint file-1 times gives same values via interpolation."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+
+    with ExodusWriter.create(a) as writer:
+        writer.initialize("i", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(3):
+            writer.write_time(float(s) + 0.5)
+            writer.write_node_values("TEMP", np.full(4, (s + 0.5) * 10.0))
+
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("i", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s))
+            writer.write_node_values("TEMP", np.full(4, float(s * 10)))
+
+    stream = StringIO()
+    status = main(
+        ["--interpolate", "--absolute", "-t", "1e-10", "--no-coordinates", str(a), str(b)],
+        file=stream,
+    )
+    assert status == _SAME, stream.getvalue()

@@ -282,6 +282,30 @@ Supported tolerance modes mirror SEACAS `exodiff`: `relative`, `absolute`,
 `combined`, `ignore`, `eigenrel`, `eigenabs`, `eigencom`, `ulps_float`, and
 `ulps_double`.
 
+### Time-step selection
+
+Use `TimeSelection` to compare a subset of steps or enable linear interpolation
+of file-2 values onto file-1 time points:
+
+```python
+from exodusii import TimeSelection
+
+# Compare steps 3-10, every other step.
+ts = TimeSelection(start=3, stop=10, increment=2)
+
+# Compare only the last step on each file.
+ts = TimeSelection(start=-1)
+
+# Exclude steps 2 and 5.
+ts = TimeSelection(exclude_steps=frozenset({2, 5}))
+
+# Interpolate file-2 to match file-1 times (e.g., different time axes).
+ts = TimeSelection(interpolating=True, time_value_scale=0.5)
+
+opts = DiffOptions(time_selection=ts)
+result = diff("gold.exo", "test.exo", opts)
+```
+
 ### `exodiff` CLI
 
 If installed with console scripts enabled, `exodiff` compares two files and
@@ -292,11 +316,17 @@ exodiff gold.exo test.exo
 exodiff --absolute -t 1e-8 gold.exo test.exo
 exodiff -x TIME --no-coordinates gold.exo test.exo
 exodiff --format json --terse gold.exo test.exo
+
+# Time-step selection
+exodiff --start 3 --stop 10 --increment 2 gold.exo test.exo
+exodiff --start LAST gold.exo test.exo
+exodiff --exclude-steps 2,5 gold.exo test.exo
+exodiff --interpolate --time-scale 0.5 gold.exo test.exo
 ```
 
 Note: `exodiff` covers the common matched-ordering workflow. Coordinate-based
-mesh matching, nodeset/sideset nodelist matching, connectivity permutation, and
-time interpolation from the reference tool are not yet implemented.
+mesh matching, nodeset/sideset nodelist matching, and connectivity permutation
+from the reference tool are not yet implemented.
 
 ---
 

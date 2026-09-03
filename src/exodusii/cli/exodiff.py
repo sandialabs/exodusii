@@ -4,9 +4,10 @@
 
 """Command-line interface for exodiff-style comparison.
 
-Provides ``exodiff``-like behavior on top of :mod:`exodusii.api.diff`.  This
-Phase 1 CLI supports matched mesh ordering (no coordinate-based mesh matching)
-and offers both a human-readable and a JSON output mode.
+Provides ``exodiff``-like behavior on top of :mod:`exodusii.api.diff`.
+Supports matched mesh ordering (no coordinate-based mesh matching) and offers
+both a human-readable and a JSON output mode.  Time-step selection and linear
+interpolation (Phase 2) are fully supported.
 
 Return codes follow the SEACAS ``exodiff`` convention:
 
@@ -24,6 +25,7 @@ from typing import TextIO
 
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
+from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import diff
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
@@ -152,13 +154,71 @@ def build_parser() -> argparse.ArgumentParser:
     sel.add_argument(
         "--no-attributes", action="store_true", help="Do not compare block attributes."
     )
-    sel.add_argument(
+
+    ts = parser.add_argument_group("time-step selection")
+    ts.add_argument(
         "-T",
         "--time-step-offset",
         type=int,
         default=0,
         metavar="N",
-        help="Offset added to file-1 step indices when matching file-2 steps.",
+        help=(
+            "Offset: file1_step = file2_step + N.  "
+            "Ignored when --start/--stop/--increment are also specified."
+        ),
+    )
+    ts.add_argument(
+        "--start",
+        type=str,
+        default=None,
+        metavar="N|LAST",
+        help=(
+            "First file-2 step to compare (1-based, default 1).  "
+            "Use 'LAST' to compare only the final step on each file."
+        ),
+    )
+    ts.add_argument(
+        "--stop",
+        type=int,
+        default=-1,
+        metavar="N",
+        help="Last file-2 step to compare, inclusive (default: all).",
+    )
+    ts.add_argument(
+        "--increment",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Step stride (default 1).",
+    )
+    ts.add_argument(
+        "--exclude-steps",
+        type=str,
+        default=None,
+        metavar="N[,N...]",
+        help="Comma-separated 1-based file-2 step numbers to skip.",
+    )
+    ts.add_argument(
+        "--time-scale",
+        type=float,
+        default=1.0,
+        metavar="S",
+        help="Multiply file-1 time values by S before matching (default 1.0).",
+    )
+    ts.add_argument(
+        "--time-offset",
+        type=float,
+        default=0.0,
+        metavar="O",
+        help="Add O to file-1 time values before matching (default 0.0).",
+    )
+    ts.add_argument(
+        "--interpolate",
+        action="store_true",
+        help=(
+            "Interpolate file-2 values to each file-1 time.  "
+            "Steps whose file-1 time is outside the file-2 time range are skipped."
+        ),
     )
 
     out = parser.add_argument_group("output")
@@ -181,6 +241,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse_start(value: str | None) -> int:
+    """Return the 1-based start step or -1 for LAST."""
+    if value is None:
+        return 1
+    if value.strip().upper() == "LAST":
+        return -1
+    return int(value)
+
+
+def _parse_exclude_steps(value: str | None) -> frozenset[int]:
+    if not value:
+        return frozenset()
+    return frozenset(int(s.strip()) for s in value.split(",") if s.strip())
+
+
 def _options_from_args(args: argparse.Namespace) -> DiffOptions:
     mode = ToleranceMode.parse(args.mode) if args.mode else ToleranceMode.RELATIVE
     default_tol = Tolerance(
@@ -195,12 +270,24 @@ def _options_from_args(args: argparse.Namespace) -> DiffOptions:
         floor=0.0,
         use_old_floor=bool(args.use_old_floor),
     )
+    start = _parse_start(args.start)
+    exclude_steps = _parse_exclude_steps(args.exclude_steps)
+    time_sel = TimeSelection(
+        start=start,
+        stop=int(args.stop),
+        increment=int(args.increment),
+        time_step_offset=int(args.time_step_offset),
+        exclude_steps=exclude_steps,
+        time_value_scale=float(args.time_scale),
+        time_value_offset=float(args.time_offset),
+        interpolating=bool(args.interpolate),
+    )
     return DiffOptions(
         default_tolerance=default_tol,
         coordinate_tolerance=coord_tol,
         exclude=frozenset(args.exclude),
         ignore_case=not args.case_sensitive,
-        time_step_offset=int(args.time_step_offset),
+        time_selection=time_sel,
         compare_coordinates=not args.no_coordinates,
         compare_attributes=not args.no_attributes,
         show_all=bool(args.show_all),

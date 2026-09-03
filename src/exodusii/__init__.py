@@ -15,6 +15,7 @@ from exodusii.api.copy import copy
 from exodusii.api.copy import copy_file
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
+from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import VariableDiff
 from exodusii.api.diff import diff
 from exodusii.api.file import ExodusFile
@@ -48,6 +49,7 @@ __all__ = [
     "ComparisonResult",
     "DiffOptions",
     "DiffResult",
+    "TimeSelection",
     "ExodusFile",
     "ExodusIIFile",
     "ExodusWriter",

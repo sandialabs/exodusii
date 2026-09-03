@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 import exodusii
+from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
 from exodusii.api.diff import diff
@@ -410,3 +411,339 @@ def test_node_set_variable_same(tmp_path: Path) -> None:
     _write_with_node_set(a)
     _write_with_node_set(b)
     assert diff(a, b).same
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Time-step selection helpers
+# ---------------------------------------------------------------------------
+
+
+def _write_multistep(
+    path: Path,
+    *,
+    n_steps: int = 5,
+    temp_scale: float = 1.0,
+    start_time: float = 0.0,
+    dt: float = 1.0,
+) -> None:
+    """Write a 4-node, 1-element, n-step file with TEMP nodal variable."""
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(path) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(n_steps):
+            t = start_time + s * dt
+            writer.write_time(t)
+            writer.write_node_values("TEMP", np.full(4, float(s) * temp_scale))
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — start / stop / increment
+# ---------------------------------------------------------------------------
+
+
+def test_start_selects_first_step(tmp_path: Path) -> None:
+    """start=3 should skip steps 1-2; steps 3-5 are compared."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    # File-1 and file-2 identical except step 1 and 2 differ.
+    # Without selection both would differ; with start=3 they should be same.
+    _write_multistep(a, n_steps=5, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(5):
+            writer.write_time(float(s))
+            # Steps 0-1 (1-based 1-2) differ; steps 2-4 (1-based 3-5) match.
+            val = float(s) if s >= 2 else float(s) + 100.0
+            writer.write_node_values("TEMP", np.full(4, val))
+
+    ts = TimeSelection(start=3)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+def test_stop_limits_last_step(tmp_path: Path) -> None:
+    """stop=2 should compare only steps 1-2; step 3+ differ but are ignored."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=4, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s))
+            val = float(s) if s < 2 else float(s) + 100.0
+            writer.write_node_values("TEMP", np.full(4, val))
+
+    ts = TimeSelection(stop=2)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+def test_increment_skips_steps(tmp_path: Path) -> None:
+    """increment=2 compares steps 1, 3, 5 of file-2; steps 2, 4 differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=5, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(5):
+            writer.write_time(float(s))
+            # Odd 0-based indices (1-based 2, 4) differ.
+            val = float(s) if s % 2 == 0 else float(s) + 100.0
+            writer.write_node_values("TEMP", np.full(4, val))
+
+    ts = TimeSelection(increment=2)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — LAST sentinel
+# ---------------------------------------------------------------------------
+
+
+def test_last_compares_only_final_step(tmp_path: Path) -> None:
+    """start=-1 (LAST) should compare only the final step; earlier steps differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=3, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(3):
+            writer.write_time(float(s))
+            # Only the last step (s=2) matches; others differ.
+            val = float(s) if s == 2 else float(s) + 50.0
+            writer.write_node_values("TEMP", np.full(4, val))
+
+    ts = TimeSelection(start=-1)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — exclude_steps
+# ---------------------------------------------------------------------------
+
+
+def test_exclude_steps_skips_listed_steps(tmp_path: Path) -> None:
+    """Steps in exclude_steps are not compared even when they differ."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=4, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s))
+            # Steps 2 and 4 (1-based) differ.
+            val = float(s) if s in (0, 2) else float(s) + 200.0
+            writer.write_node_values("TEMP", np.full(4, val))
+
+    ts = TimeSelection(exclude_steps=frozenset({2, 4}))
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — time_step_offset via TimeSelection
+# ---------------------------------------------------------------------------
+
+
+def test_time_step_offset_via_time_selection(tmp_path: Path) -> None:
+    """time_step_offset=1 maps file-2 step n to file-1 step n+1.
+
+    file-1 has 5 steps with TEMP = 0,1,2,3,4.
+    file-2 has 4 steps with TEMP = 1,2,3,4 (same as file-1 steps 2..5).
+    With offset=1, file-2 step 1 compares to file-1 step 2, etc. -> same.
+    """
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=5, temp_scale=1.0)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s + 1))
+            # TEMP = s+1 to match file-1 steps 2..5 (0-based 1..4)
+            writer.write_node_values("TEMP", np.full(4, float(s + 1)))
+
+    ts = TimeSelection(time_step_offset=1)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — time_value_scale / time_value_offset
+# ---------------------------------------------------------------------------
+
+
+def test_time_value_scale_and_offset(tmp_path: Path) -> None:
+    """time_value_scale/offset adjusts file-1 times before matching."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    # file-1 times: 0, 2, 4, 6, 8 (dt=2)
+    _write_multistep(a, n_steps=5, dt=2.0)
+    # file-2 times: 0, 1, 2, 3, 4 (dt=1) — same values, half the time axis
+    _write_multistep(b, n_steps=5, dt=1.0)
+
+    # With scale=0.5, file-1 adjusted times become 0, 1, 2, 3, 4 — matching file-2.
+    ts = TimeSelection(time_value_scale=0.5, interpolating=True)
+    opts = DiffOptions(
+        time_selection=ts,
+        time_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10),
+    )
+    result = diff(a, b, opts)
+    assert result.same, result.errors
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — interpolating
+# ---------------------------------------------------------------------------
+
+
+def test_interpolating_exact_match_is_same(tmp_path: Path) -> None:
+    """When file-1 times exactly coincide with file-2 times, interpolating gives same result."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=4)
+    _write_multistep(b, n_steps=4)
+
+    ts = TimeSelection(interpolating=True)
+    opts = DiffOptions(time_selection=ts)
+    assert diff(a, b, opts).same
+
+
+def test_interpolating_midpoint_values(tmp_path: Path) -> None:
+    """Interpolating at the midpoint between two file-2 steps gives correct values."""
+    # file-1 times: 0.5, 1.5, 2.5  (midpoints between file-2 steps)
+    # file-1 TEMP:  linearly interpolated values from file-2
+    # file-2 times: 0, 1, 2, 3  with TEMP = s*10 at step s (0-based)
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+
+    # file-1: times at midpoints; TEMP = interpolated value = (s + 0.5) * 10
+    with ExodusWriter.create(a) as writer:
+        writer.initialize("interp", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(3):
+            writer.write_time(float(s) + 0.5)
+            writer.write_node_values("TEMP", np.full(4, (s + 0.5) * 10.0))
+
+    # file-2: integer times, TEMP = s*10
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("interp", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s))
+            writer.write_node_values("TEMP", np.full(4, float(s * 10)))
+
+    ts = TimeSelection(interpolating=True)
+    # Use a tight absolute tolerance; interpolated values should be exact.
+    opts = DiffOptions(
+        time_selection=ts,
+        default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10),
+        compare_coordinates=False,
+    )
+    result = diff(a, b, opts)
+    assert result.same, result.errors
+
+
+def test_interpolating_outside_range_skipped(tmp_path: Path) -> None:
+    """File-1 times outside the file-2 time range are skipped when interpolating."""
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+
+    # file-1: times 0, 1, 2, 5 — last step (5) is outside file-2 range [0,3].
+    with ExodusWriter.create(a) as writer:
+        writer.initialize("skip", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for t in [0.0, 1.0, 2.0, 5.0]:
+            writer.write_time(t)
+            writer.write_node_values("TEMP", np.full(4, t))
+
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("skip", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for t in [0.0, 1.0, 2.0, 3.0]:
+            writer.write_time(t)
+            writer.write_node_values("TEMP", np.full(4, t))
+
+    ts = TimeSelection(interpolating=True)
+    opts = DiffOptions(
+        time_selection=ts,
+        default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10),
+        compare_coordinates=False,
+    )
+    result = diff(a, b, opts)
+    # Steps 0-2 match; step 3 (t=5.0) is out of range and skipped -> same.
+    assert result.same, result.errors
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — backward compat: legacy time_step_offset on DiffOptions
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_time_step_offset_still_works(tmp_path: Path) -> None:
+    """time_step_offset on DiffOptions (no time_selection) still works as before.
+
+    file-1: 5 steps, TEMP=0..4.
+    file-2: 4 steps, TEMP=1..4 (matching file-1 steps 2..5).
+    With legacy time_step_offset=1 -> file-2 step n maps to file-1 step n+1.
+    """
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write_multistep(a, n_steps=5)
+
+    coords = np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+    with ExodusWriter.create(b) as writer:
+        writer.initialize("ms", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(coords)
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_node_variables(["TEMP"])
+        for s in range(4):
+            writer.write_time(float(s + 1))
+            writer.write_node_values("TEMP", np.full(4, float(s + 1)))
+
+    opts = DiffOptions(time_step_offset=1)
+    assert diff(a, b, opts).same
