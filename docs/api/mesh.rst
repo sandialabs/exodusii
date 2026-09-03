@@ -21,3 +21,11 @@ exodusii.mesh.geometry
    :members:
    :undoc-members: False
    :show-inheritance:
+
+exodusii.mesh.matching
+-----------------------
+
+.. automodule:: exodusii.mesh.matching
+   :members:
+   :undoc-members: False
+   :show-inheritance:

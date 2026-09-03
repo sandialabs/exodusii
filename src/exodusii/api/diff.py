@@ -1242,11 +1242,10 @@ def _align_set_entries(
         mapped_entries = np.where(
             valid, mesh_map.elem_map[np.clip(e2_0based, 0, n_elems - 1)] + 1, entries2
         )
-        # Sort by (mapped_element_id, side_ordinal).
-        keys1 = entries1 * 10000 + sides1  # composite sort key (assuming sides < 10000)
-        keys2 = mapped_entries * 10000 + sides2
-        order1 = np.argsort(keys1, stable=True).astype(np.int64)
-        order2 = np.argsort(keys2, stable=True).astype(np.int64)
+        # Sort by (mapped_element_id, side_ordinal) using lexsort.
+        # np.lexsort sorts by the *last* key first, so pass (sides, entries).
+        order1 = np.lexsort((sides1, entries1)).astype(np.int64)
+        order2 = np.lexsort((sides2, mapped_entries)).astype(np.int64)
         return order1, order2
 
     # For other set types (edge sets, face sets, element sets) translate

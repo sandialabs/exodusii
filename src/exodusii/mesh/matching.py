@@ -164,22 +164,14 @@ class MeshMap:
         off1 = self.block_elem_offsets1[block_id1]
         off2 = self.block_elem_offsets2[block_id2]
 
-        # Determine block size from the global elem_map.
-        # Count file-2 global indices that fall in this block's global range.
-        # We need the size; derive it by scanning elem_map for entries whose
-        # file-1 global index falls in [off1, off1+count1).
-        # Since block_elem_offsets are stored, infer count from consecutive
-        # keys or directly from elem_map_inv slice.
-        # Use a simpler approach: find all file-2 indices j where
-        # elem_map[j] maps into block1's range, and restrict to j in block2's range.
-        # Actually: elem_map[j] = i means j is in block2 and i is in block1.
-        # block2's elements are at global file-2 indices [off2, off2+count2).
-        # count2 == count1 (matched blocks must have equal element counts).
-        # Find count2 by looking at how many global file-2 indices are in block2.
-        sorted_ids2 = sorted(self.block_elem_offsets2.keys())
-        idx2 = sorted_ids2.index(block_id2)
-        if idx2 + 1 < len(sorted_ids2):
-            count2 = self.block_elem_offsets2[sorted_ids2[idx2 + 1]] - off2
+        # Determine the element count of this file-2 block by finding the next
+        # larger offset.  Sort items by offset value (not by block ID) so that
+        # non-consecutive block IDs are handled correctly.
+        sorted_by_offset2 = sorted(self.block_elem_offsets2.items(), key=lambda kv: kv[1])
+        offsets2 = [off for _bid, off in sorted_by_offset2]
+        idx2 = offsets2.index(off2)
+        if idx2 + 1 < len(offsets2):
+            count2 = offsets2[idx2 + 1] - off2
         else:
             count2 = self.elem_map.shape[0] - off2
 
@@ -219,7 +211,8 @@ def build_mesh_map(
     require_unique_mapping : bool
         If ``True`` (default), raise :class:`MeshMatchError` when any
         node or element cannot be uniquely matched.  If ``False``, emit
-        warnings and leave unmatched entries at index ``-1`` in the maps.
+        warnings and continue; unmatched file-2 nodes/elements are aliased
+        to file-1 index 0, making those specific comparisons unreliable.
 
     Returns
     -------
@@ -362,23 +355,31 @@ def build_mesh_map(
     if unmatched_nodes > 0:
         warnings.warn(
             f"Coordinate mesh matching: {unmatched_nodes} node(s) could not be matched "
-            f"within tolerance {matching_tolerance:.3e}; left at -1.",
+            f"within tolerance {matching_tolerance:.3e}. Unmatched file-2 nodes will be "
+            f"mapped to file-1 node 0; comparisons involving those nodes are unreliable.",
             stacklevel=3,
         )
     if unmatched_elems > 0:
         warnings.warn(
             f"Coordinate mesh matching: {unmatched_elems} element(s) could not be matched "
-            f"within tolerance {matching_tolerance:.3e}; left at -1.",
+            f"within tolerance {matching_tolerance:.3e}. Unmatched file-2 elements will be "
+            f"mapped to file-1 element 0; comparisons involving those elements are unreliable.",
             stacklevel=3,
         )
 
-    # Replace any remaining -1 entries with 0 to avoid downstream IndexErrors
-    # when require_unique_mapping=False.
+    # Replace any remaining -1 entries with 0 so downstream array indexing
+    # does not raise IndexError.  Note: this means unmatched file-2 nodes/
+    # elements silently alias to file-1 index 0, making those comparisons
+    # unreliable.  When require_unique_mapping=True (the default) this path
+    # is never reached because MeshMatchError is raised above.
     node_map_safe = node_map.copy()
     node_map_safe[node_map_safe == -1] = 0
     elem_map_safe = elem_map.copy()
     elem_map_safe[elem_map_safe == -1] = 0
 
+    # np.argsort on a map with duplicate values (caused by aliasing above)
+    # is not a true inverse, but it is the best available approximation when
+    # require_unique_mapping=False.
     node_map_inv = np.argsort(node_map_safe).astype(np.int64)
     elem_map_inv = np.argsort(elem_map_safe).astype(np.int64)
 
@@ -607,6 +608,12 @@ def _match_blocks(
                     best_bid2 = bid2
 
             if best_bid2 is not None and best_dist <= tol * 1000:
+                # Use a 1000x looser threshold for block-centroid matching than
+                # for node matching.  Block centroids are averages of many nodes
+                # and can legitimately differ by more than the per-node tolerance
+                # even when the blocks describe the same physical region.  The
+                # factor of 1000 is a conservative empirical choice; it accepts
+                # up to ~0.1% of the mesh diameter as a centroid offset.
                 try:
                     conn2 = np.asarray(
                         exo2.block_connectivity(Entity.ELEMENT_BLOCK, best_bid2, zero_based=True),

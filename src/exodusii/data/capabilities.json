@@ -213,7 +213,7 @@
           "exodiff --start LAST gold.exo test.exo",
           "exodiff --interpolate --time-scale 0.5 gold.exo test.exo"
         ],
-        "limitation": "Requires matched mesh ordering (same node/element IDs in both files). No coordinate-based mesh matching."
+        "limitation": "Supports matched mesh ordering (default) and coordinate-based mesh matching (--match-coordinates / DiffOptions(coordinate_matching=True)). See python_api.diff for matching options."
       },
       "exoread": {
         "purpose": "Interactive extraction of named variables by entity. Registered console script.",
@@ -480,9 +480,25 @@
           "opts = DiffOptions(\n    nodal_tolerance=Tolerance(ToleranceMode.RELATIVE, 1e-6),\n    variable_tolerances={'PRESSURE': Tolerance(ToleranceMode.ABSOLUTE, 1e-4)},\n    exclude=frozenset({'TIME'})\n)\nresult = diff('gold.exo', 'test.exo', opts)",
           "opts = DiffOptions(time_selection=TimeSelection(start=3, stop=10, increment=2))\nresult = diff('gold.exo', 'test.exo', opts)",
           "opts = DiffOptions(time_selection=TimeSelection(start=-1))  # LAST only",
-          "opts = DiffOptions(time_selection=TimeSelection(interpolating=True, time_value_scale=0.5))"
+          "opts = DiffOptions(time_selection=TimeSelection(interpolating=True, time_value_scale=0.5))",
+          "opts = DiffOptions(coordinate_matching=True, matching_tolerance=1e-8)",
+          "result = diff('gold.exo', 'reordered.exo', opts)  # files with different node/elem order"
         ],
-        "limitation": "Requires matched mesh ordering (same node/element IDs in both files). Coordinate-based mesh matching is not implemented."
+        "coordinate_matching": {
+          "summary": "Enable with DiffOptions(coordinate_matching=True). Builds a permutation map from spatial coordinates before comparison. Allows comparing files whose nodes/elements are in different order but describe the same physical mesh.",
+          "options": {
+            "coordinate_matching": "bool — enable coordinate-based matching (default False).",
+            "matching_tolerance": "float — per-axis spatial proximity tolerance for building the map (default 1e-6). Independent of coordinate_tolerance.",
+            "require_unique_mapping": "bool — raise MeshMatchError on unmatched nodes/elements (default True). Set False to warn and continue with partial map."
+          },
+          "result_fields": {
+            "mesh_map_built": "bool — True when the coordinate-based map was successfully built.",
+            "unmatched_nodes": "int — count of unmatched nodes (0 unless require_unique_mapping=False).",
+            "unmatched_elems": "int — count of unmatched elements."
+          },
+          "sideset_note": "Sideset face ordinals are checked after element remapping; ordinal mismatches are emitted as warnings in result.warnings but are not fatal errors."
+        },
+        "limitation": "Matched ordering is the default. Coordinate matching requires equal node and element counts in both files. Full face-ordinal correction from connectivity permutation is not performed."
       },
       "copy": {
         "import": "from exodusii.api.copy import copy_file",
@@ -497,13 +513,19 @@
       }
     },
     "mesh_geometry": {
-      "summary": "exodusii.mesh provides finite-element geometry helpers.",
+      "summary": "exodusii.mesh provides finite-element geometry helpers and coordinate-based mesh matching.",
       "functions": {
         "entity_centers": "Compute centers from zero-based connectivity and coordinates.",
         "element_volumes": "Compute element areas or volumes.",
         "nodal_volumes": "Distribute element measures to nodes.",
         "connected_average": "Average nodal values over connectivity.",
         "bounding_box": "Compute coordinate bounding box."
+      },
+      "matching": {
+        "build_mesh_map": "Build a MeshMap permutation map between two ExodusFile objects by spatial coordinate proximity. Used by diff() when coordinate_matching=True.",
+        "MeshMap": "Frozen dataclass holding node_map, node_map_inv, elem_map, elem_map_inv, block_map, unmatched_nodes, unmatched_elems.",
+        "MeshMatchError": "Raised when matching fails and require_unique_mapping=True.",
+        "check_sideset_ordinals": "Check sideset face ordinals after element remapping; returns list of warning strings."
       },
       "elements": ["Quad4", "Hex8", "Tri3", "Tet4", "Wedge6"],
       "element_type_aliases": {
@@ -532,7 +554,7 @@
     "limitations": {
       "python_version": "Requires Python >= 3.13.",
       "dependencies": "Requires netCDF4.",
-      "exodiff_mesh_matching": "The Python exodiff (both CLI and diff() API) only supports matched mesh ordering. Files with the same mesh in different node/element ID order will report differences. Coordinate-based mesh matching (as in SEACAS exodiff --map) is not implemented.",
+      "exodiff_mesh_matching": "The Python exodiff supports both matched mesh ordering (default) and coordinate-based mesh matching (DiffOptions(coordinate_matching=True) / CLI --match-coordinates). See python_api.diff.coordinate_matching for details.",
       "writer_upfront_counts": "ExodusWriter requires exact block/set counts to be declared in initialize() before any blocks or sets are defined. NetCDF4 dimensions cannot be resized after creation. Passing a wrong count raises ExodusWriteError.",
       "parallel_id_maps": "ParallelExodusFile correctness depends on node_num_map / elem_num_map being present in each component file. If absent, a sequential fallback is used and UserWarning is emitted. The fallback is correct only for non-overlapping partitions; files with shared border/external nodes will produce wrong coordinates and connectivity without the maps.",
       "query_cli": [
