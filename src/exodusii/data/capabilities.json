@@ -22,7 +22,10 @@
         "Expose JSON output for AI agents and automation tools.",
         "Compute statistics (mean, max, min, sum, count, std) of a field variable inside a geometric region with optional field-threshold predicate.",
         "Compute material mass inside a geometric region (sum of element_volume * density [* volfrac]).",
-        "Read global scalars quickly from one small decomposed piece file without opening the full joined database."
+        "Read global scalars quickly from one small decomposed piece file without opening the full joined database.",
+        "Region stats over all non-empty blocks or only blocks that define a variable (blocks='auto' for target-material selection).",
+        "Region stats time-history: time='all' returns per-step statistics in one call.",
+        "Tracer access by ID: tracer_ids() and tracer() for robust tracer extraction by integer ID."
       ],
       "start_here": {
         "agent_cli": ".commands",
@@ -685,30 +688,45 @@
         "exo.get_element_variable_values(block_id, 'ENERGY', time_step=1)"
       ]
     },
-    "region_reduce": {
+      "region_reduce": {
       "summary": "Native spatial reduction over a geometric region with optional field-threshold predicate. Replaces the common pattern of manually computing element centers, building a region mask, AND-ing with a field threshold, and reducing. Available as ExodusFile.region_stats(), ExodusFile.region_mass(), and the CLI subcommand 'python -m exodusii region-stats'.",
-      "imports": "from exodusii import region_stats, region_mass, RegionStatsResult, RegionMassResult",
+      "imports": "from exodusii import region_stats, region_mass, RegionStatsResult, RegionMassResult, RegionStatsHistory, BLOCKS_AUTO, BLOCKS_ALL",
       "region_stats": {
-        "signature": "exo.region_stats(name, *, on='element', block_id=None, region, where=None, reduce, time=None, symmetry_factor=1.0) -> RegionStatsResult",
+        "signature": "exo.region_stats(name, *, on='element', block_id=None, blocks=None, region, where=None, reduce, time=None, symmetry_factor=1.0) -> RegionStatsResult | RegionStatsHistory",
         "reducers": ["mean", "max", "min", "sum", "count", "std"],
         "extensive_reducers": ["sum", "count"],
+        "blocks_parameter": {
+          "None_or_all": "All non-empty blocks (skips empty blocks safely — fixes crash on joined files with 16+ empty material blocks).",
+          "auto": "Only non-empty blocks that define the requested variable. Natural 'target material' selection for Alegra multi-material Eulerian output.",
+          "single_block": "Use block_id= for a single block (mutually exclusive with blocks=)."
+        },
+        "time_parameter": {
+          "None": "Last step; returns RegionStatsResult.",
+          "all": "Every step; returns RegionStatsHistory (one RegionStatsResult per step, element centers cached).",
+          "list": "Specific steps; returns RegionStatsHistory.",
+          "single_selector": "That step; returns RegionStatsResult."
+        },
+        "RegionStatsHistory": {
+          "properties": ["steps (tuple)", "times (ndarray)", "counts (ndarray)", "variable (str)"],
+          "method": "stats_table(reducer) -> ndarray, shape (n_steps,)"
+        },
         "notes": [
           "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad from exodusii.mesh.",
           "where is a safe field-threshold predicate: 'VARNAME OP VALUE' only (e.g. 'EQPS_2 > 1.0'). No arbitrary Python.",
           "symmetry_factor is applied only to extensive reducers (sum, count). Mean, max, min, std are intensive and are NOT scaled.",
-          "block_id=None concatenates all element blocks.",
-          "time=None selects the last time step.",
-          "Returns RegionStatsResult with fields: variable, entity, block_id, time_index, time_value, count_total, count_selected, symmetry_factor, stats."
+          "time='all' computes element centers once; where predicate and field values re-read per step for moving selections.",
+          "blocks_used field on RegionStatsResult lists which block IDs contributed."
         ],
         "python_examples": [
-          "from exodusii.api.file import ExodusFile",
-          "from exodusii.mesh import Cylinder",
-          "with ExodusFile.open('run.exo') as exo:",
-          "    cyl = Cylinder([0,0,0], [0.05,0,0], radius=0.013)",
-          "    r = exo.region_stats('YIELD_STRESS_2', block_id=3, region=cyl,",
-          "                          where='EQPS_2 > 1.0', reduce=['mean','max','count'],",
-          "                          time='last', symmetry_factor=4.0)",
-          "    print(r.stats['mean'], r.count_selected)"
+          "# Single block, last step",
+          "r = exo.region_stats('YIELD_STRESS_2', block_id=3, region=cyl, where='EQPS_2 > 1.0', reduce=['mean','max'], time='last', symmetry_factor=4.0)",
+          "# Target material only (skip empty blocks and wrong-material blocks)",
+          "r = exo.region_stats('YIELD_STRESS_2', blocks='auto', region=cyl, reduce='mean', time='last')",
+          "print(r.blocks_used)  # e.g. (3, 7)",
+          "# Time history — band metric over all steps",
+          "h = exo.region_stats('DAMAGE', block_id=3, region=cyl, reduce='max', time='all')",
+          "import matplotlib.pyplot as plt",
+          "plt.plot(h.times, h.stats_table('max'))"
         ]
       },
       "region_mass": {
@@ -718,21 +736,27 @@
           "element_volumes is computed automatically from the block element type.",
           "volfrac_name is optional; omit for pure materials, set for mixed-material cells.",
           "symmetry_factor=4.0 for a quarter-symmetry model.",
-          "Returns RegionMassResult with fields: block_id, time_index, time_value, count_total, count_selected, density_name, volfrac_name, symmetry_factor, mass."
-        ],
-        "python_examples": [
-          "from exodusii.api.file import ExodusFile",
-          "from exodusii.mesh import Cylinder",
-          "with ExodusFile.open('run.exo') as exo:",
-          "    cyl = Cylinder([0,0,0], [0.05,0,0], radius=0.013)",
-          "    result = exo.region_mass(block_id=3, region=cyl,",
-          "                             density_name='DENSITY', volfrac_name='VOLFRC_2',",
-          "                             time='last', symmetry_factor=4.0)",
-          "    print(result.mass)"
+          "Returns RegionMassResult with fields: block_id, blocks_used, time_index, time_value, count_total, count_selected, density_name, volfrac_name, symmetry_factor, mass."
         ]
       },
+      "tracer_api": {
+        "storage_pattern": "Tracers in Alegra output are stored as SPHERE element-block nodes. 'ID' is a nodal variable (float64, constant across time) holding the user-assigned integer tracer IDs.",
+        "tracer_ids": {
+          "signature": "exo.tracer_ids(*, id_variable='ID') -> ndarray[int64]",
+          "purpose": "Return sorted integer tracer IDs from the ID nodal variable."
+        },
+        "tracer": {
+          "signature": "exo.tracer(name, *, ids=None, time=None, id_variable='ID') -> dict[int, float | ndarray]",
+          "ids_none": "Return all tracers.",
+          "ids_list": "Return only those IDs; raises ExodusLookupError if any are missing.",
+          "time_none": "Full time history per tracer: ndarray, shape (n_steps,).",
+          "time_single": "Scalar float per tracer at that step.",
+          "primary_use_case": "mean_plug_vel = np.mean(list(exo.tracer('VELX', ids=[21,22,23], time='last').values()))"
+        },
+        "cli": "python -m exodusii tracers FILE --select n/VELX [--ids 21,22,23] [--time last] [--id-variable ID]"
+      },
       "cli_region_stats": {
-        "command": "python -m exodusii region-stats FILE --select ENTITY/NAME --REGION_TYPE ARGS --reduce REDUCERS [--block BLOCK_ID] [--where EXPR] [--time SELECTOR] [--symmetry FACTOR]",
+        "command": "python -m exodusii region-stats FILE --select ENTITY/NAME --REGION_TYPE ARGS --reduce REDUCERS [--block BLOCK_ID | --blocks MODE] [--where EXPR] [--time SELECTOR] [--symmetry FACTOR]",
         "region_flags": {
           "--cylinder AX AY AZ BX BY BZ R": "3-D cylinder from axis point A to B with radius R.",
           "--sphere CX CY CZ R": "3-D sphere centred at (CX,CY,CZ) with radius R.",
@@ -741,7 +765,7 @@
         },
         "examples": [
           "python -m exodusii region-stats run.exo --select e/YIELD_STRESS_2 --cylinder 0 0 0 0.05 0 0 0.013 --reduce mean,max,count --time last",
-          "python -m exodusii region-stats run.exo --select e/ENERGY --cylinder 0 0 0 0.05 0 0 0.013 --where 'EQPS_2 > 1.0' --reduce mean --time last --block 3",
+          "python -m exodusii region-stats run.exo --select e/ENERGY --blocks auto --cylinder 0 0 0 0.05 0 0 0.013 --reduce mean --time last",
           "python -m exodusii region-stats run.exo --select e/DENSITY --sphere 0 0 0 0.01 --reduce sum --symmetry 4 --time last"
         ]
       },
