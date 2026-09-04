@@ -1850,6 +1850,153 @@ class ExodusFile:
 
         raise NotImplementedError(f"values for {ent.value!r} are not implemented yet")
 
+    def region_stats(
+        self,
+        name: str,
+        *,
+        on: Entity | str = "element",
+        block_id: int | None = None,
+        region: Any,
+        where: str | None = None,
+        reduce: list[str] | str,
+        time: TimeSelector = None,
+        symmetry_factor: float = 1.0,
+    ) -> Any:
+        """Compute statistics of a result variable inside a geometric region.
+
+        This is the primary convenience method for spatial reduction.  It
+        computes element centroids, applies the region predicate, optionally
+        applies a field-threshold predicate (*where*), and reduces the target
+        variable with one or more aggregation functions.
+
+        Parameters
+        ----------
+        name : str
+            Result variable name (element variable recommended).
+        on : Entity or str, optional
+            Entity location.  Currently ``"element"`` is fully supported.
+            Default ``"element"``.
+        block_id : int or None, optional
+            Restrict to one element block.  When ``None``, all blocks are
+            concatenated.
+        region : Region
+            Geometric region implementing ``region.contains(points)``.
+            Typical choices: :class:`~exodusii.mesh.regions.Cylinder`,
+            :class:`~exodusii.mesh.regions.Sphere`,
+            :class:`~exodusii.mesh.regions.Rectangle`.
+        where : str or None, optional
+            Optional field-threshold predicate in ``"VARNAME OP VALUE"`` form,
+            e.g. ``"EQPS_2 > 1.0"``.  AND-ed with the region mask.
+        reduce : str or list of str
+            One or more of ``"mean"``, ``"max"``, ``"min"``, ``"sum"``,
+            ``"count"``, ``"std"``.
+        time : TimeSelector, optional
+            Time step selector.  ``None`` selects the last available step.
+        symmetry_factor : float, optional
+            Scale factor applied to extensive reducers (``"sum"``,
+            ``"count"``).  Default ``1.0``.
+
+        Returns
+        -------
+        RegionStatsResult
+            Frozen dataclass with ``stats``, ``count_selected``,
+            ``count_total``, ``time_index``, ``time_value``, and
+            ``symmetry_factor`` fields.
+
+        Examples
+        --------
+        >>> from exodusii.mesh import Cylinder
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     cyl = Cylinder([0, 0, 0], [0.05, 0, 0], radius=0.013)
+        ...     r = f.region_stats("YIELD_STRESS_2", block_id=3, region=cyl,
+        ...                        where="EQPS_2 > 1.0", reduce=["mean", "max"],
+        ...                        time="last")
+        ...     print(r.stats["mean"], r.count_selected)
+        """
+        from exodusii.api.region_reduce import region_stats as _region_stats
+
+        return _region_stats(
+            self,
+            name,
+            on=str(entity(on)),
+            block_id=block_id,
+            region=region,
+            where=where,
+            reduce=reduce,
+            time=time,
+            symmetry_factor=symmetry_factor,
+        )
+
+    def region_mass(
+        self,
+        *,
+        block_id: int,
+        region: Any,
+        density_name: str = "DENSITY",
+        volfrac_name: str | None = None,
+        where: str | None = None,
+        time: TimeSelector = None,
+        symmetry_factor: float = 1.0,
+    ) -> Any:
+        """Compute the mass of material inside a geometric region.
+
+        Mass is computed as::
+
+            mass = symmetry_factor * sum(|vol_i| * density_i [* volfrac_i])
+
+        for all elements whose centroid lies inside *region* (and that satisfy
+        the optional *where* predicate).
+
+        Parameters
+        ----------
+        block_id : int
+            Element block ID.
+        region : Region
+            Geometric region predicate.
+        density_name : str, optional
+            Element density variable name.  Default ``"DENSITY"``.
+        volfrac_name : str or None, optional
+            Optional volume-fraction variable name (e.g. ``"VOLFRC_2"``).
+        where : str or None, optional
+            Optional field-threshold predicate, e.g. ``"EQPS_2 > 1.0"``.
+        time : TimeSelector, optional
+            Time step selector.  ``None`` selects the last available step.
+        symmetry_factor : float, optional
+            Symmetry scaling factor.  For a quarter-symmetry model use
+            ``symmetry_factor=4.0``.  Default ``1.0``.
+
+        Returns
+        -------
+        RegionMassResult
+            Frozen dataclass with ``mass``, ``count_selected``,
+            ``count_total``, ``time_index``, ``time_value``, and
+            ``symmetry_factor`` fields.
+
+        Examples
+        --------
+        >>> from exodusii.mesh import Cylinder
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     cyl = Cylinder([0, 0, 0], [0.05, 0, 0], radius=0.013)
+        ...     result = f.region_mass(block_id=3, region=cyl,
+        ...                            density_name="DENSITY",
+        ...                            volfrac_name="VOLFRC_2",
+        ...                            time="last",
+        ...                            symmetry_factor=4.0)
+        ...     print(result.mass)
+        """
+        from exodusii.api.region_reduce import region_mass as _region_mass
+
+        return _region_mass(
+            self,
+            block_id=block_id,
+            region=region,
+            density_name=density_name,
+            volfrac_name=volfrac_name,
+            where=where,
+            time=time,
+            symmetry_factor=symmetry_factor,
+        )
+
     def attribute_names(self, on: Entity | str, block_id: int) -> tuple[str, ...]:
         """Return the names of per-element attributes for a block.
 

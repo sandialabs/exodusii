@@ -177,6 +177,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Maximum result rows to include. Use --limit -1 for all rows.",
     )
+    query_parser.add_argument(
+        "--piece",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Open only the Nth file as a single-piece reader instead of aggregating. "
+            "Useful for reading global scalars from one small decomposed component "
+            "without opening the full joined file. Zero-based index into the file argument."
+        ),
+    )
     query_index = query_parser.add_mutually_exclusive_group()
     query_index.add_argument(
         "--object-index",
@@ -218,6 +229,100 @@ def build_parser() -> argparse.ArgumentParser:
     stats_parser.add_argument(
         "--by-set", action="store_true", help="For set variables, also report statistics by set."
     )
+    stats_parser.add_argument(
+        "--piece",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Open only the Nth file as a single-piece reader instead of aggregating. "
+            "Useful for reading global scalars from one small decomposed component "
+            "without opening the full joined file. Zero-based index into the file argument."
+        ),
+    )
+
+    region_stats_parser = subparsers.add_parser(
+        "region-stats",
+        parents=[common],
+        help="Compute statistics of a variable inside a geometric region.",
+    )
+    region_stats_parser.add_argument("file", help="Exodus database path.")
+    region_stats_parser.add_argument(
+        "--select",
+        required=True,
+        metavar="ENTITY/NAME",
+        help="Variable selector, e.g. e/YIELD_STRESS_2.",
+    )
+    region_stats_parser.add_argument(
+        "--block",
+        type=int,
+        default=None,
+        metavar="BLOCK_ID",
+        help="Restrict to a single element block ID. Default: all blocks.",
+    )
+    region_stats_parser.add_argument(
+        "--time",
+        default=None,
+        help=(
+            "Time selector. Use first, last, a physical time, "
+            "index:N, or step:N. Default: last."
+        ),
+    )
+    region_stats_parser.add_argument(
+        "--reduce",
+        default="mean,max,min,count",
+        help=(
+            "Comma-separated list of reducers: mean, max, min, sum, count, std. "
+            "Default: mean,max,min,count."
+        ),
+    )
+    region_stats_parser.add_argument(
+        "--where",
+        default=None,
+        metavar="EXPR",
+        help="Field predicate, e.g. 'EQPS_2 > 1.0'. AND-ed with the region mask.",
+    )
+    region_stats_parser.add_argument(
+        "--symmetry",
+        type=float,
+        default=1.0,
+        metavar="FACTOR",
+        help=(
+            "Symmetry factor applied to extensive reducers (sum, count). "
+            "Use 4.0 for a quarter-symmetry model. Default: 1.0."
+        ),
+    )
+
+    # Region type (mutually exclusive)
+    region_group = region_stats_parser.add_mutually_exclusive_group(required=True)
+    region_group.add_argument(
+        "--cylinder",
+        nargs=7,
+        type=float,
+        metavar=("AX", "AY", "AZ", "BX", "BY", "BZ", "R"),
+        help="Cylinder from axis-point A to axis-point B with radius R (3-D).",
+    )
+    region_group.add_argument(
+        "--sphere",
+        nargs=4,
+        type=float,
+        metavar=("CX", "CY", "CZ", "R"),
+        help="Sphere centred at (CX, CY, CZ) with radius R (3-D).",
+    )
+    region_group.add_argument(
+        "--circle",
+        nargs=3,
+        type=float,
+        metavar=("CX", "CY", "R"),
+        help="Circle centred at (CX, CY) with radius R (2-D).",
+    )
+    region_group.add_argument(
+        "--rectangle",
+        nargs=4,
+        type=float,
+        metavar=("OX", "OY", "W", "H"),
+        help="Axis-aligned rectangle with origin (OX, OY), width W, height H (2-D).",
+    )
 
     examples_parser = subparsers.add_parser(
         "examples", parents=[common], help="Print database-specific Python usage examples."
@@ -229,37 +334,49 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help=(
             "Query exodusii's static capabilities and skills for agent self-learning. "
-            "With no selector, prints instructions for using this command."
+            "With no topic, prints instructions for using this command."
         ),
     )
-    learn_group = learn_parser.add_mutually_exclusive_group(required=False)
-    learn_group.add_argument(
-        "-c",
-        "--capability",
-        metavar="CAPABILITY",
-        help=(
-            "Query the static capability database. "
-            "'-c all' or '-c capabilities' prints the whole database. "
-            "Other values are shortcut paths, e.g. '-c overview', "
-            "'-c query', or '-c python_api.values'."
-        ),
+    learn_topics = learn_parser.add_subparsers(dest="learn_topic", metavar="topic")
+
+    learn_capabilities = learn_topics.add_parser(
+        "capabilities",
+        parents=[common],
+        aliases=("capability", "caps", "cap"),
+        help="Query the static capability database.",
     )
-    learn_group.add_argument(
-        "-k",
-        "--skill",
-        metavar="SKILL",
-        help=(
-            "Query the static skills database. "
-            "'--skill list' lists skill names. "
-            "'--skill all' prints all skills. "
-            "Otherwise SKILL is interpreted as a skill name."
-        ),
-    )
-    learn_parser.add_argument(
+    learn_capabilities.add_argument(
         "query",
         nargs="?",
+        default="overview",
+        help=(
+            "Capability path. Defaults to 'overview'. "
+            "Use 'all' (or 'capabilities') for the whole database, a top-level key "
+            "like 'query' or 'mesh_geometry', or a nested path like 'python_api.values'."
+        ),
+    )
+
+    learn_skills = learn_topics.add_parser(
+        "skills",
+        parents=[common],
+        aliases=("skill",),
+        help="Query the static skills database.",
+    )
+    learn_skills.add_argument(
+        "query",
+        nargs="?",
+        default="list",
+        help=(
+            "Skill selector. Defaults to 'list' (skill names). "
+            "Use 'all' for every skill, or a skill name like 'exodusii-geometry' "
+            "optionally followed by a path, e.g. 'exodusii-querying .body'."
+        ),
+    )
+    learn_skills.add_argument(
+        "path",
+        nargs="?",
         default=".",
-        help="Optional query expression below the selected capability or skill.",
+        help="Optional query path below the selected skill, e.g. '.body'.",
     )
 
     return parser
@@ -286,6 +403,8 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         return examples_command(args)
     if args.command == "learn":
         return learn_command(args)
+    if args.command == "region-stats":
+        return region_stats_command(args)
 
     raise ValueError(f"unknown command {args.command!r}")
 
@@ -470,8 +589,9 @@ def query_command(args: argparse.Namespace) -> dict[str, Any]:
 
     time_selector = parse_time_selector(args.time)
     limit = normalize_limit(args.limit)
+    file_path = _piece_path(args.file, getattr(args, "piece", None))
 
-    with ExodusFile.open(args.file) as exo:
+    with ExodusFile.open(file_path) as exo:
         result = query(exo, *args.select, time=time_selector, object_index=bool(args.object_index))
 
         row_count = len(result.data)
@@ -488,6 +608,9 @@ def query_command(args: argparse.Namespace) -> dict[str, Any]:
             "data": structured_to_records(result.data, limit=limit),
         }
 
+        if getattr(args, "piece", None) is not None:
+            payload["piece"] = int(args.piece)
+
         if "time" in result.metadata:
             payload["time"] = resolved_time_payload(exo, time_selector, requested=args.time)
 
@@ -503,14 +626,18 @@ def stats_command(args: argparse.Namespace) -> dict[str, Any]:
 
     location = entity(selectors[0].entity)
     time_selector = parse_time_selector(args.time)
+    file_path = _piece_path(args.file, getattr(args, "piece", None))
 
-    with ExodusFile.open(args.file) as exo:
+    with ExodusFile.open(file_path) as exo:
         payload: dict[str, Any] = {
             "command": "stats",
             "file": str(args.file),
             "entity": location.value,
             "variables": {},
         }
+
+        if getattr(args, "piece", None) is not None:
+            payload["piece"] = int(args.piece)
 
         if location is not Entity.GLOBAL or args.time is not None:
             payload["time"] = resolved_time_payload(exo, time_selector, requested=args.time)
@@ -612,6 +739,112 @@ def examples_command(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     return {"command": "examples", "file": path, "examples": examples, "agent_hints": agent_hints()}
+
+
+def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Compute statistics of a variable inside a geometric region."""
+    from exodusii.mesh.regions import Circle, Cylinder, Rectangle, Sphere
+
+    # Build the region object from CLI flags
+    if args.cylinder is not None:
+        ax, ay, az, bx, by, bz, r = args.cylinder
+        region_obj = Cylinder([ax, ay, az], [bx, by, bz], r)
+        region_desc = {"type": "cylinder", "p1": [ax, ay, az], "p2": [bx, by, bz], "radius": r}
+    elif args.sphere is not None:
+        cx, cy, cz, r = args.sphere
+        region_obj = Sphere([cx, cy, cz], r)
+        region_desc = {"type": "sphere", "center": [cx, cy, cz], "radius": r}
+    elif args.circle is not None:
+        cx, cy, r = args.circle
+        region_obj = Circle([cx, cy], r)
+        region_desc = {"type": "circle", "center": [cx, cy], "radius": r}
+    elif args.rectangle is not None:
+        ox, oy, w, h = args.rectangle
+        region_obj = Rectangle([ox, oy], w, h)
+        region_desc = {"type": "rectangle", "origin": [ox, oy], "width": w, "height": h}
+    else:
+        raise ValueError("a region type must be specified (--cylinder, --sphere, --circle, or --rectangle)")
+
+    # Parse the variable selector
+    selectors = parse_variable_selectors([args.select], require_same_entity=False)
+    if not selectors:
+        raise ValueError("--select requires a valid variable selector")
+    selector = selectors[0]
+    var_entity = str(entity(selector.entity))
+    var_name = selector.name
+
+    # Parse reducers
+    reduce_list = [r.strip() for r in args.reduce.split(",") if r.strip()]
+
+    time_selector = parse_time_selector(args.time) if args.time is not None else None
+
+    with ExodusFile.open(args.file) as exo:
+        result = exo.region_stats(
+            var_name,
+            on=var_entity,
+            block_id=args.block,
+            region=region_obj,
+            where=args.where,
+            reduce=reduce_list,
+            time=time_selector,
+            symmetry_factor=args.symmetry,
+        )
+
+    return {
+        "command": "region-stats",
+        "file": str(args.file),
+        "variable": result.variable,
+        "entity": result.entity,
+        "block_id": result.block_id,
+        "region": region_desc,
+        "where": args.where,
+        "time": {
+            "index": result.time_index,
+            "value": result.time_value,
+        },
+        "count_total": result.count_total,
+        "count_selected": result.count_selected,
+        "symmetry_factor": result.symmetry_factor,
+        "stats": result.stats,
+    }
+
+
+def _piece_path(file_arg: str, piece: int | None) -> str:
+    """Return the path to use for a single-piece read.
+
+    When *piece* is ``None``, returns *file_arg* unchanged.  When *piece* is
+    given, interprets *file_arg* as a glob pattern or a single path and
+    returns the Nth (zero-based) lexicographically sorted match.
+
+    This supports the common pattern of providing one component file directly
+    (``--piece 0 mesh.e.96.00``) to avoid opening the full joined file for
+    global-scalar queries.
+    """
+    if piece is None:
+        return file_arg
+
+    from pathlib import Path
+
+    path = Path(file_arg)
+    if path.exists():
+        # Single file supplied directly — the piece index must be 0
+        if piece != 0:
+            raise ValueError(
+                f"--piece {piece}: only piece 0 is valid when a single file path is given"
+            )
+        return file_arg
+
+    # Try glob expansion
+    import glob as _glob
+
+    matches = sorted(_glob.glob(file_arg))
+    if not matches:
+        raise FileNotFoundError(f"--piece: no files matched {file_arg!r}")
+    if piece >= len(matches):
+        raise IndexError(
+            f"--piece {piece}: only {len(matches)} files matched {file_arg!r} (0-based)"
+        )
+    return matches[piece]
 
 
 def variable_stats_payload(

@@ -90,6 +90,10 @@ from exodusii.api.parallel import ParallelExodusFile
 from exodusii.api.query import QueryResult
 from exodusii.api.query import print_query
 from exodusii.api.query import query
+from exodusii.api.region_reduce import RegionMassResult
+from exodusii.api.region_reduce import RegionStatsResult
+from exodusii.api.region_reduce import region_mass
+from exodusii.api.region_reduce import region_stats
 from exodusii.api.writer import ExodusWriter
 from exodusii.compat import ExodusIIFile
 from exodusii.compat import File
@@ -123,6 +127,8 @@ __all__ = [
     "ParallelExodusFile",
     "ParallelExodusIIFile",
     "QueryResult",
+    "RegionMassResult",
+    "RegionStatsResult",
     "TimeSelection",
     "Tolerance",
     "ToleranceMode",
@@ -139,6 +145,8 @@ __all__ = [
     "print_query",
     "query",
     "region",
+    "region_mass",
+    "region_stats",
     "similar",
     "write_globals",
 ]

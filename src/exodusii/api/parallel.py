@@ -1744,6 +1744,114 @@ class ParallelExodusFile:
 
         raise ExodusInvalidEntityError(f"{location.value!r} is not a set entity")
 
+    def region_stats(
+        self,
+        name: str,
+        *,
+        on: Any = "element",
+        block_id: int | None = None,
+        region: Any,
+        where: str | None = None,
+        reduce: Any,
+        time: TimeSelector = None,
+        symmetry_factor: float = 1.0,
+    ) -> Any:
+        """Compute statistics of a result variable inside a geometric region.
+
+        Delegates to :func:`exodusii.api.region_reduce.region_stats` using
+        this :class:`ParallelExodusFile` as the data source.  The parallel
+        aggregation (coordinates and values assembled from all component
+        files) is handled transparently.
+
+        Parameters
+        ----------
+        name : str
+            Result variable name.
+        on : Entity or str, optional
+            Entity location.  Default ``"element"``.
+        block_id : int or None, optional
+            Restrict to one element block.  ``None`` uses all blocks.
+        region : Region
+            Geometric region predicate.
+        where : str or None, optional
+            Field-threshold predicate, e.g. ``"EQPS_2 > 1.0"``.
+        reduce : str or list of str
+            Reducer names: ``"mean"``, ``"max"``, ``"min"``, ``"sum"``,
+            ``"count"``, ``"std"``.
+        time : TimeSelector, optional
+            Time step selector.  ``None`` selects the last available step.
+        symmetry_factor : float, optional
+            Scale factor for extensive reducers.  Default ``1.0``.
+
+        Returns
+        -------
+        RegionStatsResult
+        """
+        from exodusii.api.region_reduce import region_stats as _region_stats
+        from exodusii.core.entities import entity as _entity
+
+        return _region_stats(
+            self,  # type: ignore[arg-type]
+            name,
+            on=str(_entity(on)),
+            block_id=block_id,
+            region=region,
+            where=where,
+            reduce=reduce,
+            time=time,
+            symmetry_factor=symmetry_factor,
+        )
+
+    def region_mass(
+        self,
+        *,
+        block_id: int,
+        region: Any,
+        density_name: str = "DENSITY",
+        volfrac_name: str | None = None,
+        where: str | None = None,
+        time: TimeSelector = None,
+        symmetry_factor: float = 1.0,
+    ) -> Any:
+        """Compute the mass of material inside a geometric region.
+
+        Delegates to :func:`exodusii.api.region_reduce.region_mass` using
+        this :class:`ParallelExodusFile` as the data source.
+
+        Parameters
+        ----------
+        block_id : int
+            Element block ID.
+        region : Region
+            Geometric region predicate.
+        density_name : str, optional
+            Element density variable name.  Default ``"DENSITY"``.
+        volfrac_name : str or None, optional
+            Optional volume-fraction variable name.
+        where : str or None, optional
+            Field-threshold predicate, e.g. ``"EQPS_2 > 1.0"``.
+        time : TimeSelector, optional
+            Time step selector.  ``None`` selects the last available step.
+        symmetry_factor : float, optional
+            Symmetry scaling factor.  Default ``1.0``.
+
+        Returns
+        -------
+        RegionMassResult
+        """
+        from exodusii.api.region_reduce import region_mass as _region_mass
+
+        return _region_mass(
+            self,  # type: ignore[arg-type]
+            block_id=block_id,
+            region=region,
+            density_name=density_name,
+            volfrac_name=volfrac_name,
+            where=where,
+            time=time,
+            symmetry_factor=symmetry_factor,
+        )
+
     def write(self, filename: str | Path) -> str:
         """Write the aggregated logical database to a serial Exodus file.
 

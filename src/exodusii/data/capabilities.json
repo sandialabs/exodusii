@@ -5,7 +5,7 @@
     "audience": "AI coding agents and automation tools that need to discover how to use exodusii without loading the full documentation corpus.",
     "format": {
       "type": "static_json",
-      "query_command": "python -m exodusii learn -c CAPABILITY [query]",
+      "query_command": "python -m exodusii learn capabilities [QUERY]  |  python -m exodusii learn skills [QUERY [PATH]]",
       "query_language": "Lightweight path syntax: whole object with '.', dotted object keys, bracketed object keys, and list indexes. This is not jq.",
       "progressive_disclosure": "Top-level objects are compact indexes. Query deeper paths for operational details."
     },
@@ -19,7 +19,10 @@
         "Aggregate decomposed parallel Exodus/Nemesis files.",
         "Write or copy Exodus databases.",
         "Compute simple mesh geometry quantities such as centers, volumes, and nodal volumes.",
-        "Expose JSON output for AI agents and automation tools."
+        "Expose JSON output for AI agents and automation tools.",
+        "Compute statistics (mean, max, min, sum, count, std) of a field variable inside a geometric region with optional field-threshold predicate.",
+        "Compute material mass inside a geometric region (sum of element_volume * density [* volfrac]).",
+        "Read global scalars quickly from one small decomposed piece file without opening the full joined database."
       ],
       "start_here": {
         "agent_cli": ".commands",
@@ -33,25 +36,29 @@
         "variable_selectors": ".query.selectors",
         "time_selectors": ".query.time_selectors",
         "geometry_and_regions": ".mesh_geometry",
+        "region_reduce": ".region_reduce",
         "lineouts": ".query.lineouts",
         "entity_aliases": ".concepts.entity_aliases",
         "legacy_compatibility": ".legacy"
       },
       "common_agent_queries": [
-        "python -m exodusii learn -c overview",
-        "python -m exodusii learn -c commands",
-        "python -m exodusii learn -c query",
-        "python -m exodusii learn -c python_api",
-        "python -m exodusii learn -c python_api.diff",
-        "python -m exodusii learn -c python_api.writer",
-        "python -m exodusii learn -c mesh_geometry",
-        "python -m exodusii learn -c mesh_geometry.regions",
-        "python -m exodusii learn -c query.lineouts",
-        "python -m exodusii learn --skill list",
+        "python -m exodusii learn capabilities overview",
+        "python -m exodusii learn capabilities commands",
+        "python -m exodusii learn capabilities query",
+        "python -m exodusii learn capabilities python_api",
+        "python -m exodusii learn capabilities python_api.diff",
+        "python -m exodusii learn capabilities python_api.writer",
+        "python -m exodusii learn capabilities mesh_geometry",
+        "python -m exodusii learn capabilities mesh_geometry.regions",
+        "python -m exodusii learn capabilities region_reduce",
+        "python -m exodusii learn capabilities query.lineouts",
+        "python -m exodusii learn skills list",
         "python -m exodusii inspect mesh.exo",
         "python -m exodusii variables mesh.exo",
         "python -m exodusii query mesh.exo --select n/TEMP --time last",
         "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block",
+        "python -m exodusii region-stats mesh.exo --select e/YIELD_STRESS_2 --cylinder 0 0 0 0.05 0 0 0.013 --reduce mean,max --time last",
+        "python -m exodusii stats mesh.exo.96.00 --select g/MAT_MASS_1 --piece 0",
         "exodiff gold.exo test.exo"
       ]
     },
@@ -103,11 +110,11 @@
       "learn": {
         "purpose": "Query static exodusii capabilities and skills for self-learning.",
         "examples": [
-          "python -m exodusii learn -c overview",
-          "python -m exodusii learn -c query",
-          "python -m exodusii learn -c python_api.values",
-          "python -m exodusii learn --skill list",
-          "python -m exodusii learn --skill exodusii-querying .body"
+          "python -m exodusii learn capabilities overview",
+          "python -m exodusii learn capabilities query",
+          "python -m exodusii learn capabilities python_api.values",
+          "python -m exodusii learn skills list",
+          "python -m exodusii learn skills exodusii-querying .body"
         ]
       },
       "inspect": {
@@ -678,8 +685,81 @@
         "exo.get_element_variable_values(block_id, 'ENERGY', time_step=1)"
       ]
     },
+    "region_reduce": {
+      "summary": "Native spatial reduction over a geometric region with optional field-threshold predicate. Replaces the common pattern of manually computing element centers, building a region mask, AND-ing with a field threshold, and reducing. Available as ExodusFile.region_stats(), ExodusFile.region_mass(), and the CLI subcommand 'python -m exodusii region-stats'.",
+      "imports": "from exodusii import region_stats, region_mass, RegionStatsResult, RegionMassResult",
+      "region_stats": {
+        "signature": "exo.region_stats(name, *, on='element', block_id=None, region, where=None, reduce, time=None, symmetry_factor=1.0) -> RegionStatsResult",
+        "reducers": ["mean", "max", "min", "sum", "count", "std"],
+        "extensive_reducers": ["sum", "count"],
+        "notes": [
+          "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad from exodusii.mesh.",
+          "where is a safe field-threshold predicate: 'VARNAME OP VALUE' only (e.g. 'EQPS_2 > 1.0'). No arbitrary Python.",
+          "symmetry_factor is applied only to extensive reducers (sum, count). Mean, max, min, std are intensive and are NOT scaled.",
+          "block_id=None concatenates all element blocks.",
+          "time=None selects the last time step.",
+          "Returns RegionStatsResult with fields: variable, entity, block_id, time_index, time_value, count_total, count_selected, symmetry_factor, stats."
+        ],
+        "python_examples": [
+          "from exodusii.api.file import ExodusFile",
+          "from exodusii.mesh import Cylinder",
+          "with ExodusFile.open('run.exo') as exo:",
+          "    cyl = Cylinder([0,0,0], [0.05,0,0], radius=0.013)",
+          "    r = exo.region_stats('YIELD_STRESS_2', block_id=3, region=cyl,",
+          "                          where='EQPS_2 > 1.0', reduce=['mean','max','count'],",
+          "                          time='last', symmetry_factor=4.0)",
+          "    print(r.stats['mean'], r.count_selected)"
+        ]
+      },
+      "region_mass": {
+        "signature": "exo.region_mass(*, block_id, region, density_name='DENSITY', volfrac_name=None, where=None, time=None, symmetry_factor=1.0) -> RegionMassResult",
+        "formula": "mass = symmetry_factor * sum(|vol_i| * density_i [* volfrac_i]) over selected elements",
+        "notes": [
+          "element_volumes is computed automatically from the block element type.",
+          "volfrac_name is optional; omit for pure materials, set for mixed-material cells.",
+          "symmetry_factor=4.0 for a quarter-symmetry model.",
+          "Returns RegionMassResult with fields: block_id, time_index, time_value, count_total, count_selected, density_name, volfrac_name, symmetry_factor, mass."
+        ],
+        "python_examples": [
+          "from exodusii.api.file import ExodusFile",
+          "from exodusii.mesh import Cylinder",
+          "with ExodusFile.open('run.exo') as exo:",
+          "    cyl = Cylinder([0,0,0], [0.05,0,0], radius=0.013)",
+          "    result = exo.region_mass(block_id=3, region=cyl,",
+          "                             density_name='DENSITY', volfrac_name='VOLFRC_2',",
+          "                             time='last', symmetry_factor=4.0)",
+          "    print(result.mass)"
+        ]
+      },
+      "cli_region_stats": {
+        "command": "python -m exodusii region-stats FILE --select ENTITY/NAME --REGION_TYPE ARGS --reduce REDUCERS [--block BLOCK_ID] [--where EXPR] [--time SELECTOR] [--symmetry FACTOR]",
+        "region_flags": {
+          "--cylinder AX AY AZ BX BY BZ R": "3-D cylinder from axis point A to B with radius R.",
+          "--sphere CX CY CZ R": "3-D sphere centred at (CX,CY,CZ) with radius R.",
+          "--circle CX CY R": "2-D circle centred at (CX,CY) with radius R.",
+          "--rectangle OX OY W H": "2-D axis-aligned rectangle origin (OX,OY) width W height H."
+        },
+        "examples": [
+          "python -m exodusii region-stats run.exo --select e/YIELD_STRESS_2 --cylinder 0 0 0 0.05 0 0 0.013 --reduce mean,max,count --time last",
+          "python -m exodusii region-stats run.exo --select e/ENERGY --cylinder 0 0 0 0.05 0 0 0.013 --where 'EQPS_2 > 1.0' --reduce mean --time last --block 3",
+          "python -m exodusii region-stats run.exo --select e/DENSITY --sphere 0 0 0 0.01 --reduce sum --symmetry 4 --time last"
+        ]
+      },
+      "piece_flag_for_globals": {
+        "summary": "The --piece N flag on 'query' and 'stats' subcommands opens only the Nth file argument directly instead of aggregating all component files. Use this to read global scalar variables from one small decomposed component file without opening the full joined (potentially multi-GB) database. Global variables are fully present in every component file.",
+        "usage": "python -m exodusii stats mesh.exo.96.00 --select g/MAT_MASS_1 --piece 0",
+        "notes": [
+          "--piece 0 when a single file path is given: opens that file directly (identical to omitting --piece).",
+          "--piece N with a glob pattern: opens the Nth lexicographically sorted match.",
+          "Only correct for global variables. Element/nodal variables require all pieces for a correct joined view."
+        ],
+        "examples": [
+          "python -m exodusii stats run.exo.96.00 --select g/MAT_MASS_1 --piece 0",
+          "python -m exodusii query run.exo.96.00 --select g/MASSDELETED --time last --piece 0"
+        ]
+      }
+    },
     "limitations": {
-      "python_version": "Requires Python >= 3.13.",
       "dependencies": "Requires netCDF4.",
       "exodiff_mesh_matching": "The Python exodiff supports both matched mesh ordering (default) and coordinate-based mesh matching (DiffOptions(coordinate_matching=True) / CLI --match-coordinates). See python_api.diff.coordinate_matching for details.",
       "writer_upfront_counts": "ExodusWriter requires exact block/set counts to be declared in initialize() before any blocks or sets are defined. NetCDF4 dimensions cannot be resized after creation. Passing a wrong count raises ExodusWriteError.",
