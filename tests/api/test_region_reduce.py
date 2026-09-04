@@ -618,3 +618,356 @@ class TestPieceCLI:
         payload = json.loads(buf.getvalue())
         assert rc == 1
         assert payload["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Helper: mesh with two blocks — one populated, one empty
+# ---------------------------------------------------------------------------
+
+
+def _write_two_block_mesh(path: Path) -> None:
+    """Write a 2x2 quad mesh with two blocks: block 1 has 4 quads, block 2 is empty.
+
+    Uses raw netCDF4 because ExodusWriter does not support zero-element blocks
+    (which are legal in real Alegra/EPU output).  Block 1 has DENSITY defined.
+    """
+    import netCDF4 as nc  # type: ignore[import-untyped]
+
+    ds = nc.Dataset(str(path), "w", format="NETCDF4")
+    ds.setncattr("api_version", 8.25)
+    ds.setncattr("version", 8.25)
+    ds.setncattr("floating_point_word_size", 8)
+    ds.setncattr("file_size", 1)
+    ds.setncattr("title", "empty block test")
+
+    ds.createDimension("len_string", 33)
+    ds.createDimension("len_line", 81)
+    ds.createDimension("four", 4)
+    ds.createDimension("num_dim", 2)
+    ds.createDimension("num_nodes", 9)
+    ds.createDimension("num_elem", 4)
+    ds.createDimension("num_el_blk", 2)
+    ds.createDimension("time_step", None)
+    ds.createDimension("num_el_in_blk1", 4)
+    ds.createDimension("num_nod_per_el1", 4)
+    ds.createDimension("num_el_in_blk2", 0)
+    ds.createDimension("num_nod_per_el2", 4)
+    ds.createDimension("num_elem_var", 1)
+
+    cx = ds.createVariable("coordx", "f8", ("num_nodes",))
+    cy = ds.createVariable("coordy", "f8", ("num_nodes",))
+    cx[:] = [0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0]
+    cy[:] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+
+    prop = ds.createVariable("eb_prop1", "i4", ("num_el_blk",))
+    prop[:] = [1, 2]
+    prop.setncattr("name", "ID")
+    status = ds.createVariable("eb_status", "i4", ("num_el_blk",))
+    status[:] = [1, 1]
+    ds.createVariable("eb_names", "S1", ("num_el_blk", "len_string"))
+
+    conn1 = ds.createVariable("connect1", "i4", ("num_el_in_blk1", "num_nod_per_el1"))
+    conn1[:] = [[1, 2, 5, 4], [2, 3, 6, 5], [4, 5, 8, 7], [5, 6, 9, 8]]
+    conn1.setncattr("elem_type", "QUAD4")
+    conn2 = ds.createVariable("connect2", "i4", ("num_el_in_blk2", "num_nod_per_el2"))
+    conn2.setncattr("elem_type", "QUAD4")
+
+    nev = ds.createVariable("name_elem_var", "S1", ("num_elem_var", "len_string"))
+    for i, ch in enumerate("DENSITY"):
+        nev[0, i] = ch
+
+    v1 = ds.createVariable("vals_elem_var1eb1", "f8", ("time_step", "num_el_in_blk1"))
+    v1[0, :] = [2.0, 4.0, 6.0, 8.0]
+
+    tw = ds.createVariable("time_whole", "f8", ("time_step",))
+    tw[0] = 1.0
+    ds.close()
+
+
+def _write_two_material_mesh(path: Path) -> None:
+    """Write a mesh where two blocks have different variable sets.
+
+    Block 1: 1 quad — has DENSITY and MAT1_VAR
+    Block 2: 1 quad — has DENSITY but NOT MAT1_VAR (different material)
+
+    Uses raw netCDF4 for fine-grained truth table control.
+    """
+    import netCDF4 as nc  # type: ignore[import-untyped]
+
+    ds = nc.Dataset(str(path), "w", format="NETCDF4")
+    ds.setncattr("api_version", 8.25)
+    ds.setncattr("version", 8.25)
+    ds.setncattr("floating_point_word_size", 8)
+    ds.setncattr("file_size", 1)
+    ds.setncattr("title", "two-material test")
+
+    ds.createDimension("len_string", 33)
+    ds.createDimension("len_line", 81)
+    ds.createDimension("four", 4)
+    ds.createDimension("num_dim", 2)
+    ds.createDimension("num_nodes", 6)
+    ds.createDimension("num_elem", 2)
+    ds.createDimension("num_el_blk", 2)
+    ds.createDimension("time_step", None)
+    ds.createDimension("num_el_in_blk1", 1)
+    ds.createDimension("num_nod_per_el1", 4)
+    ds.createDimension("num_el_in_blk2", 1)
+    ds.createDimension("num_nod_per_el2", 4)
+    ds.createDimension("num_elem_var", 2)
+
+    cx = ds.createVariable("coordx", "f8", ("num_nodes",))
+    cy = ds.createVariable("coordy", "f8", ("num_nodes",))
+    cx[:] = [0.0, 1.0, 2.0, 0.0, 1.0, 2.0]
+    cy[:] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
+
+    prop = ds.createVariable("eb_prop1", "i4", ("num_el_blk",))
+    prop[:] = [1, 2]
+    prop.setncattr("name", "ID")
+    status = ds.createVariable("eb_status", "i4", ("num_el_blk",))
+    status[:] = [1, 1]
+    ds.createVariable("eb_names", "S1", ("num_el_blk", "len_string"))
+
+    conn1 = ds.createVariable("connect1", "i4", ("num_el_in_blk1", "num_nod_per_el1"))
+    conn1[:] = [[1, 2, 5, 4]]
+    conn1.setncattr("elem_type", "QUAD4")
+    conn2 = ds.createVariable("connect2", "i4", ("num_el_in_blk2", "num_nod_per_el2"))
+    conn2[:] = [[2, 3, 6, 5]]
+    conn2.setncattr("elem_type", "QUAD4")
+
+    nev = ds.createVariable("name_elem_var", "S1", ("num_elem_var", "len_string"))
+    for i, ch in enumerate("DENSITY"):
+        nev[0, i] = ch
+    for i, ch in enumerate("MAT1_VAR"):
+        nev[1, i] = ch
+
+    # Explicit truth table: DENSITY on both; MAT1_VAR on block 1 only
+    tt = ds.createVariable("elem_var_tab", "i4", ("num_el_blk", "num_elem_var"))
+    tt[:] = [[1, 1], [1, 0]]  # [block1: DENSITY=1, MAT1_VAR=1], [block2: DENSITY=1, MAT1_VAR=0]
+
+    # DENSITY on both blocks
+    vd1 = ds.createVariable("vals_elem_var1eb1", "f8", ("time_step", "num_el_in_blk1"))
+    vd1[0, :] = [5.0]
+    vd2 = ds.createVariable("vals_elem_var1eb2", "f8", ("time_step", "num_el_in_blk2"))
+    vd2[0, :] = [7.0]
+    # MAT1_VAR on block 1 only
+    vm1 = ds.createVariable("vals_elem_var2eb1", "f8", ("time_step", "num_el_in_blk1"))
+    vm1[0, :] = [99.0]
+
+    tw = ds.createVariable("time_whole", "f8", ("time_step",))
+    tw[0] = 0.0
+    ds.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: item 5 — empty-block crash fix
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyBlockFix:
+    def test_block_id_none_skips_empty_blocks(self, tmp_path: Path) -> None:
+        """block_id=None must not crash when the mesh contains empty blocks."""
+        path = tmp_path / "empty.exo"
+        _write_two_block_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            # This should NOT raise ValueError about empty connectivity
+            result = region_stats(
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=None,
+                region=rect,
+                reduce=["mean", "count"],
+                time="last",
+            )
+        # Only block 1's 4 elements should contribute
+        assert result.count_total == 4
+        assert result.count_selected == 4
+        assert result.stats["mean"] == pytest.approx(5.0)  # (2+4+6+8)/4
+
+    def test_blocks_used_excludes_empty_block(self, tmp_path: Path) -> None:
+        """blocks_used should list only the non-empty block."""
+        path = tmp_path / "empty.exo"
+        _write_two_block_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=None,
+                region=rect,
+                reduce="count",
+                time="last",
+            )
+        assert result.block_id is None
+        assert result.blocks_used == (1,)  # block 2 was empty, excluded
+
+    def test_blocks_auto_also_skips_empty_blocks(self, tmp_path: Path) -> None:
+        """blocks='auto' must also survive empty blocks."""
+        path = tmp_path / "empty.exo"
+        _write_two_block_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo, "DENSITY", on="element", blocks="auto", region=rect, reduce="mean", time="last"
+            )
+        assert result.count_total == 4
+        assert result.stats["mean"] == pytest.approx(5.0)
+
+    def test_single_block_id_still_works(self, tmp_path: Path) -> None:
+        """Explicit block_id path is unaffected by the multi-block fix."""
+        path = tmp_path / "empty.exo"
+        _write_two_block_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="last"
+            )
+        assert result.block_id == 1
+        assert result.blocks_used is None
+        assert result.stats["mean"] == pytest.approx(5.0)
+
+    def test_all_empty_blocks_returns_nan_stats(self, tmp_path: Path) -> None:
+        """When all blocks are empty, return a zero-count result with nan stats."""
+        import netCDF4 as nc  # type: ignore[import-untyped]
+
+        p = tmp_path / "all_empty.exo"
+        ds = nc.Dataset(str(p), "w", format="NETCDF4")
+        ds.setncattr("api_version", 8.25)
+        ds.setncattr("version", 8.25)
+        ds.setncattr("floating_point_word_size", 8)
+        ds.setncattr("file_size", 1)
+        ds.setncattr("title", "all empty")
+        ds.createDimension("len_string", 33)
+        ds.createDimension("num_dim", 2)
+        ds.createDimension("num_nodes", 4)
+        ds.createDimension("num_elem", 0)
+        ds.createDimension("num_el_blk", 1)
+        ds.createDimension("time_step", None)
+        ds.createDimension("num_el_in_blk1", 0)
+        ds.createDimension("num_nod_per_el1", 4)
+        ds.createDimension("num_elem_var", 1)
+
+        cx = ds.createVariable("coordx", "f8", ("num_nodes",))
+        cy = ds.createVariable("coordy", "f8", ("num_nodes",))
+        cx[:] = [0.0, 1.0, 1.0, 0.0]
+        cy[:] = [0.0, 0.0, 1.0, 1.0]
+        prop = ds.createVariable("eb_prop1", "i4", ("num_el_blk",))
+        prop[:] = [1]
+        prop.setncattr("name", "ID")
+        status = ds.createVariable("eb_status", "i4", ("num_el_blk",))
+        status[:] = [1]
+        conn1 = ds.createVariable("connect1", "i4", ("num_el_in_blk1", "num_nod_per_el1"))
+        conn1.setncattr("elem_type", "QUAD4")
+        nev = ds.createVariable("name_elem_var", "S1", ("num_elem_var", "len_string"))
+        for i, ch in enumerate("DENSITY"):
+            nev[0, i] = ch
+        tw = ds.createVariable("time_whole", "f8", ("time_step",))
+        tw[0] = 0.0
+        ds.close()
+
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(p) as exo:
+            result = region_stats(
+                exo, "DENSITY", on="element", region=rect, reduce=["mean", "count"], time=0
+            )
+        assert result.count_total == 0
+        assert result.count_selected == 0
+        assert np.isnan(result.stats["mean"])
+        assert result.stats["count"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: item 7 — blocks='auto' target-material selection
+# ---------------------------------------------------------------------------
+
+
+class TestBlocksAuto:
+    def test_auto_selects_only_blocks_with_variable(self, tmp_path: Path) -> None:
+        """blocks='auto' should include only blocks that define the variable."""
+        path = tmp_path / "twomat.exo"
+        _write_two_material_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 1.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo,
+                "MAT1_VAR",
+                on="element",
+                blocks="auto",
+                region=rect,
+                reduce=["mean", "count"],
+                time=0,
+            )
+        # Only block 1 defines MAT1_VAR; block 2 does not
+        assert result.blocks_used == (1,)
+        assert result.count_total == 1
+        assert result.stats["mean"] == pytest.approx(99.0)
+        assert result.stats["count"] == pytest.approx(1.0)
+
+    def test_auto_vs_all_differ_when_variable_absent_on_block(self, tmp_path: Path) -> None:
+        """blocks='all' includes both blocks; blocks='auto' only one."""
+        path = tmp_path / "twomat.exo"
+        _write_two_material_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 1.0)
+        with ExodusFile.open(path) as exo:
+            r_all = region_stats(
+                exo, "DENSITY", on="element", blocks="all", region=rect, reduce="count", time=0
+            )
+            r_auto = region_stats(
+                exo, "DENSITY", on="element", blocks="auto", region=rect, reduce="count", time=0
+            )
+        # DENSITY is defined on both blocks → auto and all give the same answer
+        assert r_all.count_total == r_auto.count_total == 2
+        assert r_all.blocks_used == r_auto.blocks_used == (1, 2)
+
+    def test_block_id_and_blocks_mutually_exclusive(self, tmp_path: Path) -> None:
+        path = tmp_path / "mesh.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo, pytest.raises(ValueError, match="mutually exclusive"):
+            region_stats(
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                blocks="auto",
+                region=rect,
+                    reduce="mean",
+                )
+
+    def test_cli_blocks_auto_flag(self, tmp_path: Path) -> None:
+        """--blocks auto on CLI passes through to region_stats."""
+        import json
+        from io import StringIO
+
+        from exodusii.cli.agent import main
+
+        path = tmp_path / "twomat.exo"
+        _write_two_material_mesh(path)
+        buf = StringIO()
+        rc = main(
+            [
+                "region-stats",
+                str(path),
+                "--select",
+                "e/MAT1_VAR",
+                "--rectangle",
+                "0",
+                "0",
+                "2",
+                "1",
+                "--blocks",
+                "auto",
+                "--reduce",
+                "mean",
+                "--time",
+                "first",
+            ],
+            file=buf,
+        )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0
+        assert payload["ok"] is True
+        assert payload["blocks_used"] == [1]
+        assert payload["stats"]["mean"] == pytest.approx(99.0)

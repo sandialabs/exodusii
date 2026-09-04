@@ -1856,6 +1856,7 @@ class ExodusFile:
         *,
         on: Entity | str = "element",
         block_id: int | None = None,
+        blocks: str | None = None,
         region: Any,
         where: str | None = None,
         reduce: list[str] | str,
@@ -1877,8 +1878,12 @@ class ExodusFile:
             Entity location.  Currently ``"element"`` is fully supported.
             Default ``"element"``.
         block_id : int or None, optional
-            Restrict to one element block.  When ``None``, all blocks are
-            concatenated.
+            Restrict to one element block.  Mutually exclusive with *blocks*.
+        blocks : str or None, optional
+            Multi-block mode.  ``"auto"`` selects only non-empty blocks that
+            define *name* (the natural "target material" for Alegra
+            multi-material output).  ``"all"`` or ``None`` (default) selects
+            all non-empty blocks.  Mutually exclusive with *block_id*.
         region : Region
             Geometric region implementing ``region.contains(points)``.
             Typical choices: :class:`~exodusii.mesh.regions.Cylinder`,
@@ -1900,11 +1905,13 @@ class ExodusFile:
         -------
         RegionStatsResult
             Frozen dataclass with ``stats``, ``count_selected``,
-            ``count_total``, ``time_index``, ``time_value``, and
-            ``symmetry_factor`` fields.
+            ``count_total``, ``blocks_used``, ``time_index``, ``time_value``,
+            and ``symmetry_factor`` fields.
 
         Examples
         --------
+        Single block:
+
         >>> from exodusii.mesh import Cylinder
         >>> with ExodusFile.open("results.exo") as f:
         ...     cyl = Cylinder([0, 0, 0], [0.05, 0, 0], radius=0.013)
@@ -1912,6 +1919,13 @@ class ExodusFile:
         ...                        where="EQPS_2 > 1.0", reduce=["mean", "max"],
         ...                        time="last")
         ...     print(r.stats["mean"], r.count_selected)
+
+        Target-material only (auto-selects blocks that define the variable):
+
+        >>> with ExodusFile.open("results.exo") as f:
+        ...     r = f.region_stats("YIELD_STRESS_2", blocks="auto", region=cyl,
+        ...                        reduce="mean", time="last")
+        ...     print(r.blocks_used)
         """
         from exodusii.api.region_reduce import region_stats as _region_stats
 
@@ -1920,6 +1934,7 @@ class ExodusFile:
             name,
             on=str(entity(on)),
             block_id=block_id,
+            blocks=blocks,
             region=region,
             where=where,
             reduce=reduce,

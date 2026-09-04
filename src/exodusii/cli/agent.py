@@ -258,7 +258,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="BLOCK_ID",
-        help="Restrict to a single element block ID. Default: all blocks.",
+        help="Restrict to a single element block ID. Mutually exclusive with --blocks.",
+    )
+    region_stats_parser.add_argument(
+        "--blocks",
+        default=None,
+        metavar="MODE",
+        help=(
+            "Multi-block mode. 'auto' selects only non-empty blocks that define the "
+            "requested variable (natural target-material selection). 'all' or omitting "
+            "this flag selects all non-empty blocks. Mutually exclusive with --block."
+        ),
     )
     region_stats_parser.add_argument(
         "--time",
@@ -784,6 +794,7 @@ def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
             var_name,
             on=var_entity,
             block_id=args.block,
+            blocks=getattr(args, "blocks", None),
             region=region_obj,
             where=args.where,
             reduce=reduce_list,
@@ -797,6 +808,7 @@ def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
         "variable": result.variable,
         "entity": result.entity,
         "block_id": result.block_id,
+        "blocks_used": list(result.blocks_used) if result.blocks_used is not None else None,
         "region": region_desc,
         "where": args.where,
         "time": {"index": result.time_index, "value": result.time_value},

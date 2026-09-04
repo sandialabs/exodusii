@@ -1750,6 +1750,7 @@ class ParallelExodusFile:
         *,
         on: Any = "element",
         block_id: int | None = None,
+        blocks: str | None = None,
         region: Any,
         where: str | None = None,
         reduce: Any,
@@ -1770,7 +1771,11 @@ class ParallelExodusFile:
         on : Entity or str, optional
             Entity location.  Default ``"element"``.
         block_id : int or None, optional
-            Restrict to one element block.  ``None`` uses all blocks.
+            Restrict to one element block.  Mutually exclusive with *blocks*.
+        blocks : str or None, optional
+            Multi-block mode.  ``"auto"`` selects only non-empty blocks that
+            define *name*.  ``"all"`` or ``None`` selects all non-empty
+            blocks.  Mutually exclusive with *block_id*.
         region : Region
             Geometric region predicate.
         where : str or None, optional
@@ -1795,6 +1800,7 @@ class ParallelExodusFile:
             name,
             on=str(_entity(on)),
             block_id=block_id,
+            blocks=blocks,
             region=region,
             where=where,
             reduce=reduce,

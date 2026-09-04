@@ -90,6 +90,8 @@ from exodusii.api.parallel import ParallelExodusFile
 from exodusii.api.query import QueryResult
 from exodusii.api.query import print_query
 from exodusii.api.query import query
+from exodusii.api.region_reduce import BLOCKS_ALL
+from exodusii.api.region_reduce import BLOCKS_AUTO
 from exodusii.api.region_reduce import RegionMassResult
 from exodusii.api.region_reduce import RegionStatsResult
 from exodusii.api.region_reduce import region_mass
@@ -115,6 +117,8 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0+unknown"
 
 __all__ = [
+    "BLOCKS_ALL",
+    "BLOCKS_AUTO",
     "ComparisonResult",
     "DiffOptions",
     "DiffResult",

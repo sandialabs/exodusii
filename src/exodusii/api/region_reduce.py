@@ -4,10 +4,10 @@
 
 """Region-masked reduction utilities for Exodus databases.
 
-This module provides :class:`RegionStatsResult`, the helper functions
-:func:`region_stats` and :func:`region_mass`, and supporting utilities for
-computing statistics over a geometric region with an optional field-threshold
-predicate.
+This module provides :class:`RegionStatsResult`, :class:`RegionMassResult`,
+the helper functions :func:`region_stats` and :func:`region_mass`, and
+supporting utilities for computing statistics over a geometric region with an
+optional field-threshold predicate.
 
 These are exposed as methods on :class:`~exodusii.api.file.ExodusFile` and
 :class:`~exodusii.api.parallel.ParallelExodusFile`; direct use of this module
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from exodusii.core.time import TimeSelector
 
 # ---------------------------------------------------------------------------
-# Public result type
+# Public result types
 # ---------------------------------------------------------------------------
 
 FloatArray = npt.NDArray[np.float64]
@@ -44,6 +44,12 @@ EXTENSIVE_REDUCERS: frozenset[str] = frozenset({"sum", "count", "mass"})
 
 #: All supported reducer names.
 VALID_REDUCERS: frozenset[str] = frozenset({"mean", "max", "min", "sum", "count", "std"})
+
+#: Sentinel for "only blocks that define the requested variable".
+BLOCKS_AUTO = "auto"
+
+#: Sentinel for "all non-empty blocks".
+BLOCKS_ALL = "all"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,14 +63,18 @@ class RegionStatsResult:
     entity : str
         Entity type string (e.g. ``"element"``).
     block_id : int or None
-        Element block ID, or ``None`` when all blocks were used.
+        Element block ID when a single block was used; ``None`` when multiple
+        blocks were aggregated.
+    blocks_used : tuple[int, ...] or None
+        IDs of the blocks that contributed data when ``block_id is None``.
+        ``None`` when a single ``block_id`` was specified.
     time_index : int or None
-        Zero-based time step index used for the reduction, or ``None`` when
-        *time=None* was passed (which selects the last step).
+        Zero-based time step index used for the reduction.
     time_value : float or None
         Physical time value at *time_index*.
     count_total : int
-        Total number of entities in the block (before masking).
+        Total number of entities across all contributing blocks (before
+        masking).
     count_selected : int
         Number of entities that satisfied both the region and the predicate.
     symmetry_factor : float
@@ -78,6 +88,7 @@ class RegionStatsResult:
     variable: str
     entity: str
     block_id: int | None
+    blocks_used: tuple[int, ...] | None
     time_index: int | None
     time_value: float | None
     count_total: int
@@ -92,14 +103,16 @@ class RegionMassResult:
 
     Attributes
     ----------
-    block_id : int
-        Element block ID.
+    block_id : int or None
+        Element block ID, or ``None`` when multiple blocks were aggregated.
+    blocks_used : tuple[int, ...] or None
+        IDs of the blocks that contributed data when ``block_id is None``.
     time_index : int
         Zero-based time step index.
     time_value : float
         Physical time value.
     count_total : int
-        Total elements in block.
+        Total elements across all contributing blocks.
     count_selected : int
         Elements inside the region (after optional predicate).
     density_name : str
@@ -113,7 +126,8 @@ class RegionMassResult:
         over selected elements.
     """
 
-    block_id: int
+    block_id: int | None
+    blocks_used: tuple[int, ...] | None
     time_index: int
     time_value: float
     count_total: int
@@ -252,6 +266,63 @@ def _parse_predicate(
 
 
 # ---------------------------------------------------------------------------
+# Block enumeration helpers (items 5 + 7)
+# ---------------------------------------------------------------------------
+
+
+def _iter_eligible_blocks(exo: ExodusFile, name: str, on: str, *, blocks_mode: str) -> list[int]:
+    """Return block IDs eligible for a multi-block reduction.
+
+    Parameters
+    ----------
+    exo : ExodusFile
+        Open database.
+    name : str
+        Variable name being reduced.
+    on : str
+        Entity location string.
+    blocks_mode : str
+        ``"auto"`` — non-empty blocks that define *name*;
+        ``"all"``  — all non-empty blocks (variable absence raises normally).
+
+    Returns
+    -------
+    list of int
+        Block IDs to iterate over, in file order, skipping empty blocks.
+        When ``blocks_mode="auto"`` blocks that do not define *name* are also
+        skipped.
+    """
+    from exodusii.core.errors import ExodusLookupError
+
+    eligible: list[int] = []
+    for bid_raw in exo.element_block_ids():
+        bid = int(bid_raw)
+        block = exo.element_block(bid)
+        # Skip empty blocks (item 5 fix)
+        if block.count == 0:
+            continue
+        if blocks_mode == BLOCKS_AUTO:
+            # Skip blocks that don't define the variable (item 7)
+            try:
+                names = exo.variable_names(on)
+                if not any(n.lower() == name.lower() for n in names):
+                    # variable absent from the file entirely — skip silently
+                    continue
+                tt = exo.variable_truth_table(on, id=bid)
+                if tt is not None:
+                    # find the 0-based variable index
+                    var_idx = next(
+                        (i for i, n in enumerate(names) if n.lower() == name.lower()), None
+                    )
+                    if var_idx is not None and int(tt[var_idx]) == 0:
+                        continue
+            except ExodusLookupError:
+                continue
+        eligible.append(bid)
+    return eligible
+
+
+# ---------------------------------------------------------------------------
 # High-level public functions (called from ExodusFile methods)
 # ---------------------------------------------------------------------------
 
@@ -262,6 +333,7 @@ def region_stats(
     *,
     on: str = "element",
     block_id: int | None = None,
+    blocks: str | None = None,
     region: Region,
     where: str | None = None,
     reduce: list[str] | str,
@@ -280,9 +352,13 @@ def region_stats(
     on : str, optional
         Entity location.  Currently only ``"element"`` is fully supported.
     block_id : int or None, optional
-        Restrict to a single element block.  When ``None``, values from all
-        blocks are concatenated (element centers from all blocks are used for
-        the region test).
+        Restrict to a single element block.  Mutually exclusive with
+        *blocks*.
+    blocks : str or None, optional
+        Multi-block mode.  Pass ``"auto"`` to include only non-empty blocks
+        that define *name* (the natural "target material" selection for
+        Alegra multi-material output).  Pass ``"all"`` (or ``None``) to
+        include all non-empty blocks.  Mutually exclusive with *block_id*.
     region : Region
         A geometric region that implements ``region.contains(points)``
         returning a boolean mask.  The region is tested against element
@@ -303,8 +379,17 @@ def region_stats(
     Returns
     -------
     RegionStatsResult
+
+    Raises
+    ------
+    ValueError
+        If both *block_id* and *blocks* are specified, or if an unknown
+        reducer is requested.
     """
     from exodusii.core.time import resolve_time
+
+    if block_id is not None and blocks is not None:
+        raise ValueError("block_id and blocks are mutually exclusive")
 
     if isinstance(reduce, str):
         reduce_list = [r.strip() for r in reduce.split(",")]
@@ -326,38 +411,56 @@ def region_stats(
     time_index = selection.index
     time_value = selection.value
 
-    # Get coordinates and connectivity to compute element centers
+    # Get coordinates (needed for element centers)
     coords = exo.coordinates()
 
     if block_id is not None:
+        # --- Single-block path ---
         conn = exo.element_connectivity(block_id, zero_based=True)
         centers = entity_centers(conn, coords)
         field = np.asarray(
             exo.values(name, on=on, block_id=block_id, time=time_index), dtype=np.float64
         )
+        used_blocks: tuple[int, ...] | None = None
     else:
-        # All blocks: concatenate
-        block_ids_array = exo.element_block_ids()
+        # --- Multi-block path: skip empty / variable-absent blocks ---
+        blocks_mode = BLOCKS_AUTO if blocks == BLOCKS_AUTO else BLOCKS_ALL
+        eligible = _iter_eligible_blocks(exo, name, on, blocks_mode=blocks_mode)
+
         centers_list: list[FloatArray] = []
         field_list: list[FloatArray] = []
-        for bid in block_ids_array:
-            bid_int = int(bid)
-            conn = exo.element_connectivity(bid_int, zero_based=True)
+        for bid in eligible:
+            conn = exo.element_connectivity(bid, zero_based=True)
             centers_list.append(entity_centers(conn, coords))
             field_list.append(
-                np.asarray(
-                    exo.values(name, on=on, block_id=bid_int, time=time_index), dtype=np.float64
-                )
+                np.asarray(exo.values(name, on=on, block_id=bid, time=time_index), dtype=np.float64)
             )
+
+        if not centers_list:
+            # No eligible blocks: return empty result
+            return RegionStatsResult(
+                variable=name,
+                entity=on,
+                block_id=None,
+                blocks_used=tuple(eligible),
+                time_index=time_index,
+                time_value=float(time_value),
+                count_total=0,
+                count_selected=0,
+                symmetry_factor=symmetry_factor,
+                stats={r: (0.0 if r in EXTENSIVE_REDUCERS else float("nan")) for r in reduce_list},
+            )
+
         centers = np.vstack(centers_list)
         field = np.concatenate(field_list)
+        used_blocks = tuple(eligible)
 
     count_total = int(centers.shape[0])
 
     # Region mask
     region_mask = np.asarray(region.contains(centers), dtype=np.bool_)
 
-    # Field predicate mask
+    # Field predicate mask — for multi-block, re-use the per-block block_id=None path
     if where is not None:
         pred_mask = _parse_predicate(where, exo, on=on, block_id=block_id, time=time_index)
         combined_mask = region_mask & pred_mask
@@ -371,6 +474,7 @@ def region_stats(
         variable=name,
         entity=on,
         block_id=block_id,
+        blocks_used=used_blocks,
         time_index=time_index,
         time_value=float(time_value),
         count_total=count_total,
@@ -474,6 +578,7 @@ def region_mass(
 
     return RegionMassResult(
         block_id=block_id,
+        blocks_used=None,
         time_index=time_index,
         time_value=float(time_value),
         count_total=count_total,
@@ -486,6 +591,8 @@ def region_mass(
 
 
 __all__ = [
+    "BLOCKS_ALL",
+    "BLOCKS_AUTO",
     "EXTENSIVE_REDUCERS",
     "VALID_REDUCERS",
     "RegionMassResult",
