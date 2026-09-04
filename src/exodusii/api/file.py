@@ -2017,6 +2017,132 @@ class ExodusFile:
             symmetry_factor=symmetry_factor,
         )
 
+    def tracer_ids(self, *, id_variable: str = "ID") -> npt.NDArray[np.int64]:
+        """Return the tracer IDs stored as a nodal variable.
+
+        Tracer files produced by Alegra typically store tracer particles as
+        ``SPHERE`` element-block nodes with an ``ID`` nodal variable whose
+        values are the user-assigned integer tracer IDs.  This method reads
+        that variable at the first time step (IDs are constant across time)
+        and returns them as a sorted ``int64`` array.
+
+        Parameters
+        ----------
+        id_variable : str, optional
+            Name of the nodal variable holding tracer IDs.  Default ``"ID"``.
+
+        Returns
+        -------
+        ndarray of int64
+            Sorted tracer IDs, shape ``(n_tracers,)``.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *id_variable* is not found in the nodal variable list.
+
+        Examples
+        --------
+        >>> with ExodusFile.open("tracers.exo") as tr:
+        ...     ids = tr.tracer_ids()
+        ...     print(ids)
+        [11 12 13 14 21 22 23]
+        """
+        raw = np.asarray(self.values(id_variable, on="node", time=0), dtype=np.float64)
+        return np.sort(raw.astype(np.int64))
+
+    def tracer(
+        self,
+        name: str,
+        *,
+        ids: list[int] | npt.ArrayLike | None = None,
+        time: TimeSelector = None,
+        id_variable: str = "ID",
+    ) -> dict[int, npt.NDArray[np.float64] | float]:
+        """Return values of a nodal variable keyed by tracer ID.
+
+        Reads the ``id_variable`` nodal variable to build a positional
+        index → tracer-ID mapping, then extracts *name* values for each
+        requested ID.
+
+        Parameters
+        ----------
+        name : str
+            Name of the nodal variable to extract (e.g. ``"VELX"``).
+        ids : array_like of int or None, optional
+            Tracer IDs to return.  When ``None`` all tracers are returned.
+            Raises :exc:`~exodusii.core.errors.ExodusLookupError` if any
+            requested ID is not present.
+        time : TimeSelector, optional
+            Time step selector.  ``None`` returns the full time history
+            for each tracer as a 1-D array; a single selector returns a
+            scalar float per tracer.
+        id_variable : str, optional
+            Name of the nodal variable holding tracer IDs.  Default ``"ID"``.
+
+        Returns
+        -------
+        dict[int, ndarray or float]
+            Mapping from tracer ID (int) to:
+
+            * ``ndarray`` of shape ``(n_steps,)`` when *time* is ``None``
+              (full history).
+            * ``float`` when *time* is a single step selector.
+
+        Raises
+        ------
+        ExodusLookupError
+            If *id_variable* is not found, or any requested ID is absent.
+
+        Examples
+        --------
+        Velocity at the last step for three specific tracers:
+
+        >>> with ExodusFile.open("tracers.exo") as tr:
+        ...     vel = tr.tracer("VELX", ids=[21, 22, 23], time="last")
+        ...     print(vel[21])
+
+        Full time histories for all tracers:
+
+        >>> with ExodusFile.open("tracers.exo") as tr:
+        ...     histories = tr.tracer("VELX")
+        ...     for tid, arr in histories.items():
+        ...         print(tid, arr.shape)
+        """
+        # Read IDs at time 0 (constant across time)
+        raw_ids = np.asarray(self.values(id_variable, on="node", time=0), dtype=np.float64)
+        int_ids = raw_ids.astype(np.int64)
+
+        # Build mapping: tracer_id → 0-based node index
+        id_to_index: dict[int, int] = {int(tid): i for i, tid in enumerate(int_ids)}
+
+        # Determine which IDs to return
+        if ids is None:
+            requested = sorted(id_to_index.keys())
+        else:
+            requested = [int(i) for i in np.asarray(ids, dtype=np.int64).ravel()]
+            missing = [i for i in requested if i not in id_to_index]
+            if missing:
+                available = sorted(id_to_index.keys())
+                raise ExodusLookupError(
+                    f"tracer IDs not found: {missing}; available IDs: {available}"
+                )
+
+        # Read the full variable array then slice per-tracer
+        all_values = np.asarray(self.values(name, on="node", time=time), dtype=np.float64)
+
+        result: dict[int, npt.NDArray[np.float64] | float] = {}
+        if all_values.ndim == 1:
+            # Single time step → scalar per tracer
+            for tid in requested:
+                result[tid] = float(all_values[id_to_index[tid]])
+        else:
+            # Full history → shape (n_steps, n_nodes); extract column per tracer
+            for tid in requested:
+                result[tid] = all_values[:, id_to_index[tid]]
+
+        return result
+
     def attribute_names(self, on: Entity | str, block_id: int) -> tuple[str, ...]:
         """Return the names of per-element attributes for a block.
 

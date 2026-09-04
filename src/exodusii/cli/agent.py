@@ -338,6 +338,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     examples_parser.add_argument("file", help="Exodus database path.")
 
+    tracers_parser = subparsers.add_parser(
+        "tracers", parents=[common], help="Query tracer variables by tracer ID."
+    )
+    tracers_parser.add_argument("file", help="Exodus database path.")
+    tracers_parser.add_argument(
+        "--select", required=True, metavar="n/NAME", help="Nodal variable selector, e.g. n/VELX."
+    )
+    tracers_parser.add_argument(
+        "--ids",
+        default=None,
+        metavar="ID[,ID...]",
+        help="Comma-separated tracer IDs to return. Default: all tracers.",
+    )
+    tracers_parser.add_argument(
+        "--time",
+        default="last",
+        help=(
+            "Time selector. Use first, last, a physical time, index:N, or step:N. Default: last."
+        ),
+    )
+    tracers_parser.add_argument(
+        "--id-variable",
+        default="ID",
+        metavar="NAME",
+        help="Name of the nodal variable holding tracer IDs. Default: ID.",
+    )
+
     learn_parser = subparsers.add_parser(
         "learn",
         parents=[common],
@@ -411,6 +438,8 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         return learn_command(args)
     if args.command == "region-stats":
         return region_stats_command(args)
+    if args.command == "tracers":
+        return tracers_command(args)
 
     raise ValueError(f"unknown command {args.command!r}")
 
@@ -816,6 +845,42 @@ def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
         "count_selected": result.count_selected,
         "symmetry_factor": result.symmetry_factor,
         "stats": result.stats,
+    }
+
+
+def tracers_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Return tracer variable values keyed by tracer ID."""
+    # Parse selector
+    selectors = parse_variable_selectors([args.select], require_same_entity=False)
+    if not selectors:
+        raise ValueError("--select requires a valid variable selector")
+    selector = selectors[0]
+    var_name = selector.name
+
+    # Parse IDs
+    ids: list[int] | None = None
+    if args.ids is not None:
+        ids = [int(x.strip()) for x in args.ids.split(",") if x.strip()]
+
+    time_selector = parse_time_selector(args.time)
+    id_var = getattr(args, "id_variable", "ID")
+
+    with ExodusFile.open(args.file) as exo:
+        result = exo.tracer(var_name, ids=ids, time=time_selector, id_variable=id_var)
+        all_ids = exo.tracer_ids(id_variable=id_var).tolist()
+
+    # Serialise: ndarray values → lists for JSON
+    data = {str(tid): jsonable(v) for tid, v in result.items()}
+
+    return {
+        "command": "tracers",
+        "file": str(args.file),
+        "variable": var_name,
+        "id_variable": id_var,
+        "all_ids": all_ids,
+        "requested_ids": ids,
+        "time": args.time,
+        "data": data,
     }
 
 
