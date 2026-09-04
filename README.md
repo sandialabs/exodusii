@@ -30,15 +30,15 @@ from exodusii import ExodusFile
 
 with ExodusFile.open("results.exo") as exo:
     print(exo.title)
-    print(exo.dimension)           # 1, 2, or 3
+    print(exo.dimension)  # 1, 2, or 3
     print(exo.node_count)
     print(exo.element_count)
     print(exo.times())
 
-    coords = exo.coordinates()                              # (n_nodes, dim)
-    temp   = exo.values("TEMP",   on="node",    time="last")
+    coords = exo.coordinates()  # (n_nodes, dim)
+    temp = exo.values("TEMP", on="node", time="last")
     energy = exo.values("ENERGY", on="element", block_id=1, time="last")
-    ke     = exo.values("KE",     on="global")             # full time history
+    ke = exo.values("KE", on="global")  # full time history
 
     print(exo.element_block_ids())
     print(exo.variable_names("node"))
@@ -56,12 +56,11 @@ Time selectors: `"first"`, `"last"`, an int (0-based index), or a float
 import numpy as np
 from exodusii import ExodusWriter
 
-coords = np.array([[0,0],[1,0],[1,1],[0,1]], dtype=float)
+coords = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
 
 with ExodusWriter.create("out.exo") as w:
     # Declare all counts upfront — this cannot change after initialize()
-    w.initialize("my mesh", dimension=2, node_count=4, element_count=1,
-                 element_blocks=1)
+    w.initialize("my mesh", dimension=2, node_count=4, element_count=1, element_blocks=1)
     w.write_coordinates(coords)
     w.define_element_block(10, "quad", [[1, 2, 3, 4]])
 
@@ -71,7 +70,7 @@ with ExodusWriter.create("out.exo") as w:
 
     w.write_time(0.0)
     w.write_global_values([0.0])
-    w.write_node_values("TEMP",   [100.0, 200.0, 300.0, 400.0])
+    w.write_node_values("TEMP", [100.0, 200.0, 300.0, 400.0])
     w.write_element_values("STRESS", [42.0], block_id=10)
 ```
 
@@ -82,11 +81,10 @@ with ExodusWriter.create("out.exo") as w:
 ```python
 from exodusii import ParallelExodusFile
 
-with ParallelExodusFile.open("mesh.e.4.0", "mesh.e.4.1",
-                              "mesh.e.4.2", "mesh.e.4.3") as exo:
-    print(exo.node_count)             # global node count
-    coords = exo.coordinates()        # assembled from all pieces
-    temp   = exo.values("TEMP", on="node", time="last")
+with ParallelExodusFile.open("mesh.e.4.0", "mesh.e.4.1", "mesh.e.4.2", "mesh.e.4.3") as exo:
+    print(exo.node_count)  # global node count
+    coords = exo.coordinates()  # assembled from all pieces
+    temp = exo.values("TEMP", on="node", time="last")
 
 # Join all pieces into a single serial file
 with ParallelExodusFile.open(*files) as exo:
@@ -127,10 +125,10 @@ with ExodusFile.open("run.exo") as exo:
         "YIELD_STRESS_2",
         block_id=3,
         region=cyl,
-        where="EQPS_2 > 1.0",          # VARNAME OP VALUE only
+        where="EQPS_2 > 1.0",  # VARNAME OP VALUE only
         reduce=["mean", "max", "count"],
         time="last",
-        symmetry_factor=4.0,            # applied to sum/count; NOT mean/max
+        symmetry_factor=4.0,  # applied to sum/count; NOT mean/max
     )
     print(r.stats["mean"], r.count_selected)
 
@@ -139,11 +137,11 @@ with ExodusFile.open("run.exo") as exo:
         block_id=3,
         region=cyl,
         density_name="DENSITY",
-        volfrac_name="VOLFRC_2",        # optional volume fraction
+        volfrac_name="VOLFRC_2",  # optional volume fraction
         time="last",
         symmetry_factor=4.0,
     )
-    print(result.mass)                  # = 4 * sum(|vol| * density * volfrac)
+    print(result.mass)  # = 4 * sum(|vol| * density * volfrac)
 ```
 
 Available reducers: `mean`, `max`, `min`, `sum`, `count`, `std`.
@@ -252,20 +250,20 @@ from exodusii.mesh import Cylinder, Sphere, Circle, Rectangle
 
 with ExodusFile.open("run.exo") as exo:
     coords = exo.coordinates()
-    conn   = exo.element_connectivity(block_id=1, zero_based=True)
+    conn = exo.element_connectivity(block_id=1, zero_based=True)
 
 # Element centroids — feed to region.contains() to select elements
 centers = entity_centers(conn, coords)
 
 # Per-element volumes/areas
-vols    = element_volumes("hex8", conn, coords)
+vols = element_volumes("hex8", conn, coords)
 
 # Bounding box
-lo, hi  = bounding_box(coords)
+lo, hi = bounding_box(coords)
 
 # Region predicates
-cyl  = Cylinder([0, 0, 0], [0.05, 0, 0], radius=0.013)
-mask = cyl.contains(centers)       # boolean ndarray
+cyl = Cylinder([0, 0, 0], [0.05, 0, 0], radius=0.013)
+mask = cyl.contains(centers)  # boolean ndarray
 ```
 
 Supported element types: `quad4`, `hex8`, `tri3`, `tet4`, `wedge6`.
@@ -315,7 +313,7 @@ import exodusii
 # Read
 with exodusii.File("mesh.exo") as exo:
     times = exo.get_times()
-    temp  = exo.get_node_variable_values("TEMP", time_step=-1)
+    temp = exo.get_node_variable_values("TEMP", time_step=-1)
 
 # Write
 with exodusii.File("out.exo", mode="w") as exo:

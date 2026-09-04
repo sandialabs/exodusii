@@ -10,24 +10,22 @@ import numpy as np
 import pytest
 
 from exodusii.api.file import ExodusFile
-from exodusii.api.region_reduce import (
-    RegionMassResult,
-    RegionStatsResult,
-    _apply_mask_reduce,
-    _parse_predicate,
-    region_mass,
-    region_stats,
-)
+from exodusii.api.region_reduce import RegionMassResult
+from exodusii.api.region_reduce import RegionStatsResult
+from exodusii.api.region_reduce import _apply_mask_reduce
+from exodusii.api.region_reduce import _parse_predicate
+from exodusii.api.region_reduce import region_mass
+from exodusii.api.region_reduce import region_stats
 from exodusii.api.writer import ExodusWriter
-from exodusii.mesh.regions import Circle, Rectangle
-
+from exodusii.mesh.regions import Rectangle
 
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal 2-D quad mesh with element variables
 # ---------------------------------------------------------------------------
 
+
 def _write_quad_mesh(path: Path) -> None:
-    """Write a 2×2 grid of unit quads with DENSITY and ENERGY element variables.
+    """Write a 2x2 grid of unit quads with DENSITY and ENERGY element variables.
 
     Nodes (5 total in one block for simplicity, 4 quads 1-unit-side):
 
@@ -51,9 +49,15 @@ def _write_quad_mesh(path: Path) -> None:
     """
     coords = np.array(
         [
-            [0.0, 0.0], [1.0, 0.0], [2.0, 0.0],
-            [0.0, 1.0], [1.0, 1.0], [2.0, 1.0],
-            [0.0, 2.0], [1.0, 2.0], [2.0, 2.0],
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+            [0.0, 2.0],
+            [1.0, 2.0],
+            [2.0, 2.0],
         ],
         dtype=float,
     )
@@ -76,6 +80,7 @@ def _write_quad_mesh(path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Unit tests: _apply_mask_reduce
 # ---------------------------------------------------------------------------
+
 
 class TestApplyMaskReduce:
     def test_mean(self) -> None:
@@ -154,6 +159,7 @@ class TestApplyMaskReduce:
 # Unit tests: _parse_predicate
 # ---------------------------------------------------------------------------
 
+
 class TestParsePredicate:
     def test_greater_than(self, tmp_path: Path) -> None:
         path = tmp_path / "pred.exo"
@@ -175,9 +181,8 @@ class TestParsePredicate:
     def test_invalid_expression(self, tmp_path: Path) -> None:
         path = tmp_path / "pred.exo"
         _write_quad_mesh(path)
-        with ExodusFile.open(path) as exo:
-            with pytest.raises(ValueError, match="unsupported predicate"):
-                _parse_predicate("DENSITY + 1", exo, on="element", block_id=1, time="last")
+        with ExodusFile.open(path) as exo, pytest.raises(ValueError, match="unsupported predicate"):
+            _parse_predicate("DENSITY + 1", exo, on="element", block_id=1, time="last")
 
     def test_no_block_id(self, tmp_path: Path) -> None:
         path = tmp_path / "pred.exo"
@@ -192,6 +197,7 @@ class TestParsePredicate:
 # ---------------------------------------------------------------------------
 # Integration tests: region_stats function
 # ---------------------------------------------------------------------------
+
 
 class TestRegionStats:
     def test_full_rectangle_mean(self, tmp_path: Path) -> None:
@@ -219,7 +225,13 @@ class TestRegionStats:
         rect = Rectangle([0.0, 0.0], 1.0, 1.0)
         with ExodusFile.open(path) as exo:
             result = region_stats(
-                exo, "DENSITY", on="element", block_id=1, region=rect, reduce=["mean", "max"], time="last"
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                reduce=["mean", "max"],
+                time="last",
             )
         assert result.count_selected == 1
         # DENSITY[0] at last step = 2.0
@@ -234,8 +246,14 @@ class TestRegionStats:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
             result = region_stats(
-                exo, "ENERGY", on="element", block_id=1, region=rect,
-                where="DENSITY > 4.0", reduce=["mean", "count"], time="last",
+                exo,
+                "ENERGY",
+                on="element",
+                block_id=1,
+                region=rect,
+                where="DENSITY > 4.0",
+                reduce=["mean", "count"],
+                time="last",
             )
         assert result.count_selected == 2
         # ENERGY at last step for elems 3,4: [60, 80]  → mean=70
@@ -248,12 +266,24 @@ class TestRegionStats:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
             r4 = region_stats(
-                exo, "DENSITY", on="element", block_id=1, region=rect,
-                reduce=["mean", "sum"], time="last", symmetry_factor=4.0,
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                reduce=["mean", "sum"],
+                time="last",
+                symmetry_factor=4.0,
             )
             r1 = region_stats(
-                exo, "DENSITY", on="element", block_id=1, region=rect,
-                reduce=["mean", "sum"], time="last", symmetry_factor=1.0,
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                reduce=["mean", "sum"],
+                time="last",
+                symmetry_factor=1.0,
             )
         # mean is intensive — must be the same regardless of symmetry_factor
         assert r4.stats["mean"] == pytest.approx(r1.stats["mean"])
@@ -267,7 +297,13 @@ class TestRegionStats:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
             result = region_stats(
-                exo, "DENSITY", on="element", block_id=None, region=rect, reduce="count", time="last"
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=None,
+                region=rect,
+                reduce="count",
+                time="last",
             )
         assert result.count_total == 4
         assert result.count_selected == 4
@@ -278,14 +314,20 @@ class TestRegionStats:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
             result = region_stats(
-                exo, "DENSITY", on="element", block_id=1, region=rect,
-                reduce="mean", time="last", symmetry_factor=2.0,
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                reduce="mean",
+                time="last",
+                symmetry_factor=2.0,
             )
         assert result.variable == "DENSITY"
         assert result.entity == "element"
         assert result.block_id == 1
         assert result.symmetry_factor == pytest.approx(2.0)
-        assert result.time_index == 1   # "last" → index 1 (two steps)
+        assert result.time_index == 1  # "last" → index 1 (two steps)
         assert result.time_value == pytest.approx(1.0)
 
     def test_method_on_exodusfile(self, tmp_path: Path) -> None:
@@ -303,6 +345,7 @@ class TestRegionStats:
 # ---------------------------------------------------------------------------
 # Integration tests: region_mass function
 # ---------------------------------------------------------------------------
+
 
 class TestRegionMass:
     def test_full_mesh_mass(self, tmp_path: Path) -> None:
@@ -337,7 +380,11 @@ class TestRegionMass:
         with ExodusFile.open(path) as exo:
             r1 = region_mass(exo, block_id=1, region=rect, density_name="DENSITY", time="last")
             r4 = region_mass(
-                exo, block_id=1, region=rect, density_name="DENSITY", time="last",
+                exo,
+                block_id=1,
+                region=rect,
+                density_name="DENSITY",
+                time="last",
                 symmetry_factor=4.0,
             )
         assert r4.mass == pytest.approx(r1.mass * 4.0)
@@ -353,12 +400,14 @@ class TestRegionMass:
             # but VOID_FRC doesn't exist in this mesh; use DENSITY/max trick)
             # Instead, verify that passing volfrac_name changes the result.
             # Use DENSITY as volfrac: mass = sum(vol*DENSITY*DENSITY)
-            r_novf = region_mass(
-                exo, block_id=1, region=rect, density_name="DENSITY", time="last"
-            )
+            r_novf = region_mass(exo, block_id=1, region=rect, density_name="DENSITY", time="last")
             r_vf = region_mass(
-                exo, block_id=1, region=rect, density_name="DENSITY",
-                volfrac_name="DENSITY", time="last",
+                exo,
+                block_id=1,
+                region=rect,
+                density_name="DENSITY",
+                volfrac_name="DENSITY",
+                time="last",
             )
         # With volfrac=DENSITY, mass = sum(vol * D * D) = 1*(4+16+36+64) = 120
         assert r_vf.mass == pytest.approx(120.0)
@@ -371,8 +420,12 @@ class TestRegionMass:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
             result = region_mass(
-                exo, block_id=1, region=rect, density_name="DENSITY",
-                where="DENSITY > 4.0", time="last",
+                exo,
+                block_id=1,
+                region=rect,
+                density_name="DENSITY",
+                where="DENSITY > 4.0",
+                time="last",
             )
         # DENSITY at last=[2,4,6,8] > 4 → elems 3,4 (DENSITY=6,8)
         assert result.count_selected == 2
@@ -384,9 +437,7 @@ class TestRegionMass:
         _write_quad_mesh(path)
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
-            result = exo.region_mass(
-                block_id=1, region=rect, density_name="DENSITY", time="last"
-            )
+            result = exo.region_mass(block_id=1, region=rect, density_name="DENSITY", time="last")
         assert result.mass == pytest.approx(20.0)
 
     def test_result_metadata(self, tmp_path: Path) -> None:
@@ -394,9 +445,7 @@ class TestRegionMass:
         _write_quad_mesh(path)
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo:
-            result = region_mass(
-                exo, block_id=1, region=rect, density_name="DENSITY", time="last"
-            )
+            result = region_mass(exo, block_id=1, region=rect, density_name="DENSITY", time="last")
         assert result.block_id == 1
         assert result.density_name == "DENSITY"
         assert result.volfrac_name is None
@@ -407,6 +456,7 @@ class TestRegionMass:
 # ---------------------------------------------------------------------------
 # CLI tests: region-stats subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestRegionStatsCLI:
     def test_cli_region_stats_rectangle(self, tmp_path: Path) -> None:
@@ -419,15 +469,24 @@ class TestRegionStatsCLI:
         buf = StringIO()
         rc = main(
             [
-                "region-stats", str(path),
-                "--select", "e/DENSITY",
-                "--rectangle", "0", "0", "2", "2",
-                "--reduce", "mean,max",
-                "--time", "last",
+                "region-stats",
+                str(path),
+                "--select",
+                "e/DENSITY",
+                "--rectangle",
+                "0",
+                "0",
+                "2",
+                "2",
+                "--reduce",
+                "mean,max",
+                "--time",
+                "last",
             ],
             file=buf,
         )
         import json
+
         payload = json.loads(buf.getvalue())
         assert payload["ok"] is True
         assert payload["command"] == "region-stats"
@@ -439,6 +498,7 @@ class TestRegionStatsCLI:
 
     def test_cli_region_stats_with_where(self, tmp_path: Path) -> None:
         from io import StringIO
+
         from exodusii.cli.agent import main
 
         path = tmp_path / "cli.exo"
@@ -446,16 +506,26 @@ class TestRegionStatsCLI:
         buf = StringIO()
         rc = main(
             [
-                "region-stats", str(path),
-                "--select", "e/ENERGY",
-                "--rectangle", "0", "0", "2", "2",
-                "--where", "DENSITY > 4.0",
-                "--reduce", "mean",
-                "--time", "last",
+                "region-stats",
+                str(path),
+                "--select",
+                "e/ENERGY",
+                "--rectangle",
+                "0",
+                "0",
+                "2",
+                "2",
+                "--where",
+                "DENSITY > 4.0",
+                "--reduce",
+                "mean",
+                "--time",
+                "last",
             ],
             file=buf,
         )
         import json
+
         payload = json.loads(buf.getvalue())
         assert payload["ok"] is True
         assert payload["count_selected"] == 2
@@ -463,6 +533,7 @@ class TestRegionStatsCLI:
 
     def test_cli_region_stats_symmetry(self, tmp_path: Path) -> None:
         from io import StringIO
+
         from exodusii.cli.agent import main
 
         path = tmp_path / "cli.exo"
@@ -470,16 +541,26 @@ class TestRegionStatsCLI:
         buf = StringIO()
         rc = main(
             [
-                "region-stats", str(path),
-                "--select", "e/DENSITY",
-                "--rectangle", "0", "0", "2", "2",
-                "--reduce", "sum",
-                "--time", "last",
-                "--symmetry", "4.0",
+                "region-stats",
+                str(path),
+                "--select",
+                "e/DENSITY",
+                "--rectangle",
+                "0",
+                "0",
+                "2",
+                "2",
+                "--reduce",
+                "sum",
+                "--time",
+                "last",
+                "--symmetry",
+                "4.0",
             ],
             file=buf,
         )
         import json
+
         payload = json.loads(buf.getvalue())
         assert payload["symmetry_factor"] == pytest.approx(4.0)
         # sum without symmetry = 2+4+6+8=20; with factor=4 → 80
@@ -489,6 +570,7 @@ class TestRegionStatsCLI:
 # ---------------------------------------------------------------------------
 # CLI tests: --piece flag
 # ---------------------------------------------------------------------------
+
 
 class TestPieceCLI:
     def _write_global_file(self, path: Path, value: float) -> None:
@@ -505,17 +587,16 @@ class TestPieceCLI:
 
     def test_piece_0_reads_single_file(self, tmp_path: Path) -> None:
         from io import StringIO
+
         from exodusii.cli.agent import main
 
         path = tmp_path / "piece0.exo"
         self._write_global_file(path, 42.0)
 
         buf = StringIO()
-        rc = main(
-            ["stats", str(path), "--select", "g/TOTAL", "--piece", "0"],
-            file=buf,
-        )
+        rc = main(["stats", str(path), "--select", "g/TOTAL", "--piece", "0"], file=buf)
         import json
+
         payload = json.loads(buf.getvalue())
         assert rc == 0
         assert payload["ok"] is True
@@ -524,17 +605,16 @@ class TestPieceCLI:
 
     def test_piece_nonzero_invalid_on_single_file_raises(self, tmp_path: Path) -> None:
         from io import StringIO
+
         from exodusii.cli.agent import main
 
         path = tmp_path / "piece1.exo"
         self._write_global_file(path, 1.0)
 
         buf = StringIO()
-        rc = main(
-            ["stats", str(path), "--select", "g/TOTAL", "--piece", "1"],
-            file=buf,
-        )
+        rc = main(["stats", str(path), "--select", "g/TOTAL", "--piece", "1"], file=buf)
         import json
+
         payload = json.loads(buf.getvalue())
         assert rc == 1
         assert payload["ok"] is False

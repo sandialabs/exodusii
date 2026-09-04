@@ -264,8 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--time",
         default=None,
         help=(
-            "Time selector. Use first, last, a physical time, "
-            "index:N, or step:N. Default: last."
+            "Time selector. Use first, last, a physical time, index:N, or step:N. Default: last."
         ),
     )
     region_stats_parser.add_argument(
@@ -357,10 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     learn_skills = learn_topics.add_parser(
-        "skills",
-        parents=[common],
-        aliases=("skill",),
-        help="Query the static skills database.",
+        "skills", parents=[common], aliases=("skill",), help="Query the static skills database."
     )
     learn_skills.add_argument(
         "query",
@@ -743,7 +739,10 @@ def examples_command(args: argparse.Namespace) -> dict[str, Any]:
 
 def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
     """Compute statistics of a variable inside a geometric region."""
-    from exodusii.mesh.regions import Circle, Cylinder, Rectangle, Sphere
+    from exodusii.mesh.regions import Circle
+    from exodusii.mesh.regions import Cylinder
+    from exodusii.mesh.regions import Rectangle
+    from exodusii.mesh.regions import Sphere
 
     # Build the region object from CLI flags
     if args.cylinder is not None:
@@ -763,7 +762,9 @@ def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
         region_obj = Rectangle([ox, oy], w, h)
         region_desc = {"type": "rectangle", "origin": [ox, oy], "width": w, "height": h}
     else:
-        raise ValueError("a region type must be specified (--cylinder, --sphere, --circle, or --rectangle)")
+        raise ValueError(
+            "a region type must be specified (--cylinder, --sphere, --circle, or --rectangle)"
+        )
 
     # Parse the variable selector
     selectors = parse_variable_selectors([args.select], require_same_entity=False)
@@ -798,10 +799,7 @@ def region_stats_command(args: argparse.Namespace) -> dict[str, Any]:
         "block_id": result.block_id,
         "region": region_desc,
         "where": args.where,
-        "time": {
-            "index": result.time_index,
-            "value": result.time_value,
-        },
+        "time": {"index": result.time_index, "value": result.time_value},
         "count_total": result.count_total,
         "count_selected": result.count_selected,
         "symmetry_factor": result.symmetry_factor,

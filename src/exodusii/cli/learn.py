@@ -6,10 +6,10 @@
 
 This module backs:
 
-    python -m exodusii learn -c overview
-    python -m exodusii learn -c query
-    python -m exodusii learn --skill list
-    python -m exodusii learn --skill exodusii-querying
+    python -m exodusii learn capabilities overview
+    python -m exodusii learn capabilities query
+    python -m exodusii learn skills list
+    python -m exodusii learn skills exodusii-querying
 
 The query language is intentionally small and mirrors Canary's lightweight path
 syntax: whole object with ".", dotted object keys, bracketed object keys, and
@@ -29,31 +29,24 @@ _KEY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 def learn_command(args: argparse.Namespace) -> dict[str, Any]:
     """Execute the static learning command and return JSON-safe data."""
 
-    if args.capability:
-        data = query_capabilities(args.capability, args.query)
-        return {
-            "command": "learn",
-            "dataset": "capabilities",
-            "selector": args.capability,
-            "query": args.query,
-            "result": data,
-        }
+    topic = getattr(args, "learn_topic", None)
 
-    if args.skill:
-        data = query_skills(args.skill, args.query)
+    if topic in {"capabilities", "capability", "caps", "cap"}:
+        selector = args.query
+        data = query_capabilities(selector)
+        return {"command": "learn", "dataset": "capabilities", "selector": selector, "result": data}
+
+    if topic in {"skills", "skill"}:
+        selector = args.query
+        path = getattr(args, "path", ".")
+        data = query_skills(selector, path)
         return {
             "command": "learn",
             "dataset": "skills",
-            "selector": args.skill,
-            "query": args.query,
+            "selector": selector,
+            "query": path,
             "result": data,
         }
-
-    if args.query and args.query != ".":
-        raise ValueError(
-            "learn query paths require a selected dataset. "
-            "Use '-c CAPABILITY query' or '--skill SKILL query'."
-        )
 
     return learn_instructions()
 
@@ -68,9 +61,9 @@ def learn_instructions() -> dict[str, Any]:
             "Use it to query installed static exodusii capability and skill datasets."
         ),
         "usage": {
-            "capabilities": "python -m exodusii learn -c CAPABILITY [query]",
-            "skills": "python -m exodusii learn --skill SKILL [query]",
-            "terse_json": "python -m exodusii learn -c overview --terse",
+            "capabilities": "python -m exodusii learn capabilities [QUERY]",
+            "skills": "python -m exodusii learn skills [QUERY [PATH]]",
+            "terse_json": "python -m exodusii learn capabilities overview --terse",
         },
         "capability_selectors": {
             "overview": "High-level orientation to exodusii.",
@@ -114,50 +107,50 @@ def learn_instructions() -> dict[str, Any]:
             {"description": "Show this instruction object.", "command": "python -m exodusii learn"},
             {
                 "description": "Read the high-level capability overview.",
-                "command": "python -m exodusii learn -c overview",
+                "command": "python -m exodusii learn capabilities overview",
             },
             {
                 "description": "Read the command reference.",
-                "command": "python -m exodusii learn -c commands",
+                "command": "python -m exodusii learn capabilities commands",
             },
             {
                 "description": "Read only query selector guidance.",
-                "command": "python -m exodusii learn -c query.selectors",
+                "command": "python -m exodusii learn capabilities query.selectors",
             },
             {
                 "description": "Read modern Python value-query guidance.",
-                "command": "python -m exodusii learn -c python_api.values",
+                "command": "python -m exodusii learn capabilities python_api.values",
             },
             {
                 "description": "Read geometry/region helper guidance "
                 "(Cylinder, element_volumes, etc.).",
-                "command": "python -m exodusii learn -c mesh_geometry",
+                "command": "python -m exodusii learn capabilities mesh_geometry",
             },
             {
                 "description": "Read lineout profile guidance.",
-                "command": "python -m exodusii learn -c query.lineouts",
+                "command": "python -m exodusii learn capabilities query.lineouts",
             },
             {
                 "description": "List installed skills.",
-                "command": "python -m exodusii learn --skill list",
+                "command": "python -m exodusii learn skills list",
             },
             {
                 "description": "Read a skill object.",
-                "command": "python -m exodusii learn --skill exodusii-querying",
+                "command": "python -m exodusii learn skills exodusii-querying",
             },
             {
                 "description": "Read only a skill body.",
-                "command": "python -m exodusii learn --skill exodusii-querying .body",
+                "command": "python -m exodusii learn skills exodusii-querying .body",
             },
             {
                 "description": "Emit compact JSON.",
-                "command": "python -m exodusii learn -c overview --terse",
+                "command": "python -m exodusii learn capabilities overview --terse",
             },
         ],
         "recommended_agent_flow": [
             "Run `python -m exodusii learn` if unfamiliar with the self-learning command.",
-            "Run `python -m exodusii learn -c overview` for general orientation.",
-            "Run `python -m exodusii learn -c commands` to learn available JSON CLI commands.",
+            "Run `python -m exodusii learn capabilities overview` for general orientation.",
+            "Run `python -m exodusii learn capabilities commands` to learn available JSON CLI commands.",  # noqa: E501
             "Run `python -m exodusii inspect FILE.exo` before querying a specific database.",
             "Run `python -m exodusii variables FILE.exo` to discover valid variable selectors.",
             "Use `query` for small extracted tables and `stats` for large numeric arrays.",

@@ -36,20 +36,17 @@ def test_learn_without_selector_returns_instructions() -> None:
 
     examples = [item["command"] for item in payload["examples"]]
     assert "python -m exodusii learn" in examples
-    assert "python -m exodusii learn -c overview" in examples
+    assert "python -m exodusii learn capabilities overview" in examples
 
 
-def test_learn_without_selector_rejects_query_path() -> None:
-    code, payload = _run_json(["learn", ".overview"])
-
-    assert code == 1
-    assert payload["ok"] is False
-    assert payload["error"]["type"] == "ValueError"
-    assert "query paths require a selected dataset" in payload["error"]["message"]
+def test_learn_unknown_topic_is_rejected() -> None:
+    stream = io.StringIO()
+    with pytest.raises(SystemExit):
+        main(["learn", "bogus-topic"], file=stream)
 
 
 def test_learn_capability_overview() -> None:
-    code, payload = _run_json(["learn", "-c", "overview"])
+    code, payload = _run_json(["learn", "capabilities", "overview"])
 
     assert code == 0
     assert payload["ok"] is True
@@ -59,8 +56,27 @@ def test_learn_capability_overview() -> None:
     assert "what_is_exodusii" in payload["result"]
 
 
+def test_learn_capability_defaults_to_overview() -> None:
+    code, payload = _run_json(["learn", "capabilities"])
+
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["dataset"] == "capabilities"
+    assert payload["selector"] == "overview"
+    assert "what_is_exodusii" in payload["result"]
+
+
+def test_learn_capability_alias() -> None:
+    code, payload = _run_json(["learn", "caps", "overview"])
+
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["dataset"] == "capabilities"
+    assert "what_is_exodusii" in payload["result"]
+
+
 def test_learn_capability_nested_shortcut() -> None:
-    code, payload = _run_json(["learn", "-c", "query.selectors"])
+    code, payload = _run_json(["learn", "capabilities", "query.selectors"])
 
     assert code == 0
     assert payload["ok"] is True
@@ -69,8 +85,8 @@ def test_learn_capability_nested_shortcut() -> None:
     assert payload["result"]["entity_prefixes"]["e"] == "element"
 
 
-def test_learn_capability_selector_plus_query_suffix() -> None:
-    code, payload = _run_json(["learn", "-c", "query", ".time_selectors"])
+def test_learn_capability_deep_path() -> None:
+    code, payload = _run_json(["learn", "capabilities", "query.time_selectors"])
 
     assert code == 0
     assert payload["ok"] is True
@@ -79,7 +95,7 @@ def test_learn_capability_selector_plus_query_suffix() -> None:
 
 
 def test_learn_skill_list() -> None:
-    code, payload = _run_json(["learn", "--skill", "list"])
+    code, payload = _run_json(["learn", "skills", "list"])
 
     assert code == 0
     assert payload["ok"] is True
@@ -88,8 +104,17 @@ def test_learn_skill_list() -> None:
     assert "exodusii-querying" in payload["result"]
 
 
+def test_learn_skill_defaults_to_list() -> None:
+    code, payload = _run_json(["learn", "skills"])
+
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["dataset"] == "skills"
+    assert "exodusii-querying" in payload["result"]
+
+
 def test_learn_skill_body_query() -> None:
-    code, payload = _run_json(["learn", "--skill", "exodusii-querying", ".body"])
+    code, payload = _run_json(["learn", "skills", "exodusii-querying", ".body"])
 
     assert code == 0
     assert payload["ok"] is True
@@ -130,6 +155,16 @@ def test_learn_terse_before_subcommand() -> None:
     payload = json.loads(text)
     assert payload["ok"] is True
     assert payload["command"] == "learn"
+
+
+def test_learn_capabilities_terse() -> None:
+    stream = io.StringIO()
+    code = main(["learn", "capabilities", "overview", "--terse"], file=stream)
+
+    assert code == 0
+    payload = json.loads(stream.getvalue())
+    assert payload["ok"] is True
+    assert payload["dataset"] == "capabilities"
 
 
 def test_query_capabilities_direct() -> None:

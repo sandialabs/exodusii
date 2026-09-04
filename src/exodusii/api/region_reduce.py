@@ -128,12 +128,9 @@ class RegionMassResult:
 # Core reduction helpers
 # ---------------------------------------------------------------------------
 
+
 def _apply_mask_reduce(
-    values: FloatArray,
-    mask: BoolArray,
-    reducers: list[str],
-    *,
-    symmetry_factor: float = 1.0,
+    values: FloatArray, mask: BoolArray, reducers: list[str], *, symmetry_factor: float = 1.0
 ) -> dict[str, float]:
     """Apply *reducers* to *values[mask]*.
 
@@ -172,8 +169,7 @@ def _apply_mask_reduce(
             result["std"] = float(np.std(selected)) if selected.size else float("nan")
         else:
             raise ValueError(
-                f"unknown reducer {reducer!r}; valid reducers: "
-                + ", ".join(sorted(VALID_REDUCERS))
+                f"unknown reducer {reducer!r}; valid reducers: " + ", ".join(sorted(VALID_REDUCERS))
             )
 
     return result
@@ -201,12 +197,7 @@ _OPS: dict[str, object] = {
 
 
 def _parse_predicate(
-    expr: str,
-    exo: "ExodusFile",
-    *,
-    on: str,
-    block_id: int | None,
-    time: "TimeSelector",
+    expr: str, exo: ExodusFile, *, on: str, block_id: int | None, time: TimeSelector
 ) -> BoolArray:
     """Parse and evaluate a simple field-predicate expression.
 
@@ -255,9 +246,7 @@ def _parse_predicate(
             exo.values(name, on=on, block_id=block_id, time=time), dtype=np.float64
         )
     else:
-        field_values = np.asarray(
-            exo.values(name, on=on, time=time), dtype=np.float64
-        )
+        field_values = np.asarray(exo.values(name, on=on, time=time), dtype=np.float64)
 
     return np.asarray(op_fn(field_values, threshold), dtype=np.bool_)
 
@@ -266,8 +255,9 @@ def _parse_predicate(
 # High-level public functions (called from ExodusFile methods)
 # ---------------------------------------------------------------------------
 
+
 def region_stats(
-    exo: "ExodusFile",
+    exo: ExodusFile,
     name: str,
     *,
     on: str = "element",
@@ -275,7 +265,7 @@ def region_stats(
     region: Region,
     where: str | None = None,
     reduce: list[str] | str,
-    time: "TimeSelector" = None,
+    time: TimeSelector = None,
     symmetry_factor: float = 1.0,
 ) -> RegionStatsResult:
     """Compute statistics of *name* inside a geometric *region*.
@@ -324,8 +314,7 @@ def region_stats(
     for r in reduce_list:
         if r not in VALID_REDUCERS:
             raise ValueError(
-                f"unknown reducer {r!r}; valid reducers: "
-                + ", ".join(sorted(VALID_REDUCERS))
+                f"unknown reducer {r!r}; valid reducers: " + ", ".join(sorted(VALID_REDUCERS))
             )
 
     # Resolve time to a concrete index so we use one consistent snapshot
@@ -392,14 +381,14 @@ def region_stats(
 
 
 def region_mass(
-    exo: "ExodusFile",
+    exo: ExodusFile,
     *,
     block_id: int,
     region: Region,
     density_name: str = "DENSITY",
     volfrac_name: str | None = None,
     where: str | None = None,
-    time: "TimeSelector" = None,
+    time: TimeSelector = None,
     symmetry_factor: float = 1.0,
 ) -> RegionMassResult:
     """Compute the mass inside a geometric region.
@@ -453,8 +442,7 @@ def region_mass(
     block = exo.element_block(block_id)
     vols = np.abs(np.asarray(element_volumes(block.element_type, conn, coords), dtype=np.float64))
     density = np.asarray(
-        exo.values(density_name, on="element", block_id=block_id, time=time_index),
-        dtype=np.float64,
+        exo.values(density_name, on="element", block_id=block_id, time=time_index), dtype=np.float64
     )
 
     count_total = int(centers.shape[0])
