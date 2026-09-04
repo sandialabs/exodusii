@@ -75,9 +75,11 @@ def learn_instructions() -> dict[str, Any]:
         "capability_selectors": {
             "overview": "High-level orientation to exodusii.",
             "commands": "Agent-oriented CLI command reference.",
-            "query": "Variable selector and time selector guidance.",
+            "query": "Variable selector, time selector, and lineout guidance.",
             "python_api": "Modern Python API usage.",
-            "mesh_geometry": "Mesh geometry helper capabilities.",
+            "mesh_geometry": "Mesh geometry helpers, geometric region predicates "
+            "(Cylinder/Sphere/Circle/Rectangle/Quad), element centers/volumes, "
+            "and mass/volume-weighted region reductions.",
             "legacy": "Legacy compatibility API guidance.",
             "limitations": "Known limitations and caveats.",
             "all": "Entire capability database.",
@@ -89,6 +91,9 @@ def learn_instructions() -> dict[str, Any]:
             "exodusii-agent-orientation": "General orientation for agents.",
             "exodusii-querying": "How to query Exodus databases and produce JSON.",
             "exodusii-python-api": "How to write Python code using exodusii.",
+            "exodusii-geometry": "How to do geometry and region queries, "
+            "including selecting entities inside a shape, element centers/volumes, "
+            "region mass, and lineout profiles.",
             "exodusii-parallel-files": "How to work with decomposed parallel Exodus files.",
         },
         "query_language": {
@@ -122,6 +127,15 @@ def learn_instructions() -> dict[str, Any]:
             {
                 "description": "Read modern Python value-query guidance.",
                 "command": "python -m exodusii learn -c python_api.values",
+            },
+            {
+                "description": "Read geometry/region helper guidance "
+                "(Cylinder, element_volumes, etc.).",
+                "command": "python -m exodusii learn -c mesh_geometry",
+            },
+            {
+                "description": "Read lineout profile guidance.",
+                "command": "python -m exodusii learn -c query.lineouts",
             },
             {
                 "description": "List installed skills.",

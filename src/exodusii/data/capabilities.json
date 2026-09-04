@@ -32,6 +32,8 @@
         "writer_api": ".python_api.writer",
         "variable_selectors": ".query.selectors",
         "time_selectors": ".query.time_selectors",
+        "geometry_and_regions": ".mesh_geometry",
+        "lineouts": ".query.lineouts",
         "entity_aliases": ".concepts.entity_aliases",
         "legacy_compatibility": ".legacy"
       },
@@ -42,6 +44,9 @@
         "python -m exodusii learn -c python_api",
         "python -m exodusii learn -c python_api.diff",
         "python -m exodusii learn -c python_api.writer",
+        "python -m exodusii learn -c mesh_geometry",
+        "python -m exodusii learn -c mesh_geometry.regions",
+        "python -m exodusii learn -c query.lineouts",
         "python -m exodusii learn --skill list",
         "python -m exodusii inspect mesh.exo",
         "python -m exodusii variables mesh.exo",
@@ -272,9 +277,38 @@
         "float": "Nearest physical time value."
       },
       "lineouts": {
-        "summary": "The Lineout helper can restrict spatial tabular data to a line parallel to a coordinate axis.",
-        "python_api": "exodusii.api.lineout.Lineout",
-        "cli_status": "If wired into the JSON CLI, lineout specifications should mirror exoread's -L/--lineout behavior."
+        "summary": "A Lineout extracts a 1-D profile from multi-dimensional tabular mesh data by FIXING one or two coordinate axes (within a tolerance) and SORTING the surviving rows along the remaining free axis. Use it for axial profiles (e.g. down a penetration axis) or radial/cross-section profiles of a field.",
+        "import": "from exodusii.api.lineout import Lineout, lineout  # 'lineout' is a keyword-only factory",
+        "constructor": "Lineout(x=None, y=None, z=None, tol=None)",
+        "axis_spec": {
+          "float": "A float FIXES that axis: only rows within tol of the value are kept and that coordinate column is dropped.",
+          "lowercase_name": "The string 'x' (or 'y'/'z') marks that axis as the FREE sweep axis: rows are sorted ascending along it and the column is kept.",
+          "uppercase_name": "The string 'X' (or 'Y'/'Z') is the free sweep axis using DISPLACED coordinates (material + displacement); requires displacement columns in the data.",
+          "none": "None means the axis is absent or irrelevant."
+        },
+        "tol": "Absolute spatial tolerance for the fixed-axis match. If None, computed automatically as 1e-4 * max(extent_of_fixed_axis, 1e-30) from the data bounding box. For an ELEMENT-center lineout the fixed axis rarely lands exactly on a value, so set tol to about half the local cell size (e.g. tol=3e-4 for a 0.4 mm mesh) so a row of cells is captured; the auto tolerance can be too tight and return zero rows.",
+        "apply": "lo.apply(header, data) -> (new_header, new_data): header is a list of column names, data is a 2-D float array whose columns include coordinate columns named COORDX/COORDY/COORDZ (or LOCATIONX/... after displacement). Also accepts a single structured array: lo.apply(structured) -> structured. Rows are filtered to the line and sorted along the free axis.",
+        "coordinate_columns": "apply() locates coordinate columns by name (COORDX/COORDY/COORDZ or LOCATIONX/Y/Z); an optional leading 'INDEX' column is tolerated. Build your data table with these coordinate column names to use a lineout.",
+        "python_examples": [
+          "lo = Lineout(y=0.0, z=0.0)          # fix y=z=0, sweep along x (axial profile down the x-axis)",
+          "lo = Lineout(x=0.006, z=0.0)        # fix x and z, sweep along y (radial cross-section at x=6mm)",
+          "lo = Lineout(x=1.0, y='Y', z=0.0)   # sweep along DISPLACED y at fixed x,z",
+          "lo = Lineout(y=0.5, tol=1e-3)       # explicit tolerance",
+          "new_header, profile = lo.apply(header, data)"
+        ],
+        "cli_form": "CLI/exoread lineout strings mirror exoread -L: 'x/1.0' (sweep x with y fixed at 1.0), '1.0/Y/3.0/T0.1' (sweep displaced y, fix x=1.0 and z=3.0, tol=0.1). Trailing 't'/'T' token sets tolerance. Parse with Lineout.from_cli(str).",
+        "cli_status": "The JSON `query` CLI may or may not wire lineout in this build; the Python Lineout.apply path always works. For a lineout of results, assemble a table of [coords..., field] with COORDX/Y/Z column names (element lineout: use entity_centers as the coordinates) and call apply().",
+        "recipe_element_field_lineout": [
+          "import numpy as np; from exodusii.api.file import ExodusFile; from exodusii.mesh import entity_centers; from exodusii.api.lineout import Lineout",
+          "with ExodusFile.open('run.exo') as exo:",
+          "    bid=3; coords=exo.coordinates(); conn=exo.element_connectivity(bid, zero_based=True)",
+          "    c=entity_centers(conn, coords); f=exo.values('TEMPERATURE_2', on='element', block_id=bid, time='last')",
+          "    header=['COORDX','COORDY','COORDZ','TEMPERATURE_2']",
+          "    data=np.column_stack([c, f])",
+          "    hdr, prof = Lineout(y=0.0, z=0.0).apply(header, data)   # axial temperature profile vs x",
+          "    # prof columns are [COORDX, TEMPERATURE_2], sorted by x",
+          "    # if prof has 0 rows, widen tol (element centers rarely sit exactly on y=z=0): Lineout(y=0.0, z=0.0, tol=3e-4)"
+        ]
       }
     },
     "python_api": {
@@ -513,13 +547,106 @@
       }
     },
     "mesh_geometry": {
-      "summary": "exodusii.mesh provides finite-element geometry helpers and coordinate-based mesh matching.",
+      "summary": "exodusii.mesh provides finite-element geometry helpers, geometric region predicates, and coordinate-based mesh matching. Use this for spatial (geometry-based) selection and reduction of results: compute element centers, select cells inside a shape (Cylinder/Sphere/Circle/Rectangle/Quad), compute per-element volumes, and mass- or volume-weight results. This is the correct, source-free reference for all geometry queries; you do NOT need to read the exodusii source.",
+      "imports": {
+        "helpers": "from exodusii.mesh import entity_centers, element_volumes, nodal_volumes, connected_average, bounding_box, characteristic_element_length",
+        "regions": "from exodusii.mesh import Cylinder, Sphere, Circle, Rectangle, Quad  # also: from exodusii.mesh.regions import ...  or  from exodusii.region import ...",
+        "region_factories": "from exodusii.mesh import cylinder, sphere, circle, rectangle, quad  # lowercase factory functions, same args as the classes",
+        "time_domains": "from exodusii.mesh import BoundedTimeDomain, UnboundedTimeDomain, bounded_time_domain, unbounded_time_domain",
+        "note": "Region classes are re-exported from three places (exodusii.mesh, exodusii.mesh.regions, exodusii.region) and are identical. All region and helper functions are pure NumPy and do not need an open file."
+      },
+      "helper_functions": {
+        "entity_centers": {
+          "signature": "entity_centers(conn, coords) -> ndarray, shape (n_elems, dim)",
+          "purpose": "Element centroids: mean of the element's node coordinates. Feed the result to region.contains() to classify cells geometrically.",
+          "conn": "ZERO-BASED connectivity, shape (n_elems, n_nodes_per_elem). Get it via exo.element_connectivity(block_id, zero_based=True).",
+          "coords": "Nodal coordinates, shape (n_nodes, dim). Get it via exo.coordinates(). Use exo.coordinates(time='last', displaced=True) for deformed geometry."
+        },
+        "element_volumes": {
+          "signature": "element_volumes(element_type, conn, coords) -> ndarray, shape (n_elems,)",
+          "purpose": "Per-element measure: volume for 3-D element types, area for 2-D. Multiply by DENSITY (and/or volume fraction) and sum over a region to get a true mass inside that region (e.g. an ejected plug mass) instead of relying on whole-block global sums.",
+          "element_type": "Exodus element-type string, e.g. 'hex8', 'quad4', 'tet4', 'wedge6' (see .element_type_aliases; matching is case-insensitive and accepts the block's own name). Get a block's type directly with exo.element_block(block_id).element_type (this returns the stored Exodus name, e.g. 'HEX', which element_volumes accepts as-is).",
+          "conn": "ZERO-BASED connectivity (see entity_centers).",
+          "note": "Values are signed; take np.abs if node ordering may be inverted."
+        },
+        "nodal_volumes": {
+          "signature": "nodal_volumes(element_type, conn, coords, *, num_nodes=None) -> ndarray, shape (n_nodes,)",
+          "purpose": "Distribute each element's measure equally to its nodes; useful for nodal mass/volume weighting."
+        },
+        "connected_average": {
+          "signature": "connected_average(conn, values) -> ndarray, shape (n_elems,)",
+          "purpose": "Average a nodal field over each element's connectivity, i.e. interpolate nodal values to element centers."
+        },
+        "bounding_box": {
+          "signature": "bounding_box(coords) -> (lower, upper)  # each shape (dim,)",
+          "purpose": "Axis-aligned bounding box of a coordinate array; handy for choosing region parameters or lineout fixed values."
+        },
+        "characteristic_element_length": {
+          "signature": "characteristic_element_length(element_type, conn, coords) -> ndarray, shape (n_elems,)",
+          "purpose": "Representative element size per element (e.g. for mesh-resolution or shear-band-width diagnostics)."
+        }
+      },
+      "regions": {
+        "summary": "Geometric predicate objects. Construct with world coordinates, then call region.contains(points) where points is (n, dim) or a single (dim,) point. Returns a boolean mask (or bool for a single point). Combine masks with numpy &, |, ~. Feed entity_centers(...) as points to select ELEMENTS by centroid, or coords to select NODES.",
+        "contains": "region.contains(points) -> ndarray[bool] of shape (n,), or a Python bool for a single point. Closed regions (boundary included).",
+        "Cylinder": {
+          "constructor": "Cylinder(p1, p2, radius)",
+          "p1_p2": "The two endpoints of the cylinder AXIS (world coordinates, 2-D or 3-D, must match and be distinct).",
+          "radius": "Cylinder radius (nonnegative).",
+          "behavior": "3-D: finite circular cylinder about the p1->p2 segment; containment is distance-to-segment <= radius (endpoints get spherical-cap inclusion). 2-D: a capsule around the segment.",
+          "dimension": "Inferred from p1/p2 size (2 or 3)."
+        },
+        "Sphere": {"constructor": "Sphere(center, radius)", "note": "Closed 3-D ball: ||point-center|| <= radius."},
+        "Circle": {"constructor": "Circle(center, radius)", "note": "Closed 2-D disk."},
+        "Rectangle": {"constructor": "Rectangle(origin, width, height)", "note": "Closed axis-aligned 2-D rectangle; lower=origin, upper=origin+[width,height]."},
+        "Quad": {"constructor": "Quad(p1, p2, p3, p4)", "note": "Closed 2-D quadrilateral defined by four vertices (point-in-polygon test)."},
+        "hollow_shell_recipe": "For an annulus/tube (e.g. a shear band at a fixed radius range on a cylindrical surface), subtract two cylinders: inside = Cylinder(p1,p2,r_outer).contains(c) & ~Cylinder(p1,p2,r_inner).contains(c).",
+        "time_domains": "BoundedTimeDomain(lower, upper) and UnboundedTimeDomain expose contains(times) for temporal masking (either bound may be None for semi-bounded)."
+      },
+      "workflows": {
+        "select_elements_in_region": [
+          "from exodusii.api.file import ExodusFile",
+          "from exodusii.mesh import entity_centers, Cylinder",
+          "with ExodusFile.open('run.exo') as exo:",
+          "    bid = 3                                        # target block id",
+          "    coords = exo.coordinates()                     # (n_nodes, dim)",
+          "    conn = exo.element_connectivity(bid, zero_based=True)",
+          "    centers = entity_centers(conn, coords)         # (n_elems, dim)",
+          "    field = exo.values('DAMAGE', on='element', block_id=bid, time='last')",
+          "    axis = Cylinder([0,0,0], [0.05,0,0], radius=0.013)  # world coords",
+          "    mask = axis.contains(centers)",
+          "    print(int(mask.sum()), float(field[mask].max()))"
+        ],
+        "hollow_rim_band": [
+          "outer = Cylinder([0,0,0], [0.05,0,0], 0.013).contains(centers)",
+          "inner = Cylinder([0,0,0], [0.05,0,0], 0.007).contains(centers)",
+          "rim = outer & ~inner                              # cells in the 7-13 mm shell",
+          "band = rim & (eqps > 0.5)                         # combine geometry with a field threshold"
+        ],
+        "mass_inside_region": [
+          "from exodusii.mesh import element_volumes",
+          "etype = exo.element_block(bid).element_type       # e.g. 'hex8'",
+          "vol = element_volumes(etype, conn, coords)        # per-element volume",
+          "dens = exo.values('DENSITY', on='element', block_id=bid, time='last')",
+          "vfrac = exo.values('VOLFRC_2', on='element', block_id=bid, time='last')  # if mixed cells",
+          "region_mass = float((vol[mask] * dens[mask] * vfrac[mask]).sum())",
+          "# multiply by any symmetry factor (e.g. x4 for a quarter model) for the full-model mass"
+        ],
+        "notes": [
+          "Always pass ZERO-BASED connectivity to the mesh helpers (zero_based=True).",
+          "entity_centers -> region.contains selects by ELEMENT centroid; pass exo.coordinates() directly to region.contains to select NODES.",
+          "Regions use the SAME units as the mesh coordinates (usually meters). Confirm with bounding_box(coords).",
+          "For decomposed parallel output, do this per piece and OR/concatenate, or open with ParallelExodusFile first (see .python_api.parallel).",
+          "Prefer per-region element_volumes*density sums for masses; the global MAT_MASS_* / block totals average the whole block and mislead for localized features."
+        ]
+      },
       "functions": {
-        "entity_centers": "Compute centers from zero-based connectivity and coordinates.",
-        "element_volumes": "Compute element areas or volumes.",
-        "nodal_volumes": "Distribute element measures to nodes.",
-        "connected_average": "Average nodal values over connectivity.",
-        "bounding_box": "Compute coordinate bounding box."
+        "entity_centers": "Compute element centers from zero-based connectivity and coordinates. See .helper_functions.entity_centers.",
+        "element_volumes": "Compute per-element areas (2-D) or volumes (3-D). See .helper_functions.element_volumes.",
+        "nodal_volumes": "Distribute element measures to nodes. See .helper_functions.nodal_volumes.",
+        "connected_average": "Average nodal values over connectivity. See .helper_functions.connected_average.",
+        "bounding_box": "Compute coordinate bounding box. See .helper_functions.bounding_box.",
+        "characteristic_element_length": "Per-element representative size. See .helper_functions.characteristic_element_length."
       },
       "matching": {
         "build_mesh_map": "Build a MeshMap permutation map between two ExodusFile objects by spatial coordinate proximity. Used by diff() when coordinate_matching=True.",
