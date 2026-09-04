@@ -927,14 +927,8 @@ class TestBlocksAuto:
         rect = Rectangle([0.0, 0.0], 2.0, 2.0)
         with ExodusFile.open(path) as exo, pytest.raises(ValueError, match="mutually exclusive"):
             region_stats(
-                exo,
-                "DENSITY",
-                on="element",
-                block_id=1,
-                blocks="auto",
-                region=rect,
-                    reduce="mean",
-                )
+                exo, "DENSITY", on="element", block_id=1, blocks="auto", region=rect, reduce="mean"
+            )
 
     def test_cli_blocks_auto_flag(self, tmp_path: Path) -> None:
         """--blocks auto on CLI passes through to region_stats."""
@@ -971,3 +965,134 @@ class TestBlocksAuto:
         assert payload["ok"] is True
         assert payload["blocks_used"] == [1]
         assert payload["stats"]["mean"] == pytest.approx(99.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: item 6 — time='all' region stats history
+# ---------------------------------------------------------------------------
+
+
+class TestRegionStatsHistory:
+    def test_time_all_returns_history(self, tmp_path: Path) -> None:
+        """time='all' returns a RegionStatsHistory with one entry per step."""
+        from exodusii.api.region_reduce import RegionStatsHistory
+
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
+            )
+        assert isinstance(history, RegionStatsHistory)
+        assert len(history.steps) == 2  # two time steps written
+
+    def test_times_array(self, tmp_path: Path) -> None:
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
+            )
+        np.testing.assert_allclose(history.times, [0.0, 1.0])
+
+    def test_stats_table_mean(self, tmp_path: Path) -> None:
+        """stats_table('mean') returns correct mean at each step."""
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
+            )
+        means = history.stats_table("mean")
+        # Step 0: DENSITY=[1,2,3,4] → mean=2.5; Step 1: DENSITY=[2,4,6,8] → mean=5.0
+        np.testing.assert_allclose(means, [2.5, 5.0])
+
+    def test_counts_array(self, tmp_path: Path) -> None:
+        """counts property gives count_selected at each step."""
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="count", time="all"
+            )
+        np.testing.assert_array_equal(history.counts, [4, 4])
+
+    def test_where_predicate_varies_per_step(self, tmp_path: Path) -> None:
+        """where predicate is re-evaluated per step, so count_selected can change."""
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            # Step 0: DENSITY=[1,2,3,4]; > 2 → 2 elements
+            # Step 1: DENSITY=[2,4,6,8]; > 2 → 3 elements
+            history = region_stats(
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                where="DENSITY > 2.0",
+                reduce="count",
+                time="all",
+            )
+        np.testing.assert_array_equal(history.counts, [2, 3])
+
+    def test_list_of_times(self, tmp_path: Path) -> None:
+        """A list of selectors reduces only those steps."""
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo,
+                "DENSITY",
+                on="element",
+                block_id=1,
+                region=rect,
+                reduce="mean",
+                time=[1],  # only step index 1 (last)
+            )
+        assert len(history.steps) == 1
+        assert history.stats_table("mean")[0] == pytest.approx(5.0)
+
+    def test_variable_property(self, tmp_path: Path) -> None:
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
+            )
+        assert history.variable == "DENSITY"
+
+    def test_method_on_exodusfile(self, tmp_path: Path) -> None:
+        from exodusii.api.region_reduce import RegionStatsHistory
+
+        path = tmp_path / "hist.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = exo.region_stats(
+                "DENSITY", block_id=1, region=rect, reduce="mean", time="all"
+            )
+        assert isinstance(history, RegionStatsHistory)
+        assert len(history.steps) == 2
+
+    def test_time_all_with_blocks_auto(self, tmp_path: Path) -> None:
+        """time='all' works together with blocks='auto'."""
+        from exodusii.api.region_reduce import RegionStatsHistory
+
+        path = tmp_path / "empty.exo"
+        _write_two_block_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            history = region_stats(
+                exo, "DENSITY", on="element", blocks="auto", region=rect, reduce="mean", time="all"
+            )
+        assert isinstance(history, RegionStatsHistory)
+        assert len(history.steps) == 1  # one time step in the empty-block fixture
+        assert history.stats_table("mean")[0] == pytest.approx(5.0)

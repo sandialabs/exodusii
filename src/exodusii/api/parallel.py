@@ -1754,7 +1754,7 @@ class ParallelExodusFile:
         region: Any,
         where: str | None = None,
         reduce: Any,
-        time: TimeSelector = None,
+        time: Any = None,
         symmetry_factor: float = 1.0,
     ) -> Any:
         """Compute statistics of a result variable inside a geometric region.

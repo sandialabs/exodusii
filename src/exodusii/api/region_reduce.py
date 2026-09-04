@@ -138,6 +138,60 @@ class RegionMassResult:
     mass: float
 
 
+@dataclass(frozen=True, slots=True)
+class RegionStatsHistory:
+    """Time-history result from :func:`region_stats` called with ``time='all'``.
+
+    Contains one :class:`RegionStatsResult` per time step plus convenience
+    accessors for array-form outputs.
+
+    Attributes
+    ----------
+    steps : tuple[RegionStatsResult, ...]
+        One result per time step, in chronological order.
+
+    Properties
+    ----------
+    times : ndarray
+        Physical time values, shape ``(n_steps,)``.
+    counts : ndarray
+        ``count_selected`` at each step, shape ``(n_steps,)``.
+    variable : str
+        Variable name (from the first step).
+    """
+
+    steps: tuple[RegionStatsResult, ...]
+
+    @property
+    def times(self) -> FloatArray:
+        """Physical time values at each step."""
+        return np.array([s.time_value for s in self.steps], dtype=np.float64)
+
+    @property
+    def counts(self) -> npt.NDArray[np.int64]:
+        """Count of selected entities at each step."""
+        return np.array([s.count_selected for s in self.steps], dtype=np.int64)
+
+    @property
+    def variable(self) -> str:
+        """Variable name."""
+        return self.steps[0].variable if self.steps else ""
+
+    def stats_table(self, reducer: str) -> FloatArray:
+        """Return per-step values for a single reducer as a 1-D array.
+
+        Parameters
+        ----------
+        reducer : str
+            One of the reducer names that was computed (e.g. ``"mean"``).
+
+        Returns
+        -------
+        ndarray of float64, shape ``(n_steps,)``
+        """
+        return np.array([s.stats[reducer] for s in self.steps], dtype=np.float64)
+
+
 # ---------------------------------------------------------------------------
 # Core reduction helpers
 # ---------------------------------------------------------------------------
@@ -337,9 +391,9 @@ def region_stats(
     region: Region,
     where: str | None = None,
     reduce: list[str] | str,
-    time: TimeSelector = None,
+    time: TimeSelector | list[TimeSelector] | str = None,
     symmetry_factor: float = 1.0,
-) -> RegionStatsResult:
+) -> RegionStatsResult | RegionStatsHistory:
     """Compute statistics of *name* inside a geometric *region*.
 
     Parameters
@@ -370,8 +424,14 @@ def region_stats(
     reduce : str or list of str
         One or more of ``"mean"``, ``"max"``, ``"min"``, ``"sum"``,
         ``"count"``, ``"std"``.
-    time : TimeSelector, optional
-        Time step selector.  ``None`` selects the last available step.
+    time : TimeSelector or list[TimeSelector] or 'all', optional
+        * ``None`` — last available step (returns :class:`RegionStatsResult`).
+        * ``'all'`` — every step in the file (returns
+          :class:`RegionStatsHistory`).
+        * A ``list`` of selectors — the specified steps (returns
+          :class:`RegionStatsHistory`).
+        * Any other single selector — that step (returns
+          :class:`RegionStatsResult`).
     symmetry_factor : float, optional
         Scale factor for extensive reducers (``"sum"``, ``"count"``).
         Default ``1.0`` (no scaling).
@@ -379,6 +439,9 @@ def region_stats(
     Returns
     -------
     RegionStatsResult
+        When *time* is a single selector or ``None``.
+    RegionStatsHistory
+        When *time* is ``'all'`` or a list.
 
     Raises
     ------
@@ -386,6 +449,168 @@ def region_stats(
         If both *block_id* and *blocks* are specified, or if an unknown
         reducer is requested.
     """
+    # Delegate to the time-history path when 'all' or a list is requested
+    if time == "all" or isinstance(time, list):
+        return _region_stats_history(
+            exo,
+            name,
+            on=on,
+            block_id=block_id,
+            blocks=blocks,
+            region=region,
+            where=where,
+            reduce=reduce,
+            time=time,
+            symmetry_factor=symmetry_factor,
+        )
+
+    return _region_stats_single(
+        exo,
+        name,
+        on=on,
+        block_id=block_id,
+        blocks=blocks,
+        region=region,
+        where=where,
+        reduce=reduce,
+        time=time,
+        symmetry_factor=symmetry_factor,
+    )
+
+
+def _region_stats_history(
+    exo: ExodusFile,
+    name: str,
+    *,
+    on: str,
+    block_id: int | None,
+    blocks: str | None,
+    region: Region,
+    where: str | None,
+    reduce: list[str] | str,
+    time: list[TimeSelector] | str,
+    symmetry_factor: float,
+) -> RegionStatsHistory:
+    """Compute per-step region stats for every requested time step.
+
+    Element centers are computed once (Eulerian mesh — coordinates are
+    fixed), then field values and the optional *where* predicate are
+    evaluated at each step.
+    """
+    from exodusii.core.time import resolve_time
+
+    all_times = exo.times()
+
+    # Build the list of 0-based step indices to evaluate
+    if time == "all":
+        step_indices = list(range(len(all_times)))
+    else:
+        # list of selectors
+        time_list: list[TimeSelector] = time  # type: ignore[assignment]
+        step_indices = [resolve_time(all_times, t).index for t in time_list]
+
+    # Compute centers once — they are fixed for an Eulerian mesh
+    coords = exo.coordinates()
+
+    if block_id is not None and blocks is not None:
+        raise ValueError("block_id and blocks are mutually exclusive")
+
+    if block_id is not None:
+        conn = exo.element_connectivity(block_id, zero_based=True)
+        centers = entity_centers(conn, coords)
+        region_mask = np.asarray(region.contains(centers), dtype=np.bool_)
+        used_blocks: tuple[int, ...] | None = None
+        _bid: int | None = block_id
+    else:
+        blocks_mode = BLOCKS_AUTO if blocks == BLOCKS_AUTO else BLOCKS_ALL
+        eligible = _iter_eligible_blocks(exo, name, on, blocks_mode=blocks_mode)
+        if not eligible:
+            # Return empty history
+            empty_step = RegionStatsResult(
+                variable=name,
+                entity=on,
+                block_id=None,
+                blocks_used=tuple(eligible),
+                time_index=0,
+                time_value=float(all_times[0]) if len(all_times) else 0.0,
+                count_total=0,
+                count_selected=0,
+                symmetry_factor=symmetry_factor,
+                stats={},
+            )
+            return RegionStatsHistory(steps=())
+        centers_list: list[FloatArray] = []
+        for bid in eligible:
+            conn = exo.element_connectivity(bid, zero_based=True)
+            centers_list.append(entity_centers(conn, coords))
+        centers = np.vstack(centers_list)
+        region_mask = np.asarray(region.contains(centers), dtype=np.bool_)
+        used_blocks = tuple(eligible)
+        _bid = None
+
+    # Reduce over each step
+    steps: list[RegionStatsResult] = []
+    for step_idx in step_indices:
+        # Read field at this step
+        if _bid is not None:
+            field = np.asarray(
+                exo.values(name, on=on, block_id=_bid, time=step_idx), dtype=np.float64
+            )
+        else:
+            field_parts: list[FloatArray] = [
+                np.asarray(exo.values(name, on=on, block_id=b, time=step_idx), dtype=np.float64)
+                for b in (used_blocks or ())
+            ]
+            field = np.concatenate(field_parts) if field_parts else np.empty(0, dtype=np.float64)
+
+        # Where predicate (re-evaluated per step since field changes)
+        if where is not None:
+            pred_mask = _parse_predicate(where, exo, on=on, block_id=_bid, time=step_idx)
+            combined_mask = region_mask & pred_mask
+        else:
+            combined_mask = region_mask
+
+        if isinstance(reduce, str):
+            reduce_list = [r.strip() for r in reduce.split(",")]
+        else:
+            reduce_list = list(reduce)
+
+        stats = _apply_mask_reduce(
+            field, combined_mask, reduce_list, symmetry_factor=symmetry_factor
+        )
+
+        steps.append(
+            RegionStatsResult(
+                variable=name,
+                entity=on,
+                block_id=_bid,
+                blocks_used=used_blocks,
+                time_index=step_idx,
+                time_value=float(all_times[step_idx]),
+                count_total=int(centers.shape[0]),
+                count_selected=int(combined_mask.sum()),
+                symmetry_factor=symmetry_factor,
+                stats=stats,
+            )
+        )
+
+    return RegionStatsHistory(steps=tuple(steps))
+
+
+def _region_stats_single(
+    exo: ExodusFile,
+    name: str,
+    *,
+    on: str = "element",
+    block_id: int | None = None,
+    blocks: str | None = None,
+    region: Region,
+    where: str | None = None,
+    reduce: list[str] | str,
+    time: TimeSelector = None,
+    symmetry_factor: float = 1.0,
+) -> RegionStatsResult:
+    """Single-step implementation backing :func:`region_stats`."""
     from exodusii.core.time import resolve_time
 
     if block_id is not None and blocks is not None:
@@ -596,6 +821,7 @@ __all__ = [
     "EXTENSIVE_REDUCERS",
     "VALID_REDUCERS",
     "RegionMassResult",
+    "RegionStatsHistory",
     "RegionStatsResult",
     "region_mass",
     "region_stats",

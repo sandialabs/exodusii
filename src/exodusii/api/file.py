@@ -1860,7 +1860,7 @@ class ExodusFile:
         region: Any,
         where: str | None = None,
         reduce: list[str] | str,
-        time: TimeSelector = None,
+        time: TimeSelector | list[Any] | str = None,
         symmetry_factor: float = 1.0,
     ) -> Any:
         """Compute statistics of a result variable inside a geometric region.
@@ -1895,8 +1895,13 @@ class ExodusFile:
         reduce : str or list of str
             One or more of ``"mean"``, ``"max"``, ``"min"``, ``"sum"``,
             ``"count"``, ``"std"``.
-        time : TimeSelector, optional
-            Time step selector.  ``None`` selects the last available step.
+        time : TimeSelector or list[TimeSelector] or 'all', optional
+            * ``None`` — last available step; returns :class:`RegionStatsResult`.
+            * ``'all'`` — every step; returns :class:`RegionStatsHistory`.
+            * A ``list`` — those specific steps; returns
+              :class:`RegionStatsHistory`.
+            * Any other single selector — that step; returns
+              :class:`RegionStatsResult`.
         symmetry_factor : float, optional
             Scale factor applied to extensive reducers (``"sum"``,
             ``"count"``).  Default ``1.0``.

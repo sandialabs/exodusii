@@ -93,6 +93,7 @@ from exodusii.api.query import query
 from exodusii.api.region_reduce import BLOCKS_ALL
 from exodusii.api.region_reduce import BLOCKS_AUTO
 from exodusii.api.region_reduce import RegionMassResult
+from exodusii.api.region_reduce import RegionStatsHistory
 from exodusii.api.region_reduce import RegionStatsResult
 from exodusii.api.region_reduce import region_mass
 from exodusii.api.region_reduce import region_stats
@@ -132,6 +133,7 @@ __all__ = [
     "ParallelExodusIIFile",
     "QueryResult",
     "RegionMassResult",
+    "RegionStatsHistory",
     "RegionStatsResult",
     "TimeSelection",
     "Tolerance",
