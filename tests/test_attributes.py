@@ -41,7 +41,7 @@ def test_block_attributes_round_trip(tmp_path: Path) -> None:
 
     with ExodusFile.open(path) as exo:
         assert exo.attribute_names("element_block", 10) == ("A", "B")
-        assert np.allclose(exo.attributes("element_block", 10), [[1.0, 2.0]])
+        assert np.allclose(exo.attributes("element_block", 10), [[1.0, 2.0]])  # ty: ignore[invalid-argument-type]
         assert np.allclose(exo.attribute_values("element_block", 10, "B"), [2.0])
 
         assert exo.attribute_names("edge_block", 20) == ("L",)
@@ -82,7 +82,7 @@ def test_copy_preserves_block_attributes(tmp_path: Path) -> None:
 
     with ExodusFile.open(target) as exo:
         assert exo.attribute_names("element_block", 10) == ("A", "B")
-        assert np.allclose(exo.attributes("element_block", 10), [[1.0, 2.0]])
+        assert np.allclose(exo.attributes("element_block", 10), [[1.0, 2.0]])  # ty: ignore[invalid-argument-type]
 
 
 def _coords() -> np.ndarray:

@@ -1197,8 +1197,7 @@ class ParallelExodusFile:
                         has_factors = True
                         start = position * nodes_per_face
                         df_slice = np.asarray(
-                            side_set.dist_facts[start : start + nodes_per_face],
-                            dtype=np.float64,
+                            side_set.dist_facts[start : start + nodes_per_face], dtype=np.float64
                         )
                     seen[key] = df_slice
 
@@ -1208,9 +1207,7 @@ class ParallelExodusFile:
         elements = np.asarray([k[0] for k in seen], dtype=np.int64)
         sides = np.asarray([k[1] for k in seen], dtype=np.int64)
         dist_facts = (
-            np.concatenate([v for v in seen.values() if v is not None])
-            if has_factors
-            else None
+            np.concatenate([v for v in seen.values() if v is not None]) if has_factors else None
         )
 
         return SetInfo(
@@ -1651,7 +1648,7 @@ class ParallelExodusFile:
 
                 if local_set.extra_entries is not None:
                     has_extras = True
-                    all_extras.append(int(local_set.extra_entries[position]))
+                    all_extras.append(int(np.asarray(local_set.extra_entries)[position]))
                 if local_set.dist_facts is not None:
                     has_factors = True
                     all_factors.append(float(local_set.dist_facts[position]))
@@ -1811,6 +1808,7 @@ class ParallelExodusFile:
         RegionStatsResult
         """
         from typing import cast
+
         from exodusii.api.region_reduce import region_stats as _region_stats
         from exodusii.core.entities import entity as _entity
 
@@ -1865,6 +1863,7 @@ class ParallelExodusFile:
         RegionMassResult
         """
         from typing import cast
+
         from exodusii.api.region_reduce import region_mass as _region_mass
 
         return _region_mass(

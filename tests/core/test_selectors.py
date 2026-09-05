@@ -125,7 +125,7 @@ def test_parse_variable_selector_returns_existing_selector() -> None:
 
 def test_parse_variable_selector_rejects_non_string_non_selector() -> None:
     with pytest.raises(TypeError, match="must be a string or VariableSelector"):
-        parse_variable_selector(42)  # type: ignore[arg-type]
+        parse_variable_selector(42)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_parse_variable_selector_rejects_empty_string() -> None:

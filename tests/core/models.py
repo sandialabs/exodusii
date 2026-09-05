@@ -61,7 +61,7 @@ def test_init_params_rejects_negative_counts() -> None:
 
 def test_init_params_rejects_noninteger_counts() -> None:
     with pytest.raises(TypeError, match="nodes must be an int"):
-        InitParams(nodes=1.5)  # type: ignore[arg-type]
+        InitParams(nodes=1.5)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize(
@@ -173,9 +173,11 @@ def test_set_info_node_set_payload() -> None:
 
     assert info.entity is Entity.NODE_SET
     assert info.name == "nodes"
+    assert info.nodes is not None
     assert np.allclose(info.nodes, [1, 2, 3])
     assert info.elems is None
     assert info.sides is None
+    assert info.dist_facts is not None
     assert np.allclose(info.dist_facts, [1.0, 2.0, 3.0])
 
 
@@ -185,7 +187,9 @@ def test_set_info_side_set_payload() -> None:
     )
 
     assert info.entity is Entity.SIDE_SET
+    assert info.elems is not None
     assert np.allclose(info.elems, [10, 11])
+    assert info.sides is not None
     assert np.allclose(info.sides, [1, 2])
     assert info.nodes is None
 
@@ -235,4 +239,4 @@ def test_models_are_frozen() -> None:
     params = InitParams(title="mesh")
 
     with pytest.raises(FrozenInstanceError):
-        params.title = "other"  # type: ignore[misc]
+        params.title = "other"  # type: ignore[misc]  # ty: ignore[invalid-assignment]

@@ -143,7 +143,7 @@ def test_encode_fixed_width_iterable_of_strings() -> None:
     encoded = encode_fixed_width(["abc", "def"], width=5)
 
     assert encoded.shape == (2, 5)
-    assert stringify(encoded).tolist() == ["abc", "def"]
+    assert stringify(encoded).tolist() == ["abc", "def"]  # ty: ignore[unresolved-attribute]
 
 
 def test_encode_fixed_width_truncates() -> None:

@@ -170,7 +170,7 @@ def test_resolve_time_rejects_non_1d_times() -> None:
 
 def test_resolve_time_rejects_unsupported_selector_type() -> None:
     with pytest.raises(ExodusInvalidTimeError, match="Unsupported time selector"):
-        resolve_time([0.0, 1.0, 2.0], object())  # type: ignore[arg-type]
+        resolve_time([0.0, 1.0, 2.0], object())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_resolve_time_index() -> None:
@@ -199,7 +199,7 @@ def test_resolve_time_step_rejects_nonpositive_steps(step: int) -> None:
 @pytest.mark.parametrize("step", [1.5, True])
 def test_resolve_time_step_rejects_noninteger_steps(step: object) -> None:
     with pytest.raises(ExodusInvalidTimeError, match="must be an int"):
-        resolve_time_step([0.0, 1.0, 2.0], step)  # type: ignore[arg-type]
+        resolve_time_step([0.0, 1.0, 2.0], step)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_nearest_time_index() -> None:

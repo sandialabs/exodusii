@@ -157,7 +157,7 @@ def test_create_variable_rejects_unsupported_dtype(tmp_path: Path) -> None:
         backend.create_dimension("n", 1)
 
         with pytest.raises(TypeError, match="unsupported NetCDF variable dtype"):
-            backend.create_variable("x", object, ("n",))  # type: ignore[arg-type]
+            backend.create_variable("x", object, ("n",))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_write_variable_rejects_missing_variable(tmp_path: Path) -> None:

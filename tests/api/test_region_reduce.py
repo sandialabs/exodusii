@@ -11,6 +11,7 @@ import pytest
 
 from exodusii.api.file import ExodusFile
 from exodusii.api.region_reduce import RegionMassResult
+from exodusii.api.region_reduce import RegionStatsHistory
 from exodusii.api.region_reduce import RegionStatsResult
 from exodusii.api.region_reduce import _apply_mask_reduce
 from exodusii.api.region_reduce import _parse_predicate
@@ -233,6 +234,7 @@ class TestRegionStats:
                 reduce=["mean", "max"],
                 time="last",
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.count_selected == 1
         # DENSITY[0] at last step = 2.0
         assert result.stats["mean"] == pytest.approx(2.0)
@@ -255,6 +257,7 @@ class TestRegionStats:
                 reduce=["mean", "count"],
                 time="last",
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.count_selected == 2
         # ENERGY at last step for elems 3,4: [60, 80]  → mean=70
         assert result.stats["mean"] == pytest.approx(70.0)
@@ -285,6 +288,8 @@ class TestRegionStats:
                 time="last",
                 symmetry_factor=1.0,
             )
+        assert isinstance(r4, RegionStatsResult)
+        assert isinstance(r1, RegionStatsResult)
         # mean is intensive — must be the same regardless of symmetry_factor
         assert r4.stats["mean"] == pytest.approx(r1.stats["mean"])
         # sum is extensive — scaled by factor
@@ -305,6 +310,7 @@ class TestRegionStats:
                 reduce="count",
                 time="last",
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.count_total == 4
         assert result.count_selected == 4
 
@@ -323,6 +329,7 @@ class TestRegionStats:
                 time="last",
                 symmetry_factor=2.0,
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.variable == "DENSITY"
         assert result.entity == "element"
         assert result.block_id == 1
@@ -780,6 +787,7 @@ class TestEmptyBlockFix:
                 reduce=["mean", "count"],
                 time="last",
             )
+            assert isinstance(result, RegionStatsResult)
         # Only block 1's 4 elements should contribute
         assert result.count_total == 4
         assert result.count_selected == 4
@@ -800,6 +808,7 @@ class TestEmptyBlockFix:
                 reduce="count",
                 time="last",
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.block_id is None
         assert result.blocks_used == (1,)  # block 2 was empty, excluded
 
@@ -812,6 +821,7 @@ class TestEmptyBlockFix:
             result = region_stats(
                 exo, "DENSITY", on="element", blocks="auto", region=rect, reduce="mean", time="last"
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.count_total == 4
         assert result.stats["mean"] == pytest.approx(5.0)
 
@@ -824,6 +834,7 @@ class TestEmptyBlockFix:
             result = region_stats(
                 exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="last"
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.block_id == 1
         assert result.blocks_used is None
         assert result.stats["mean"] == pytest.approx(5.0)
@@ -872,6 +883,7 @@ class TestEmptyBlockFix:
             result = region_stats(
                 exo, "DENSITY", on="element", region=rect, reduce=["mean", "count"], time=0
             )
+        assert isinstance(result, RegionStatsResult)
         assert result.count_total == 0
         assert result.count_selected == 0
         assert np.isnan(result.stats["mean"])
@@ -899,6 +911,7 @@ class TestBlocksAuto:
                 reduce=["mean", "count"],
                 time=0,
             )
+            assert isinstance(result, RegionStatsResult)
         # Only block 1 defines MAT1_VAR; block 2 does not
         assert result.blocks_used == (1,)
         assert result.count_total == 1
@@ -917,6 +930,8 @@ class TestBlocksAuto:
             r_auto = region_stats(
                 exo, "DENSITY", on="element", blocks="auto", region=rect, reduce="count", time=0
             )
+        assert isinstance(r_all, RegionStatsResult)
+        assert isinstance(r_auto, RegionStatsResult)
         # DENSITY is defined on both blocks → auto and all give the same answer
         assert r_all.count_total == r_auto.count_total == 2
         assert r_all.blocks_used == r_auto.blocks_used == (1, 2)
@@ -995,6 +1010,7 @@ class TestRegionStatsHistory:
             history = region_stats(
                 exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
             )
+        assert isinstance(history, RegionStatsHistory)
         np.testing.assert_allclose(history.times, [0.0, 1.0])
 
     def test_stats_table_mean(self, tmp_path: Path) -> None:
@@ -1006,6 +1022,7 @@ class TestRegionStatsHistory:
             history = region_stats(
                 exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
             )
+        assert isinstance(history, RegionStatsHistory)
         means = history.stats_table("mean")
         # Step 0: DENSITY=[1,2,3,4] → mean=2.5; Step 1: DENSITY=[2,4,6,8] → mean=5.0
         np.testing.assert_allclose(means, [2.5, 5.0])
@@ -1019,6 +1036,7 @@ class TestRegionStatsHistory:
             history = region_stats(
                 exo, "DENSITY", on="element", block_id=1, region=rect, reduce="count", time="all"
             )
+        assert isinstance(history, RegionStatsHistory)
         np.testing.assert_array_equal(history.counts, [4, 4])
 
     def test_where_predicate_varies_per_step(self, tmp_path: Path) -> None:
@@ -1039,6 +1057,7 @@ class TestRegionStatsHistory:
                 reduce="count",
                 time="all",
             )
+        assert isinstance(history, RegionStatsHistory)
         np.testing.assert_array_equal(history.counts, [2, 3])
 
     def test_list_of_times(self, tmp_path: Path) -> None:
@@ -1056,6 +1075,7 @@ class TestRegionStatsHistory:
                 reduce="mean",
                 time=[1],  # only step index 1 (last)
             )
+        assert isinstance(history, RegionStatsHistory)
         assert len(history.steps) == 1
         assert history.stats_table("mean")[0] == pytest.approx(5.0)
 
@@ -1067,6 +1087,7 @@ class TestRegionStatsHistory:
             history = region_stats(
                 exo, "DENSITY", on="element", block_id=1, region=rect, reduce="mean", time="all"
             )
+        assert isinstance(history, RegionStatsHistory)
         assert history.variable == "DENSITY"
 
     def test_method_on_exodusfile(self, tmp_path: Path) -> None:

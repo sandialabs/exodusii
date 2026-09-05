@@ -68,14 +68,14 @@ def test_writer_node_and_side_sets(tmp_path: Path) -> None:
 
         node_set = exo.node_set(100)
         assert node_set.name == "nodeset_100"
-        assert np.allclose(node_set.nodes, [1, 4])
-        assert np.allclose(node_set.dist_facts, [1.0, 2.0])
+        assert np.allclose(node_set.nodes, [1, 4])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(node_set.dist_facts, [1.0, 2.0])  # ty: ignore[invalid-argument-type]
 
         side_set = exo.side_set(200)
         assert side_set.name == "sideset_200"
-        assert np.allclose(side_set.elems, [1])
-        assert np.allclose(side_set.sides, [2])
-        assert np.allclose(side_set.dist_facts, [3.0, 4.0])
+        assert np.allclose(side_set.elems, [1])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.sides, [2])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.dist_facts, [3.0, 4.0])  # ty: ignore[invalid-argument-type]
 
 
 def test_writer_result_variables(tmp_path: Path) -> None:

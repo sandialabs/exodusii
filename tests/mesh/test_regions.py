@@ -148,7 +148,7 @@ def test_region_sphere() -> None:
 )
 def test_regions_reject_negative_sizes(factory: object) -> None:
     with pytest.raises(ValueError, match="must be nonnegative"):
-        factory()
+        factory()  # ty: ignore[call-non-callable]
 
 
 def test_region_rejects_bad_point_dimension() -> None:

@@ -17,9 +17,9 @@ is not normally required.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from typing import Callable
 
 import numpy as np
 import numpy.typing as npt

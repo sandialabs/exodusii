@@ -67,6 +67,9 @@ def test_streamify_stream() -> None:
             self.text += text
             return len(text)
 
+        def close(self) -> None:
+            pass
+
     stream = Stream()
     result, owned = util.streamify(stream)
 

@@ -34,7 +34,7 @@ def test_parallel_ignores_inactive_local_set(tmp_path: Path) -> None:
 
     with ParallelExodusFile.open(active, inactive) as exo:
         node_set = exo.node_set(100)
-        assert np.allclose(node_set.nodes, [1, 4])
+        assert np.allclose(node_set.nodes, [1, 4])  # ty: ignore[invalid-argument-type]
 
 
 def _write_part(path: Path, *, active: bool, temp: list[float], energy: list[float]) -> None:

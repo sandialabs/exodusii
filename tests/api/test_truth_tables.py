@@ -44,9 +44,9 @@ def test_element_edge_face_variables_and_truth_tables(tmp_path: Path) -> None:
         assert exo.variable_names("edge") == ("EDGEVAR",)
         assert exo.variable_names("face") == ("FACEVAR",)
 
-        assert np.allclose(exo.variable_truth_table("element"), [[1]])
-        assert np.allclose(exo.variable_truth_table("edge"), [[1]])
-        assert np.allclose(exo.variable_truth_table("face"), [[1]])
+        assert np.allclose(exo.variable_truth_table("element"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("edge"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("face"), [[1]])  # ty: ignore[invalid-argument-type]
 
         assert np.allclose(exo.values("ENERGY", on="element", block_id=10, time=0), [1.0])
         assert np.allclose(
@@ -83,11 +83,11 @@ def test_set_variables_and_truth_tables(tmp_path: Path) -> None:
         writer.write_values("ELSVAR", [7.0], on=writer_entity("element_set"), set_id=50)
 
     with ExodusFile.open(path) as exo:
-        assert np.allclose(exo.variable_truth_table("node_set"), [[1]])
-        assert np.allclose(exo.variable_truth_table("side_set"), [[1]])
-        assert np.allclose(exo.variable_truth_table("edge_set"), [[1]])
-        assert np.allclose(exo.variable_truth_table("face_set"), [[1]])
-        assert np.allclose(exo.variable_truth_table("element_set"), [[1]])
+        assert np.allclose(exo.variable_truth_table("node_set"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("side_set"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("edge_set"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("face_set"), [[1]])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.variable_truth_table("element_set"), [[1]])  # ty: ignore[invalid-argument-type]
 
         assert np.allclose(exo.values("NSVAR", on="node_set", set_id=10, time=0), [1.0, 2.0])
         assert np.allclose(exo.values("SSVAR", on="side_set", set_id=20, time=0), [3.0])

@@ -23,7 +23,7 @@ class Region(Protocol):
     def dimension(self) -> int:
         """Spatial dimension of the region."""
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
         """Return whether point or points are inside the region."""
 
 
@@ -31,7 +31,7 @@ class Region(Protocol):
 class TimeDomain(Protocol):
     """Protocol for time-domain predicates."""
 
-    def contains(self, times: npt.ArrayLike) -> bool | BoolArray:
+    def contains(self, times: npt.ArrayLike) -> BoolArray:
         """Return whether time or times are inside the domain."""
 
 
@@ -50,11 +50,11 @@ class Circle:
     def dimension(self) -> int:
         return 2
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
-        points_array, scalar = _points(points, dimension=self.dimension)
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
         distances = np.linalg.norm(points_array - self.center, axis=1)
         result = distances <= self.radius
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,11 +72,11 @@ class Sphere:
     def dimension(self) -> int:
         return 3
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
-        points_array, scalar = _points(points, dimension=self.dimension)
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
         distances = np.linalg.norm(points_array - self.center, axis=1)
         result = distances <= self.radius
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,10 +104,10 @@ class Rectangle:
     def upper(self) -> FloatArray:
         return self.origin + np.asarray([self.width, self.height], dtype=np.float64)
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
-        points_array, scalar = _points(points, dimension=self.dimension)
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
         result = np.all((points_array >= self.lower) & (points_array <= self.upper), axis=1)
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,10 +133,10 @@ class Quad:
     def dimension(self) -> int:
         return 2
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
-        points_array, scalar = _points(points, dimension=self.dimension)
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
         result = _points_in_polygon(points_array, self.vertices)
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,20 +171,20 @@ class Cylinder:
     def dimension(self) -> int:
         return int(self.p1.size)
 
-    def contains(self, points: npt.ArrayLike) -> bool | BoolArray:
-        points_array, scalar = _points(points, dimension=self.dimension)
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
         result = _points_in_flat_capped_cylinder(points_array, self.p1, self.p2, self.radius)
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
 class UnboundedTimeDomain:
     """Time domain containing every time."""
 
-    def contains(self, times: npt.ArrayLike) -> bool | BoolArray:
-        array, scalar = _times(times)
+    def contains(self, times: npt.ArrayLike) -> BoolArray:
+        array, _scalar = _times(times)
         result = np.ones(array.shape, dtype=np.bool_)
-        return bool(result[0]) if scalar else result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,8 +194,8 @@ class BoundedTimeDomain:
     lower: float | None = None
     upper: float | None = None
 
-    def contains(self, times: npt.ArrayLike) -> bool | BoolArray:
-        array, scalar = _times(times)
+    def contains(self, times: npt.ArrayLike) -> BoolArray:
+        array, _scalar = _times(times)
         result = np.ones(array.shape, dtype=np.bool_)
 
         if self.lower is not None:
@@ -203,7 +203,7 @@ class BoundedTimeDomain:
         if self.upper is not None:
             result &= array <= self.upper
 
-        return bool(result[0]) if scalar else result
+        return result
 
 
 def circle(center: npt.ArrayLike, radius: float) -> Circle:

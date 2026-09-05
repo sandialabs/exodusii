@@ -42,7 +42,7 @@ def test_writer_edge_and_face_blocks(tmp_path: Path) -> None:
         assert exo.face_block(30).name == "face_block"
 
         assert np.allclose(exo.element_connectivity(10), [[1, 2, 3, 4]])
-        assert np.allclose(exo.element_edge_connectivity(10), [[1, 2, 3, 4]])
+        assert np.allclose(exo.element_edge_connectivity(10), [[1, 2, 3, 4]])  # ty: ignore[invalid-argument-type]
         assert np.allclose(exo.edge_connectivity(20), [[1, 2], [2, 3], [3, 4], [4, 1]])
         assert np.allclose(exo.face_connectivity(30), [[1, 2, 3, 4]])
 
@@ -73,11 +73,11 @@ def test_writer_all_set_types(tmp_path: Path) -> None:
         assert exo.face_set_ids().tolist() == [40]
         assert exo.element_set_ids().tolist() == [50]
 
-        assert np.allclose(exo.node_set(10).nodes, [1, 2])
-        assert np.allclose(exo.side_set(20).sides, [3])
-        assert np.allclose(exo.edge_set(30).extra_entries, [1, -1])
-        assert np.allclose(exo.face_set(40).extra_entries, [1])
-        assert np.allclose(exo.element_set(50).entries, [1])
+        assert np.allclose(exo.node_set(10).nodes, [1, 2])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.side_set(20).sides, [3])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.edge_set(30).extra_entries, [1, -1])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.face_set(40).extra_entries, [1])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.element_set(50).entries, [1])  # ty: ignore[invalid-argument-type]
 
 
 def _coords() -> np.ndarray:

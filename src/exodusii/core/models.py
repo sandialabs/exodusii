@@ -12,8 +12,10 @@ QA records, and information records.
 
 from dataclasses import dataclass
 from typing import Any
+from typing import cast
 
 import numpy as np
+import numpy.typing as npt
 
 from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
@@ -462,9 +464,9 @@ class SetInfo:
     count: int
     distribution_factors: int = 0
     name: str = ""
-    entries: np.ndarray | None = None
-    extra_entries: np.ndarray | None = None
-    distribution_values: np.ndarray | None = None
+    entries: npt.ArrayLike | None = None
+    extra_entries: npt.ArrayLike | None = None
+    distribution_values: npt.ArrayLike | None = None
 
     def __post_init__(self) -> None:
         normalized = entity(self.entity)
@@ -498,7 +500,7 @@ class SetInfo:
             ``Entity.NODE_SET``, otherwise ``None``.
         """
 
-        return self.entries if self.entity is Entity.NODE_SET else None
+        return cast(np.ndarray, self.entries) if self.entity is Entity.NODE_SET else None
 
     @property
     def elems(self) -> np.ndarray | None:
@@ -511,7 +513,7 @@ class SetInfo:
             ``Entity.SIDE_SET``, otherwise ``None``.
         """
 
-        return self.entries if self.entity is Entity.SIDE_SET else None
+        return cast(np.ndarray, self.entries) if self.entity is Entity.SIDE_SET else None
 
     @property
     def sides(self) -> np.ndarray | None:
@@ -524,7 +526,7 @@ class SetInfo:
             :attr:`entity` is ``Entity.SIDE_SET``, otherwise ``None``.
         """
 
-        return self.extra_entries if self.entity is Entity.SIDE_SET else None
+        return cast(np.ndarray, self.extra_entries) if self.entity is Entity.SIDE_SET else None
 
     @property
     def dist_facts(self) -> np.ndarray | None:
@@ -537,7 +539,11 @@ class SetInfo:
             distribution factors were loaded.
         """
 
-        return self.distribution_values
+        return (
+            cast(np.ndarray, self.distribution_values)
+            if self.distribution_values is not None
+            else None
+        )
 
 
 @dataclass(frozen=True, slots=True)

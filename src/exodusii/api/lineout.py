@@ -188,7 +188,7 @@ class Lineout:
 
     def apply(
         self,
-        header_or_structured: Sequence[str] | npt.NDArray[np.void],
+        header_or_structured: Sequence[str] | npt.NDArray[np.void] | npt.NDArray[np.float64],
         data: npt.ArrayLike | None = None,
     ) -> tuple[list[str], npt.NDArray[np.float64]] | npt.NDArray[np.void]:
         """Apply the lineout to tabular data.

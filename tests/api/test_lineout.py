@@ -122,9 +122,9 @@ def test_apply_structured_array() -> None:
 
     result = Lineout(x="x", y=0.0, tol=1.0e-12).apply(data)
 
-    assert result.dtype.names == ("COORDX", "TEMP")
-    assert np.allclose(result["COORDX"], [0.0, 1.0])
-    assert np.allclose(result["TEMP"], [10.0, 11.0])
+    assert result.dtype.names == ("COORDX", "TEMP")  # ty: ignore[unresolved-attribute]
+    assert np.allclose(result["COORDX"], [0.0, 1.0])  # ty: ignore[invalid-argument-type]
+    assert np.allclose(result["TEMP"], [10.0, 11.0])  # ty: ignore[invalid-argument-type]
 
 
 def test_apply_single_argument_requires_structured_array() -> None:

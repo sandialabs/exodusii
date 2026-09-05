@@ -5,6 +5,7 @@
 """Legacy ExodusIIFile-compatible facade."""
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1438,7 +1439,7 @@ exodusii_file = ExodusIIFile
 
 
 def write_globals(
-    data: dict[str, npt.ArrayLike],
+    data: Mapping[str, npt.ArrayLike],
     times: npt.ArrayLike,
     title: str | None = None,
     filename: str | Path = "Globals.exo",

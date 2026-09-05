@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from typing import TextIO
+from typing import Protocol
+from typing import runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
@@ -144,7 +145,13 @@ def compute_connected_average(
     return connected_average(conn, values)
 
 
-def streamify(file: str | os.PathLike[str] | TextIO | None) -> tuple[TextIO | None, bool]:
+@runtime_checkable
+class _Writable(Protocol):
+    def write(self, s: str, /) -> int: ...
+    def close(self) -> None: ...
+
+
+def streamify(file: str | os.PathLike[str] | _Writable | None) -> tuple[_Writable | None, bool]:
     """Return ``(stream, owned)`` for a path or stream."""
 
     if file is None:

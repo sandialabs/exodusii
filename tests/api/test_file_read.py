@@ -161,8 +161,8 @@ def test_node_set(tmp_path: Path) -> None:
         assert node_set.id == 100
         assert node_set.index == 1
         assert node_set.name == "nodeset_100"
-        assert np.allclose(node_set.nodes, [1, 4])
-        assert np.allclose(node_set.dist_facts, [1.0, 2.0])
+        assert np.allclose(node_set.nodes, [1, 4])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(node_set.dist_facts, [1.0, 2.0])  # ty: ignore[invalid-argument-type]
 
 
 def test_side_set(tmp_path: Path) -> None:
@@ -175,9 +175,9 @@ def test_side_set(tmp_path: Path) -> None:
         assert side_set.id == 200
         assert side_set.index == 1
         assert side_set.name == "sideset_200"
-        assert np.allclose(side_set.elems, [1])
-        assert np.allclose(side_set.sides, [2])
-        assert np.allclose(side_set.dist_facts, [3.0])
+        assert np.allclose(side_set.elems, [1])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.sides, [2])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.dist_facts, [3.0])  # ty: ignore[invalid-argument-type]
 
 
 def test_variable_names(tmp_path: Path) -> None:

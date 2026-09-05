@@ -21,7 +21,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from typing import Literal
 from typing import TextIO
+from typing import overload
 
 import numpy as np
 
@@ -52,6 +54,34 @@ class ComparisonResult:
     def __bool__(self) -> bool:
         """Return ``True`` when the comparison found no differences."""
         return self.equal
+
+
+@overload
+def allclose(
+    file1: ExodusFileLike,
+    file2: ExodusFileLike,
+    *,
+    atol: float = ...,
+    rtol: float = ...,
+    dimensions: bool | str | Iterable[str] | None = ...,
+    variables: bool | str | Iterable[str] | None = ...,
+    verbose: bool | TextIO = ...,
+    result: Literal[True],
+) -> ComparisonResult: ...
+
+
+@overload
+def allclose(
+    file1: ExodusFileLike,
+    file2: ExodusFileLike,
+    *,
+    atol: float = ...,
+    rtol: float = ...,
+    dimensions: bool | str | Iterable[str] | None = ...,
+    variables: bool | str | Iterable[str] | None = ...,
+    verbose: bool | TextIO = ...,
+    result: Literal[False] = ...,
+) -> bool: ...
 
 
 def allclose(

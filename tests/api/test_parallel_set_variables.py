@@ -24,13 +24,13 @@ def test_parallel_node_and_side_set_variables(tmp_path: Path) -> None:
 
     with ParallelExodusFile.open(part0, part1) as exo:
         node_set = exo.node_set(10)
-        assert np.allclose(node_set.nodes, [10, 40, 50, 80])
+        assert np.allclose(node_set.nodes, [10, 40, 50, 80])  # ty: ignore[invalid-argument-type]
         assert np.allclose(
             exo.values("NSVAR", on="node_set", set_id=10, time=0), [1.0, 4.0, 5.0, 8.0]
         )
 
         side_set = exo.side_set(20)
-        assert np.allclose(side_set.elems, [100, 200])
+        assert np.allclose(side_set.elems, [100, 200])  # ty: ignore[invalid-argument-type]
         assert np.allclose(exo.values("SSVAR", on="side_set", set_id=20, time=0), [10.0, 20.0])
 
 

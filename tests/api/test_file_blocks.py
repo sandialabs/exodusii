@@ -46,7 +46,7 @@ def test_file_reads_element_edge_and_face_blocks(tmp_path: Path) -> None:
         assert np.allclose(exo.edge_connectivity(20), [[1, 2], [2, 3], [3, 4], [4, 1]])
         assert np.allclose(exo.face_connectivity(30), [[1, 2, 3, 4]])
 
-        assert np.allclose(exo.element_edge_connectivity(10), [[1, 2, 3, 4]])
+        assert np.allclose(exo.element_edge_connectivity(10), [[1, 2, 3, 4]])  # ty: ignore[invalid-argument-type]
 
 
 def test_file_block_status(tmp_path: Path) -> None:

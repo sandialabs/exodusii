@@ -231,7 +231,7 @@ def test_invalid_coordinate_dimension() -> None:
 def test_structured_subdivision_rejects_nonpositive_intervals(
     element_type: type[Quad4] | type[Hex8], coord_factory: object
 ) -> None:
-    element = element_type(coord_factory())  # type: ignore[operator]
+    element = element_type(coord_factory())  # type: ignore[operator]  # ty: ignore[call-non-callable]
 
     with pytest.raises(ValueError, match="intervals must be positive"):
         element.subdiv(0)
@@ -243,7 +243,7 @@ def test_structured_subdivision_rejects_nonpositive_intervals(
 def test_structured_subdivision_rejects_noninteger_intervals(
     element_type: type[Quad4] | type[Hex8], coord_factory: object
 ) -> None:
-    element = element_type(coord_factory())  # type: ignore[operator]
+    element = element_type(coord_factory())  # type: ignore[operator]  # ty: ignore[call-non-callable]
 
     with pytest.raises(TypeError, match="intervals must be an int"):
-        element.subdiv(1.5)  # type: ignore[arg-type]
+        element.subdiv(1.5)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]

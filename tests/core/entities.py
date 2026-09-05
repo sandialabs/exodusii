@@ -80,7 +80,7 @@ def test_invalid_entity_string_raises_exodus_invalid_entity_error() -> None:
 
 def test_invalid_entity_type_raises_exodus_invalid_entity_error() -> None:
     with pytest.raises(ExodusInvalidEntityError, match="Expected an Exodus entity"):
-        entity(42)  # type: ignore[arg-type]
+        entity(42)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize(

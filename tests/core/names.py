@@ -174,7 +174,7 @@ def test_coordinate(axis: int | str, expected: str) -> None:
 @pytest.mark.parametrize("axis", [-1, 3, "q", object()])
 def test_coordinate_rejects_invalid_axis(axis: object) -> None:
     with pytest.raises(ValueError, match="Expected coordinate axis"):
-        ExodusNames.coordinate(axis)  # type: ignore[arg-type]
+        ExodusNames.coordinate(axis)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_element_block_generated_names() -> None:
@@ -236,12 +236,12 @@ def test_result_variable_generated_names() -> None:
 )
 def test_generated_names_require_positive_one_based_indices(call: object) -> None:
     with pytest.raises(ValueError, match="1-based and positive"):
-        call()
+        call()  # ty: ignore[call-non-callable]
 
 
 def test_generated_names_require_int_indices() -> None:
     with pytest.raises(TypeError, match="must be an int"):
-        ExodusNames.block_count(1.5)  # type: ignore[arg-type]
+        ExodusNames.block_count(1.5)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_ex_alias_points_to_exodus_names() -> None:

@@ -48,14 +48,14 @@ def test_parallel_sets(tmp_path: Path) -> None:
     with ParallelExodusFile.open(part0, part1) as exo:
         node_set = exo.node_set(100)
         assert node_set.name == "nodeset_100"
-        assert np.allclose(node_set.nodes, [1, 4, 5, 8])
-        assert np.allclose(node_set.dist_facts, [1.0, 2.0, 3.0, 4.0])
+        assert np.allclose(node_set.nodes, [1, 4, 5, 8])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(node_set.dist_facts, [1.0, 2.0, 3.0, 4.0])  # ty: ignore[invalid-argument-type]
 
         side_set = exo.side_set(200)
         assert side_set.name == "sideset_200"
-        assert np.allclose(side_set.elems, [1, 2])
-        assert np.allclose(side_set.sides, [2, 4])
-        assert np.allclose(side_set.dist_facts, [5.0, 6.0])
+        assert np.allclose(side_set.elems, [1, 2])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.sides, [2, 4])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(side_set.dist_facts, [5.0, 6.0])  # ty: ignore[invalid-argument-type]
 
 
 def test_parallel_values(tmp_path: Path) -> None:
@@ -310,10 +310,10 @@ def test_parallel_sets_return_global_labels(tmp_path: Path) -> None:
 
     with ParallelExodusFile.open(part0, part1) as exo:
         node_set = exo.node_set(100)
-        assert np.allclose(node_set.nodes, [10, 20, 70, 80])
+        assert np.allclose(node_set.nodes, [10, 20, 70, 80])  # ty: ignore[invalid-argument-type]
 
         side_set = exo.side_set(200)
-        assert np.allclose(side_set.elems, [100, 200])
+        assert np.allclose(side_set.elems, [100, 200])  # ty: ignore[invalid-argument-type]
 
 
 def test_parallel_legacy_methods(tmp_path: Path) -> None:
