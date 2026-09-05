@@ -1162,7 +1162,10 @@ class ParallelExodusFile:
 
         # Use an ordered dict to deduplicate (elem_gid, side) pairs while
         # preserving encounter order and associating distribution factors.
-        seen: dict[tuple[int, int], float | None] = {}
+        # Values are either None (no dist_facts) or a 1-D float64 array
+        # containing the per-node distribution factors for that face
+        # (nodes_per_face values per entry).
+        seen: dict[tuple[int, int], npt.NDArray[np.float64] | None] = {}
         has_factors = False
         name = ""
 
@@ -1177,23 +1180,38 @@ class ParallelExodusFile:
 
             element_map = self._maps[file_index].element_lid_to_gid
 
+            # Determine how many dist_fact values are stored per face entry.
+            n_entries = len(side_set.elems)
+            if side_set.dist_facts is not None and n_entries > 0:
+                nodes_per_face = len(side_set.dist_facts) // n_entries
+            else:
+                nodes_per_face = 1
+
             for position, local_element_id in enumerate(side_set.elems):
                 gid = int(element_map[int(local_element_id) - 1])
                 side = int(side_set.sides[position])
                 key = (gid, side)
                 if key not in seen:
-                    df: float | None = None
+                    df_slice: npt.NDArray[np.float64] | None = None
                     if side_set.dist_facts is not None:
                         has_factors = True
-                        df = float(side_set.dist_facts[position])
-                    seen[key] = df
+                        start = position * nodes_per_face
+                        df_slice = np.asarray(
+                            side_set.dist_facts[start : start + nodes_per_face],
+                            dtype=np.float64,
+                        )
+                    seen[key] = df_slice
 
         if not seen:
             raise ExodusLookupError(f"side_set ID {set_id} not found")
 
         elements = np.asarray([k[0] for k in seen], dtype=np.int64)
         sides = np.asarray([k[1] for k in seen], dtype=np.int64)
-        dist_facts = np.asarray(list(seen.values()), dtype=np.float64) if has_factors else None
+        dist_facts = (
+            np.concatenate([v for v in seen.values() if v is not None])
+            if has_factors
+            else None
+        )
 
         return SetInfo(
             id=set_id,
@@ -1792,11 +1810,12 @@ class ParallelExodusFile:
         -------
         RegionStatsResult
         """
+        from typing import cast
         from exodusii.api.region_reduce import region_stats as _region_stats
         from exodusii.core.entities import entity as _entity
 
         return _region_stats(
-            self,  # type: ignore[arg-type]
+            cast(ExodusFile, self),
             name,
             on=str(_entity(on)),
             block_id=block_id,
@@ -1845,10 +1864,11 @@ class ParallelExodusFile:
         -------
         RegionMassResult
         """
+        from typing import cast
         from exodusii.api.region_reduce import region_mass as _region_mass
 
         return _region_mass(
-            self,  # type: ignore[arg-type]
+            cast(ExodusFile, self),
             block_id=block_id,
             region=region,
             density_name=density_name,

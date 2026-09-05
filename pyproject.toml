@@ -67,7 +67,7 @@ packages = ["src/exodusii"]
 "src/exodusii/data/skills.json" = "exodusii/data/skills.json"
 
 [tool.pytest.ini_options]
-addopts = "--durations=20 -ra"
+addopts = "--durations=20 -ra --import-mode=importlib"
 testpaths = ["."]
 norecursedirs = ["data"]
 python_files = ["*.py"]
@@ -104,6 +104,15 @@ ignore = [ "E731", "E741", "F841", "B905" ]
 [tool.ruff.lint.isort]
 force-single-line = true
 known-first-party = ["exodusii"]
+
+[tool.bandit]
+skips = [
+    "B101",  # assert used — acceptable in internal parsing helpers
+    "B110",  # try/except/pass — intentional fallback in diff/mesh matching
+    "B112",  # try/except/continue — intentional fallback in diff/mesh matching
+    "B404",  # subprocess import — used for epu parallel-merge utility
+    "B603",  # subprocess call without shell=True — input is a fixed executable path
+]
 
 [tool.pyright]
 include = ["src", "tests"]

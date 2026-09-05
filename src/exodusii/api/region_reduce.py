@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from typing import Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -254,7 +255,7 @@ _PREDICATE_RE = re.compile(
     r"(?P<value>[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*$"
 )
 
-_OPS: dict[str, object] = {
+_OPS: dict[str, Callable[[FloatArray, float], BoolArray]] = {
     ">": np.greater,
     "<": np.less,
     ">=": np.greater_equal,
@@ -451,6 +452,8 @@ def region_stats(
     """
     # Delegate to the time-history path when 'all' or a list is requested
     if time == "all" or isinstance(time, list):
+        from typing import cast
+
         return _region_stats_history(
             exo,
             name,
@@ -460,7 +463,7 @@ def region_stats(
             region=region,
             where=where,
             reduce=reduce,
-            time=time,
+            time=cast("list[TimeSelector] | str", time),
             symmetry_factor=symmetry_factor,
         )
 
@@ -506,7 +509,9 @@ def _region_stats_history(
         step_indices = list(range(len(all_times)))
     else:
         # list of selectors
-        time_list: list[TimeSelector] = time  # type: ignore[assignment]
+        from typing import cast as _cast
+
+        time_list: list[TimeSelector] = _cast("list[TimeSelector]", time)
         step_indices = [resolve_time(all_times, t).index for t in time_list]
 
     # Compute centers once — they are fixed for an Eulerian mesh
