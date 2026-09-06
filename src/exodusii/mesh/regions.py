@@ -212,6 +212,63 @@ def circle(center: npt.ArrayLike, radius: float) -> Circle:
     return Circle(center, radius)
 
 
+@dataclass(frozen=True, slots=True)
+class Ring:
+    """Closed 2-D annular (ring) region.
+
+    A point is inside the ring when it is within *outer_radius* of *center*
+    and strictly outside *inner_radius*.  Both boundaries are inclusive, so a
+    point exactly on either circle is considered inside.
+
+    Parameters
+    ----------
+    center:
+        2-D centre point.
+    inner_radius:
+        Radius of the inner (hollow) circle.  Must be non-negative and
+        strictly less than *outer_radius*.
+    outer_radius:
+        Radius of the outer circle.  Must be positive.
+
+    Raises
+    ------
+    ValueError
+        If *inner_radius* >= *outer_radius* or either value is negative.
+    """
+
+    center: FloatArray
+    inner_radius: float
+    outer_radius: float
+
+    def __init__(self, center: npt.ArrayLike, *, inner_radius: float, outer_radius: float) -> None:
+        object.__setattr__(self, "center", _point(center, dimension=2, name="center"))
+        inner = _nonnegative_float(inner_radius, name="inner_radius")
+        outer = _nonnegative_float(outer_radius, name="outer_radius")
+        if inner >= outer:
+            raise ValueError(
+                f"inner_radius ({inner_radius}) must be less than outer_radius ({outer_radius})"
+            )
+        object.__setattr__(self, "inner_radius", inner)
+        object.__setattr__(self, "outer_radius", outer)
+
+    @property
+    def dimension(self) -> int:
+        return 2
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
+        distances = np.linalg.norm(points_array - self.center, axis=1)
+        return np.asarray(
+            (distances >= self.inner_radius) & (distances <= self.outer_radius), dtype=np.bool_
+        )
+
+
+def ring(center: npt.ArrayLike, *, inner_radius: float, outer_radius: float) -> Ring:
+    """Create a closed 2-D annular region."""
+
+    return Ring(center, inner_radius=inner_radius, outer_radius=outer_radius)
+
+
 def sphere(center: npt.ArrayLike, radius: float) -> Sphere:
     """Create a closed 3-D sphere."""
 
@@ -388,6 +445,7 @@ __all__ = [
     "Quad",
     "Rectangle",
     "Region",
+    "Ring",
     "Sphere",
     "TimeDomain",
     "UnboundedTimeDomain",
@@ -397,6 +455,7 @@ __all__ = [
     "cylinder",
     "quad",
     "rectangle",
+    "ring",
     "sphere",
     "unbounded_time_domain",
 ]

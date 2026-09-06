@@ -98,19 +98,28 @@ from exodusii.api.region_reduce import RegionStatsResult
 from exodusii.api.region_reduce import region_mass
 from exodusii.api.region_reduce import region_stats
 from exodusii.api.writer import ExodusWriter
+from exodusii.cli.exoread import main as exoread
 from exodusii.compat import ExodusIIFile
 from exodusii.compat import File
 from exodusii.compat import MFExodusIIFile
 from exodusii.compat import ParallelExodusIIFile
 from exodusii.compat import exodusii_file
+from exodusii.compat import find_element_data_in_region
 from exodusii.compat import parallel_exodusii_file
 from exodusii.compat import write_globals
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
+from exodusii.extension import compute_edge_centers
+from exodusii.extension import compute_element_centers
+from exodusii.extension import compute_element_volumes
+from exodusii.extension import compute_face_centers
+from exodusii.extension import compute_node_volumes
+from exodusii.extension import compute_volume_averaged_elem_variable
 
 region = importlib.import_module("exodusii.region")
 
 exo_file = File
+get_element_centers = compute_element_centers
 
 try:
     __version__ = version("exodusii")
@@ -141,11 +150,20 @@ __all__ = [
     "VariableDiff",
     "__version__",
     "allclose",
+    "compute_edge_centers",
+    "compute_element_centers",
+    "compute_element_volumes",
+    "compute_face_centers",
+    "compute_node_volumes",
+    "compute_volume_averaged_elem_variable",
     "copy",
     "copy_file",
     "diff",
     "exo_file",
     "exodusii_file",
+    "exoread",
+    "find_element_data_in_region",
+    "get_element_centers",
     "lineout",
     "parallel_exodusii_file",
     "print_query",

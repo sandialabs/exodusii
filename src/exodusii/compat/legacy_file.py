@@ -174,6 +174,11 @@ class ExodusIIFile:
     def num_times(self) -> int:
         return len(self.get_times())
 
+    @property
+    def times(self) -> npt.NDArray[np.float64]:
+        """Array of simulation time values (direct-attribute legacy access)."""
+        return self.get_times()
+
     def get_times(self) -> npt.NDArray[np.float64]:
         return self.reader.times()
 
@@ -383,6 +388,15 @@ class ExodusIIFile:
     def get_global_variable_value(self, var_name: str, time_step: int) -> float:
         return float(self.get_global_variable_values(var_name)[time_step - 1])
 
+    def get_global_variable_iid(self, var_name: str) -> int:
+        """Return the one-based index of *var_name* among the global variables."""
+
+        names = self.get_global_variable_names().tolist()
+        try:
+            return names.index(var_name) + 1
+        except ValueError as exc:
+            raise ValueError(f"global variable {var_name!r} not found") from exc
+
     def get_node_variable_values(
         self, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
@@ -399,6 +413,21 @@ class ExodusIIFile:
             block=block_id,
             time=None if time_step is None else time_step - 1,
         )
+
+    def get_element_variable_values_across_blocks(
+        self, var_name: str, time_step: int | None = None
+    ) -> npt.NDArray[np.float64]:
+        """Return element variable values concatenated across all blocks.
+
+        Equivalent to calling :meth:`get_element_variable_values` for each
+        block and stacking the results.
+        """
+
+        parts = [
+            self.get_element_variable_values(int(bid), var_name, time_step=time_step)
+            for bid in self.get_element_block_ids()
+        ]
+        return np.concatenate(parts, axis=0) if parts else np.empty(0, dtype=np.float64)
 
     def get_node_variable_history(self, var_name: str, node_id: int) -> npt.NDArray[np.float64]:
         values = self.get_node_variable_values(var_name, time_step=None)
@@ -1438,6 +1467,49 @@ def File(filename: str | Path, *files: str | Path, mode: str = "r"):
 exodusii_file = ExodusIIFile
 
 
+def find_element_data_in_region(
+    file: ExodusIIFile, var_names: list[str], *, region: Any, time_step: int | None = None
+) -> dict[str, npt.NDArray[np.float64]]:
+    """Return element variable values for elements whose centers lie inside *region*.
+
+    Parameters
+    ----------
+    file:
+        Open :class:`ExodusIIFile` (or compatible legacy file object).
+    var_names:
+        List of element variable names to extract.
+    region:
+        A region object with a ``contains(points)`` method (e.g. from
+        ``exodusii.region``).
+    time_step:
+        One-based time-step index.  ``None`` selects the last available step.
+
+    Returns
+    -------
+    dict[str, ndarray]
+        Mapping from variable name to a 1-D float64 array of values for the
+        elements inside *region*, concatenated across all blocks.
+    """
+
+    from exodusii.extension import compute_element_centers
+
+    centers = compute_element_centers(file, time_step=time_step)
+    mask = np.asarray(region.contains(centers), dtype=np.bool_)
+
+    result: dict[str, npt.NDArray[np.float64]] = {}
+    for name in var_names:
+        values = np.concatenate(
+            [
+                file.get_element_variable_values(int(bid), name, time_step=time_step)
+                for bid in file.get_element_block_ids()
+            ],
+            axis=0,
+        )
+        result[name] = values[mask]
+
+    return result
+
+
 def write_globals(
     data: Mapping[str, npt.ArrayLike],
     times: npt.ArrayLike,
@@ -1509,4 +1581,4 @@ def _current_coordinates(writer: ExodusWriter) -> npt.NDArray[np.float64]:
     return coords
 
 
-__all__ = ["ExodusIIFile", "File", "exodusii_file", "write_globals"]
+__all__ = ["ExodusIIFile", "File", "exodusii_file", "find_element_data_in_region", "write_globals"]
