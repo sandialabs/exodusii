@@ -294,3 +294,78 @@ def test_interpolate_flag(tmp_path: Path) -> None:
         file=stream,
     )
     assert status == _SAME, stream.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# `python -m exodusii diff` subcommand (same logic, routed through cli.main)
+# ---------------------------------------------------------------------------
+
+
+def test_module_diff_subcommand_same(tmp_path: Path) -> None:
+    from exodusii.cli.main import main as module_main
+
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b)
+    stream = StringIO()
+
+    status = module_main(["diff", str(a), str(b)], file=stream)
+
+    assert status == _SAME
+    assert "Files are the same" in stream.getvalue()
+
+
+def test_module_diff_subcommand_different(tmp_path: Path) -> None:
+    from exodusii.cli.main import main as module_main
+
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=5.0)
+    stream = StringIO()
+
+    status = module_main(["diff", str(a), str(b)], file=stream)
+
+    assert status == _DIFFERENT
+    text = stream.getvalue()
+    assert "Files are different" in text
+    assert "TEMP" in text
+
+
+def test_module_diff_subcommand_json_terse(tmp_path: Path) -> None:
+    from exodusii.cli.main import main as module_main
+
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b)
+    stream = StringIO()
+
+    status = module_main(["diff", str(a), str(b), "--format", "json", "--terse"], file=stream)
+
+    assert status == _SAME
+    text = stream.getvalue().strip()
+    assert "\n" not in text  # terse == single line
+    payload = json.loads(text)
+    assert payload["ok"] is True
+    assert payload["same"] is True
+
+
+def test_module_diff_matches_standalone(tmp_path: Path) -> None:
+    """The diff subcommand and the standalone exodiff main agree bit-for-bit."""
+    from exodusii.cli.main import main as module_main
+
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=5.0)
+
+    standalone = StringIO()
+    standalone_rc = main([str(a), str(b), "--format", "json"], file=standalone)
+
+    via_module = StringIO()
+    module_rc = module_main(["diff", str(a), str(b), "--format", "json"], file=via_module)
+
+    assert standalone_rc == module_rc
+    assert standalone.getvalue() == via_module.getvalue()

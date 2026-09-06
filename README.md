@@ -193,11 +193,11 @@ Tolerance modes mirror SEACAS `exodiff`: `relative`, `absolute`, `combined`,
 are interpolated to file-1 time points.
 
 ```bash
-exodiff gold.exo test.exo
-exodiff --absolute -t 1e-8 gold.exo test.exo
-exodiff --start LAST gold.exo test.exo
-exodiff --match-coordinates gold.exo reordered.exo
-exodiff --format json --terse gold.exo test.exo
+python -m exodusii diff gold.exo test.exo
+python -m exodusii diff --absolute -t 1e-8 gold.exo test.exo
+python -m exodusii diff --start LAST gold.exo test.exo
+python -m exodusii diff --match-coordinates gold.exo reordered.exo
+python -m exodusii diff --format json --terse gold.exo test.exo
 ```
 
 Exit codes: `0` same, `1` error, `2` different.
@@ -296,7 +296,7 @@ exodusii/
 ├── io/              NetCDF backend (Protocol + netCDF4 implementation)
 ├── mesh/            geometry (elements, regions, entity_centers, element_volumes)
 ├── compat/          legacy ExodusIIFile / put_*/get_* API
-├── cli/             JSON-oriented CLI (agent.py, exodiff, exoread, learn)
+├── cli/             JSON-oriented CLI (main.py dispatch + one file per subcommand, exodiff.py, exoread, learn)
 └── data/            capabilities.json, skills.json
 ```
 

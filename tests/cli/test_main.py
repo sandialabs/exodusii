@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 
 from exodusii.api.writer import ExodusWriter
-from exodusii.cli.agent import main
-from exodusii.cli.agent import parse_time_selector
+from exodusii.cli._common import parse_time_selector
+from exodusii.cli.main import main
 
 
 @pytest.fixture

@@ -51,7 +51,6 @@ dev = [
 
 [project.scripts]
 exoread = "exodusii.cli.exoread:main"
-exodiff = "exodusii.cli.exodiff:main"
 
 
 [project.urls]

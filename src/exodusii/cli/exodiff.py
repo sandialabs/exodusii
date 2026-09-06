@@ -31,25 +31,21 @@ from exodusii.api.diff import diff
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
 
-__all__ = ["build_parser", "main"]
+__all__ = ["COMMAND", "add_arguments", "add_subparser", "build_parser", "main", "run_diff"]
+
+COMMAND = "diff"
 
 _SAME = 0
 _ERROR = 1
 _DIFFERENT = 2
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the ``exodiff`` argument parser."""
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add all exodiff arguments to *parser*.
 
-    parser = argparse.ArgumentParser(
-        prog="exodiff",
-        description=(
-            "Compare two ExodusII databases. "
-            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
-            "Supports both matched mesh ordering (default) and coordinate-based "
-            "mesh matching (--match-coordinates)."
-        ),
-    )
+    Shared by the standalone ``exodiff`` parser and the ``python -m exodusii
+    diff`` subparser so the two interfaces stay in lock-step.
+    """
     parser.add_argument("file1", help="First Exodus database path.")
     parser.add_argument("file2", help="Second Exodus database path.")
 
@@ -267,6 +263,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress the per-variable difference listing (text mode).",
     )
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the standalone ``exodiff`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="exodiff",
+        description=(
+            "Compare two ExodusII databases. "
+            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
+            "Supports both matched mesh ordering (default) and coordinate-based "
+            "mesh matching (--match-coordinates)."
+        ),
+    )
+    add_arguments(parser)
+    return parser
+
+
+def add_subparser(
+    subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser
+) -> argparse.ArgumentParser:
+    """Register the ``diff`` subparser under ``python -m exodusii``.
+
+    Note: ``common`` (which carries ``--terse``) is intentionally *not* used as
+    a parent here because :func:`add_arguments` defines exodiff's own ``--terse``
+    with its distinct meaning (compact JSON for ``--format json``).
+    """
+    parser = subparsers.add_parser(
+        COMMAND,
+        help="Compare two ExodusII databases (pure-Python exodiff).",
+        description=(
+            "Compare two ExodusII databases. "
+            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
+            "Supports both matched mesh ordering (default) and coordinate-based "
+            "mesh matching (--match-coordinates)."
+        ),
+    )
+    add_arguments(parser)
     return parser
 
 
@@ -388,11 +420,12 @@ def _print_text(result: DiffResult, args: argparse.Namespace, out: TextIO) -> No
         print("exodiff: Files are different", file=out)
 
 
-def main(argv: list[str] | None = None, *, file: TextIO | None = None) -> int:
-    """Run the ``exodiff`` CLI and return an exit code."""
+def run_diff(args: argparse.Namespace, *, file: TextIO | None = None) -> int:
+    """Run a diff from parsed *args* and return an exit code.
 
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    Shared by the standalone ``exodiff`` entry point and the ``python -m
+    exodusii diff`` subcommand.
+    """
     out = file or sys.stdout
 
     try:
@@ -417,6 +450,13 @@ def main(argv: list[str] | None = None, *, file: TextIO | None = None) -> int:
     if result.errors:
         return _ERROR
     return _SAME if result.same else _DIFFERENT
+
+
+def main(argv: list[str] | None = None, *, file: TextIO | None = None) -> int:
+    """Run the ``exodiff`` CLI and return an exit code."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return run_diff(args, file=file)
 
 
 if __name__ == "__main__":

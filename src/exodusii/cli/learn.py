@@ -25,6 +25,61 @@ from typing import Any
 
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
+COMMAND = "learn"
+
+
+def add_subparser(
+    subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser
+) -> argparse.ArgumentParser:
+    """Register the ``learn`` subparser and its ``capabilities``/``skills`` topics."""
+    parser = subparsers.add_parser(
+        COMMAND,
+        parents=[common],
+        help=(
+            "Query exodusii's static capabilities and skills for agent self-learning. "
+            "With no topic, prints instructions for using this command."
+        ),
+    )
+    learn_topics = parser.add_subparsers(dest="learn_topic", metavar="topic")
+
+    learn_capabilities = learn_topics.add_parser(
+        "capabilities",
+        parents=[common],
+        aliases=("capability", "caps", "cap"),
+        help="Query the static capability database.",
+    )
+    learn_capabilities.add_argument(
+        "query",
+        nargs="?",
+        default="overview",
+        help=(
+            "Capability path. Defaults to 'overview'. "
+            "Use 'all' (or 'capabilities') for the whole database, a top-level key "
+            "like 'query' or 'mesh_geometry', or a nested path like 'python_api.values'."
+        ),
+    )
+
+    learn_skills = learn_topics.add_parser(
+        "skills", parents=[common], aliases=("skill",), help="Query the static skills database."
+    )
+    learn_skills.add_argument(
+        "query",
+        nargs="?",
+        default="list",
+        help=(
+            "Skill selector. Defaults to 'list' (skill names). "
+            "Use 'all' for every skill, or a skill name like 'exodusii-geometry' "
+            "optionally followed by a path, e.g. 'exodusii-querying .body'."
+        ),
+    )
+    learn_skills.add_argument(
+        "path",
+        nargs="?",
+        default=".",
+        help="Optional query path below the selected skill, e.g. '.body'.",
+    )
+    return parser
+
 
 def learn_command(args: argparse.Namespace) -> dict[str, Any]:
     """Execute the static learning command and return JSON-safe data."""

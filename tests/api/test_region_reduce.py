@@ -467,7 +467,7 @@ class TestRegionMass:
 
 class TestRegionStatsCLI:
     def test_cli_region_stats_rectangle(self, tmp_path: Path) -> None:
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "cli.exo"
         _write_quad_mesh(path)
@@ -506,7 +506,7 @@ class TestRegionStatsCLI:
     def test_cli_region_stats_with_where(self, tmp_path: Path) -> None:
         from io import StringIO
 
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "cli.exo"
         _write_quad_mesh(path)
@@ -541,7 +541,7 @@ class TestRegionStatsCLI:
     def test_cli_region_stats_symmetry(self, tmp_path: Path) -> None:
         from io import StringIO
 
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "cli.exo"
         _write_quad_mesh(path)
@@ -595,7 +595,7 @@ class TestPieceCLI:
     def test_piece_0_reads_single_file(self, tmp_path: Path) -> None:
         from io import StringIO
 
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "piece0.exo"
         self._write_global_file(path, 42.0)
@@ -613,7 +613,7 @@ class TestPieceCLI:
     def test_piece_nonzero_invalid_on_single_file_raises(self, tmp_path: Path) -> None:
         from io import StringIO
 
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "piece1.exo"
         self._write_global_file(path, 1.0)
@@ -950,7 +950,7 @@ class TestBlocksAuto:
         import json
         from io import StringIO
 
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "twomat.exo"
         _write_two_material_mesh(path)

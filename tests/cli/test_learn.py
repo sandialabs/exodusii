@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-from exodusii.cli.agent import main
 from exodusii.cli.learn import parse_query
 from exodusii.cli.learn import query_capabilities
 from exodusii.cli.learn import query_json
 from exodusii.cli.learn import query_skills
+from exodusii.cli.main import main
 
 
 def _run_json(argv: list[str]) -> tuple[int, dict]:

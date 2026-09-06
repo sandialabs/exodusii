@@ -194,7 +194,7 @@ class TestTracer:
 
 class TestTracersCLI:
     def test_tracers_all_at_last(self, tmp_path: Path) -> None:
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "tr.exo"
         _write_tracer_file(path)
@@ -210,7 +210,7 @@ class TestTracersCLI:
         assert payload["data"]["21"] == pytest.approx(330.0)
 
     def test_tracers_specific_ids(self, tmp_path: Path) -> None:
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "tr.exo"
         _write_tracer_file(path)
@@ -227,7 +227,7 @@ class TestTracersCLI:
         assert payload["requested_ids"] == [21, 22, 23]
 
     def test_tracers_missing_id_returns_error(self, tmp_path: Path) -> None:
-        from exodusii.cli.agent import main
+        from exodusii.cli.main import main
 
         path = tmp_path / "tr.exo"
         _write_tracer_file(path)

@@ -32,7 +32,7 @@
         "database_inspection": ".commands.inspect",
         "database_query": ".commands.query",
         "summaries": ".commands.stats",
-        "database_comparison": ".commands.exodiff",
+        "database_comparison": ".commands.diff",
         "python_api": ".python_api",
         "diff_api": ".python_api.diff",
         "writer_api": ".python_api.writer",
@@ -62,7 +62,7 @@
         "python -m exodusii stats mesh.exo --select e/ENERGY --time last --by-block",
         "python -m exodusii region-stats mesh.exo --select e/YIELD_STRESS_2 --cylinder 0 0 0 0.05 0 0 0.013 --reduce mean,max --time last",
         "python -m exodusii stats mesh.exo.96.00 --select g/MAT_MASS_1 --piece 0",
-        "exodiff gold.exo test.exo"
+        "python -m exodusii diff gold.exo test.exo"
       ]
     },
     "concepts": {
@@ -109,7 +109,7 @@
       }
     },
     "commands": {
-      "summary": "Two types of CLI are available. (1) The agent-oriented subcommand CLI: 'python -m exodusii COMMAND ...', prints JSON by default. (2) Two registered console scripts: 'exodiff' and 'exoread'.",
+      "summary": "Two types of CLI are available. (1) The agent-oriented subcommand CLI: 'python -m exodusii COMMAND ...', prints JSON by default, and includes 'diff' for exodiff-style comparison. (2) One registered console script: 'exoread'.",
       "learn": {
         "purpose": "Query static exodusii capabilities and skills for self-learning.",
         "examples": [
@@ -184,9 +184,9 @@
         "purpose": "Print database-specific Python snippets.",
         "example": "python -m exodusii examples mesh.exo"
       },
-      "exodiff": {
-        "purpose": "Compare two Exodus databases with exodiff-style tolerance checking. Registered console script (not a subcommand of 'python -m exodusii'). Returns POSIX exit codes: 0 same, 1 error, 2 different.",
-        "usage": "exodiff [OPTIONS] FILE1 FILE2",
+      "diff": {
+        "purpose": "Compare two Exodus databases with exodiff-style tolerance checking. Subcommand of 'python -m exodusii'. Manages its own output and returns POSIX exit codes: 0 same, 1 error, 2 different (not the standard JSON envelope of the other subcommands).",
+        "usage": "python -m exodusii diff [OPTIONS] FILE1 FILE2",
         "tolerance_flags": {
           "--relative": "Use relative tolerance (default).",
           "--absolute": "Use absolute tolerance.",
@@ -220,13 +220,13 @@
           "-q / --quiet": "Suppress per-variable listing."
         },
         "examples": [
-          "exodiff gold.exo test.exo",
-          "exodiff --absolute -t 1e-8 gold.exo test.exo",
-          "exodiff -x TIME --no-coordinates gold.exo test.exo",
-          "exodiff --format json --terse gold.exo test.exo",
-          "exodiff --start 3 --stop 10 --increment 2 gold.exo test.exo",
-          "exodiff --start LAST gold.exo test.exo",
-          "exodiff --interpolate --time-scale 0.5 gold.exo test.exo"
+          "python -m exodusii diff gold.exo test.exo",
+          "python -m exodusii diff --absolute -t 1e-8 gold.exo test.exo",
+          "python -m exodusii diff -x TIME --no-coordinates gold.exo test.exo",
+          "python -m exodusii diff --format json --terse gold.exo test.exo",
+          "python -m exodusii diff --start 3 --stop 10 --increment 2 gold.exo test.exo",
+          "python -m exodusii diff --start LAST gold.exo test.exo",
+          "python -m exodusii diff --interpolate --time-scale 0.5 gold.exo test.exo"
         ],
         "limitation": "Supports matched mesh ordering (default) and coordinate-based mesh matching (--match-coordinates / DiffOptions(coordinate_matching=True)). See python_api.diff for matching options."
       },
