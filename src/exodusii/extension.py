@@ -99,19 +99,43 @@ def compute_node_variable_values_at_element_center(
 
 
 def compute_edge_centers(file, block_id: int | None = None, time_step: int | None = None):
-    """Placeholder for legacy edge-center helper."""
+    """Compute edge centers using the legacy extension API.
 
-    raise NotImplementedError(
-        "edge centers are not implemented in the refreshed compatibility layer yet"
-    )
+    Returns the geometric centroid (mean of node coordinates) for each edge
+    in *block_id*, or concatenated across all edge blocks when *block_id* is
+    ``None``.
+    """
+
+    if block_id is None:
+        centers = [
+            compute_edge_centers(file, int(block), time_step=time_step)
+            for block in file.get_edge_block_ids()
+        ]
+        return np.concatenate(centers, axis=0) if centers else np.empty((0, file.num_dimensions()))
+
+    conn = file.get_edge_block_conn(block_id) - 1
+    coords = file.get_coords(time_step=time_step)
+    return entity_centers(conn, coords)
 
 
 def compute_face_centers(file, block_id: int | None = None, time_step: int | None = None):
-    """Placeholder for legacy face-center helper."""
+    """Compute face centers using the legacy extension API.
 
-    raise NotImplementedError(
-        "face centers are not implemented in the refreshed compatibility layer yet"
-    )
+    Returns the geometric centroid (mean of node coordinates) for each face
+    in *block_id*, or concatenated across all face blocks when *block_id* is
+    ``None``.
+    """
+
+    if block_id is None:
+        centers = [
+            compute_face_centers(file, int(block), time_step=time_step)
+            for block in file.get_face_block_ids()
+        ]
+        return np.concatenate(centers, axis=0) if centers else np.empty((0, file.num_dimensions()))
+
+    conn = file.get_face_block_conn(block_id) - 1
+    coords = file.get_coords(time_step=time_step)
+    return entity_centers(conn, coords)
 
 
 def compute_volume_averaged_elem_variable(
