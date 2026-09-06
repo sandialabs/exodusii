@@ -84,6 +84,17 @@ class RegionStatsResult:
     stats : dict[str, float]
         Mapping from reducer name to computed value.  Extensive reducers have
         already been multiplied by *symmetry_factor*.
+
+    Properties (convenience accessors)
+    ------------------------------------
+    mean, max, min, sum, std : float
+        Shorthand for ``stats["mean"]``, ``stats["max"]``, etc.  Raises
+        ``KeyError`` if that reducer was not requested.
+    count : int
+        Alias for :attr:`count_selected`.  Note: ``"count"`` in ``reduce=``
+        is an extensive reducer (multiplied by *symmetry_factor*) and is
+        stored in ``stats["count"]``, not here.  This property returns the
+        number of selected entities *before* symmetry scaling.
     """
 
     variable: str
@@ -96,6 +107,64 @@ class RegionStatsResult:
     count_selected: int
     symmetry_factor: float
     stats: dict[str, float]
+
+    # ------------------------------------------------------------------
+    # Convenience properties — delegate to self.stats
+    # ------------------------------------------------------------------
+
+    @property
+    def mean(self) -> float:
+        """Shorthand for ``self.stats['mean']``.
+
+        Raises ``KeyError`` if ``mean`` was not in ``reduce=``.
+        """
+        return self.stats["mean"]
+
+    @property
+    def max(self) -> float:
+        """Shorthand for ``self.stats['max']``.
+
+        Raises ``KeyError`` if ``max`` was not in ``reduce=``.
+        """
+        return self.stats["max"]
+
+    @property
+    def min(self) -> float:
+        """Shorthand for ``self.stats['min']``.
+
+        Raises ``KeyError`` if ``min`` was not in ``reduce=``.
+        """
+        return self.stats["min"]
+
+    @property
+    def sum(self) -> float:
+        """Shorthand for ``self.stats['sum']`` (symmetry-scaled).
+
+        Raises ``KeyError`` if ``sum`` was not in ``reduce=``.
+        """
+        return self.stats["sum"]
+
+    @property
+    def std(self) -> float:
+        """Shorthand for ``self.stats['std']``.
+
+        Raises ``KeyError`` if ``std`` was not in ``reduce=``.
+        """
+        return self.stats["std"]
+
+    @property
+    def count(self) -> int:
+        """Alias for :attr:`count_selected`.
+
+        Returns the number of entities passing the region + predicate filter,
+        before symmetry scaling.
+
+        .. note::
+            When ``"count"`` is in ``reduce=``, the symmetry-scaled count is
+            in ``self.stats["count"]``.  This property returns
+            ``count_selected``, the raw unscaled count.
+        """
+        return self.count_selected
 
 
 @dataclass(frozen=True, slots=True)

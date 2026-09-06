@@ -706,9 +706,29 @@
           "list": "Specific steps; returns RegionStatsHistory.",
           "single_selector": "That step; returns RegionStatsResult."
         },
+        "RegionStatsResult_fields": {
+          "stats": "dict[str, float] — reducer values keyed by reducer name, e.g. r.stats['mean'], r.stats['max']. Extensive reducers (sum, count) are already multiplied by symmetry_factor.",
+          "count_selected": "int — number of entities passing region + predicate (BEFORE symmetry scaling). Use r.count_selected or the convenience alias r.count.",
+          "count_total": "int — total entities in all contributing blocks (before masking).",
+          "time_value": "float | None — physical time at the reduction step.",
+          "time_index": "int | None — zero-based step index.",
+          "blocks_used": "tuple[int, ...] | None — block IDs that contributed (set when block_id=None or blocks= used).",
+          "symmetry_factor": "float — factor used for extensive reducers.",
+          "variable": "str — variable name.",
+          "entity": "str — entity type (e.g. 'element')."
+        },
+        "RegionStatsResult_convenience_properties": {
+          "r.mean": "Shorthand for r.stats['mean']. Raises KeyError if 'mean' not in reduce=.",
+          "r.max": "Shorthand for r.stats['max']. Raises KeyError if 'max' not in reduce=.",
+          "r.min": "Shorthand for r.stats['min']. Raises KeyError if 'min' not in reduce=.",
+          "r.sum": "Shorthand for r.stats['sum'] (symmetry-scaled). Raises KeyError if 'sum' not in reduce=.",
+          "r.std": "Shorthand for r.stats['std']. Raises KeyError if 'std' not in reduce=.",
+          "r.count": "Alias for r.count_selected (unscaled entity count). NOTE: 'count' reducer in reduce=[] stores the SYMMETRY-SCALED count in r.stats['count'], not here."
+        },
+        "count_reducer_note": "The 'count' reducer name in reduce=[] populates r.stats['count'] with the symmetry-scaled selected-entity count. r.count (the property) returns r.count_selected, which is the raw unscaled count. These differ when symmetry_factor != 1.0.",
         "RegionStatsHistory": {
-          "properties": ["steps (tuple)", "times (ndarray)", "counts (ndarray)", "variable (str)"],
-          "method": "stats_table(reducer) -> ndarray, shape (n_steps,)"
+          "properties": ["steps (tuple[RegionStatsResult, ...])", "times (ndarray)", "counts (ndarray — count_selected per step)", "variable (str)"],
+          "method": "stats_table(reducer) -> ndarray, shape (n_steps,) — values for one reducer across all steps"
         },
         "notes": [
           "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad from exodusii.mesh.",
@@ -718,12 +738,18 @@
           "blocks_used field on RegionStatsResult lists which block IDs contributed."
         ],
         "python_examples": [
-          "# Single block, last step",
+          "# Single block, last step — access stats via dict or convenience properties",
           "r = exo.region_stats('YIELD_STRESS_2', block_id=3, region=cyl, where='EQPS_2 > 1.0', reduce=['mean','max'], time='last', symmetry_factor=4.0)",
+          "print(r.stats['mean'])   # canonical access",
+          "print(r.mean)            # convenience property — same value",
+          "print(r.stats['max'])    # canonical",
+          "print(r.max)             # convenience",
+          "print(r.count_selected)  # unscaled selected-entity count",
+          "print(r.count)           # alias for count_selected",
           "# Target material only (skip empty blocks and wrong-material blocks)",
           "r = exo.region_stats('YIELD_STRESS_2', blocks='auto', region=cyl, reduce='mean', time='last')",
           "print(r.blocks_used)  # e.g. (3, 7)",
-          "# Time history — band metric over all steps",
+          "# Time history — band metric over all steps (returns RegionStatsHistory)",
           "h = exo.region_stats('DAMAGE', block_id=3, region=cyl, reduce='max', time='all')",
           "import matplotlib.pyplot as plt",
           "plt.plot(h.times, h.stats_table('max'))"

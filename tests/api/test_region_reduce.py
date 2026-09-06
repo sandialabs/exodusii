@@ -1117,3 +1117,90 @@ class TestRegionStatsHistory:
         assert isinstance(history, RegionStatsHistory)
         assert len(history.steps) == 1  # one time step in the empty-block fixture
         assert history.stats_table("mean")[0] == pytest.approx(5.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for RegionStatsResult convenience properties
+# ---------------------------------------------------------------------------
+
+
+class TestRegionStatsResultProperties:
+    """Verify convenience property accessors on RegionStatsResult."""
+
+    def _make_result(
+        self,
+        stats: dict,
+        count_selected: int = 4,
+        count_total: int = 4,
+        symmetry_factor: float = 1.0,
+    ) -> RegionStatsResult:
+        return RegionStatsResult(
+            variable="V",
+            entity="element",
+            block_id=1,
+            blocks_used=None,
+            time_index=0,
+            time_value=0.0,
+            count_total=count_total,
+            count_selected=count_selected,
+            symmetry_factor=symmetry_factor,
+            stats=stats,
+        )
+
+    def test_mean_property(self) -> None:
+        r = self._make_result({"mean": 3.14})
+        assert r.mean == pytest.approx(3.14)
+
+    def test_max_property(self) -> None:
+        r = self._make_result({"max": 9.9})
+        assert r.max == pytest.approx(9.9)
+
+    def test_min_property(self) -> None:
+        r = self._make_result({"min": 0.1})
+        assert r.min == pytest.approx(0.1)
+
+    def test_sum_property(self) -> None:
+        r = self._make_result({"sum": 42.0})
+        assert r.sum == pytest.approx(42.0)
+
+    def test_std_property(self) -> None:
+        r = self._make_result({"std": 1.5})
+        assert r.std == pytest.approx(1.5)
+
+    def test_count_property_aliases_count_selected(self) -> None:
+        r = self._make_result({}, count_selected=7)
+        assert r.count == 7
+        assert r.count == r.count_selected
+
+    def test_count_with_symmetry_factor(self) -> None:
+        """r.count is unscaled; r.stats['count'] is symmetry-scaled."""
+        r = self._make_result({"count": 28.0}, count_selected=7, symmetry_factor=4.0)
+        # r.count = count_selected (raw, unscaled) = 7
+        assert r.count == 7
+        # r.stats['count'] = symmetry-scaled value = 28
+        assert r.stats["count"] == pytest.approx(28.0)
+
+    def test_missing_reducer_raises_key_error(self) -> None:
+        r = self._make_result({"mean": 1.0})
+        with pytest.raises(KeyError):
+            _ = r.max
+
+    def test_convenience_properties_via_integration(self, tmp_path: Path) -> None:
+        """End-to-end: convenience properties return same values as stats dict."""
+        path = tmp_path / "prop.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            r = exo.region_stats(
+                "DENSITY",
+                block_id=1,
+                region=rect,
+                reduce=["mean", "max", "min", "sum", "std"],
+                time="last",
+            )
+        assert r.mean == pytest.approx(r.stats["mean"])
+        assert r.max == pytest.approx(r.stats["max"])
+        assert r.min == pytest.approx(r.stats["min"])
+        assert r.sum == pytest.approx(r.stats["sum"])
+        assert r.std == pytest.approx(r.stats["std"])
+        assert r.count == r.count_selected
