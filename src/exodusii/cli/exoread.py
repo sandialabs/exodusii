@@ -110,7 +110,7 @@ class Read(Command):
         """Run the exoread command."""
         # When dispatched from main.py the namespace is plain (no __setattr__ magic),
         # so accumulate the selectors explicitly from the individual flag values.
-        variables: list[str] = getattr(args, "variables", None)
+        variables: list[str] | None = getattr(args, "variables", None)
         if variables is None:
             variables = []
             for attr, prefix in [
