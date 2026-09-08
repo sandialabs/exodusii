@@ -610,7 +610,10 @@
         "Circle": {"constructor": "Circle(center, radius)", "note": "Closed 2-D disk."},
         "Rectangle": {"constructor": "Rectangle(origin, width, height)", "note": "Closed axis-aligned 2-D rectangle; lower=origin, upper=origin+[width,height]."},
         "Quad": {"constructor": "Quad(p1, p2, p3, p4)", "note": "Closed 2-D quadrilateral defined by four vertices (point-in-polygon test)."},
-        "hollow_shell_recipe": "For an annulus/tube (e.g. a shear band at a fixed radius range on a cylindrical surface), subtract two cylinders: inside = Cylinder(p1,p2,r_outer).contains(c) & ~Cylinder(p1,p2,r_inner).contains(c).",
+        "Halfspace": {"constructor": "Halfspace(point, normal)", "note": "Closed half-space {x : (x-point).normal >= 0}. Use for an unbounded axial cut (e.g. 'downstream of the plate back face' Halfspace([0.012,0,0],[1,0,0])) that finite Circle/Sphere/Cylinder cannot express. normal is auto-normalized; dimension 2 or 3 from point size."},
+        "Slab": {"constructor": "Slab(axis, lo=None, hi=None, dimension=3)", "note": "Axis-aligned closed slab bounding ONE coordinate axis. axis is 0/1/2 or 'x'/'y'/'z'; lo/hi optional (None => unbounded that side, like BoundedTimeDomain). Convenience alternative to Halfspace for axis-aligned cuts."},
+        "composition": "Regions compose with the boolean operators & (intersection/AND), | (union/OR), ~ (complement/NOT) into a single region object whose .contains ANDs/ORs/negates the child masks. Also factory forms intersection(a,b,...), union(a,b,...), complement(a). Works with any region (Cylinder, Sphere, Halfspace, ...) and passes straight into region_stats/region_mass. Example (radially-bounded AND downstream): plug = Cylinder([-0.05,0,0],[0.3,0,0],0.011) & Halfspace([0.012,0,0],[1,0,0]).",
+        "hollow_shell_recipe": "For an annulus/tube (e.g. a shear band at a fixed radius range on a cylindrical surface), intersect an outer cylinder with the complement of an inner one: shell = Cylinder(p1,p2,r_outer) & ~Cylinder(p1,p2,r_inner). (Old numpy-mask form Cylinder(...).contains(c) & ~Cylinder(...).contains(c) still works.)",
         "time_domains": "BoundedTimeDomain(lower, upper) and UnboundedTimeDomain expose contains(times) for temporal masking (either bound may be None for semi-bounded)."
       },
       "workflows": {
@@ -731,8 +734,8 @@
           "method": "stats_table(reducer) -> ndarray, shape (n_steps,) — values for one reducer across all steps"
         },
         "notes": [
-          "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad from exodusii.mesh.",
-          "where is a safe field-threshold predicate: 'VARNAME OP VALUE' only (e.g. 'EQPS_2 > 1.0'). No arbitrary Python.",
+          "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad, Halfspace, Slab from exodusii.mesh, and compose them with & | ~ (e.g. Cylinder(...) & Halfspace(...) for a radially-bounded AND axially-cut region).",
+          "where is a safe field-threshold predicate. A single atom 'VARNAME OP VALUE' (e.g. 'EQPS_2 > 1.0'), or several atoms joined by ' AND ' (all hold) or ' OR ' (any hold), e.g. 'EQPS_2 > 1.0 AND DAMAGE_2 > 0.5'. Mixing AND and OR in one string is rejected (no precedence) — compose regions or make separate calls. No arbitrary Python.",
           "symmetry_factor is applied only to extensive reducers (sum, count). Mean, max, min, std are intensive and are NOT scaled.",
           "time='all' computes element centers once; where predicate and field values re-read per step for moving selections.",
           "blocks_used field on RegionStatsResult lists which block IDs contributed."
@@ -762,6 +765,7 @@
           "element_volumes is computed automatically from the block element type.",
           "volfrac_name is optional; omit for pure materials, set for mixed-material cells.",
           "symmetry_factor=4.0 for a quarter-symmetry model.",
+          "region may be a composed region — e.g. an EJECTED-PLUG mass (radially bounded AND downstream of a plane AND real material): plug = Cylinder([-0.05,0,0],[0.3,0,0],0.011) & Halfspace([0.012,0,0],[1,0,0]); exo.region_mass(blocks='auto' or block_id=b, region=plug, density_name='DENSITY_2', volfrac_name='VOLFRC_2', where='VOLFRC_2 > 0.1', symmetry_factor=4.0). This replaces hand-rolled entity_centers/element_volumes loops.",
           "Returns RegionMassResult with fields: block_id, blocks_used, time_index, time_value, count_total, count_selected, density_name, volfrac_name, symmetry_factor, mass."
         ]
       },

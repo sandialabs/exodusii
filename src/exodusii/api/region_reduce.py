@@ -334,44 +334,16 @@ _OPS: dict[str, Callable[[FloatArray, float], BoolArray]] = {
 }
 
 
-def _parse_predicate(
+def _eval_atom(
     expr: str, exo: ExodusFile, *, on: str, block_id: int | None, time: TimeSelector
 ) -> BoolArray:
-    """Parse and evaluate a simple field-predicate expression.
-
-    The only supported syntax is ``VARNAME OP VALUE`` where *OP* is one of
-    ``>``, ``<``, ``>=``, ``<=``, ``==``, ``!=`` and *VALUE* is a numeric
-    literal.  This restriction is intentional; arbitrary Python expressions
-    are not supported.
-
-    Parameters
-    ----------
-    expr : str
-        Predicate string, e.g. ``"EQPS_2 > 1.0"``.
-    exo : ExodusFile
-        Open database.
-    on : str
-        Entity location (e.g. ``"element"``).
-    block_id : int or None
-        Block to read the predicate variable from.
-    time : TimeSelector
-        Time step selector forwarded to :meth:`~ExodusFile.values`.
-
-    Returns
-    -------
-    ndarray of bool
-        Boolean mask of shape ``(n_entities,)`` where the predicate is True.
-
-    Raises
-    ------
-    ValueError
-        If the expression does not match the supported syntax.
-    """
+    """Evaluate a single ``VARNAME OP VALUE`` predicate atom to a boolean mask."""
     match = _PREDICATE_RE.match(expr)
     if match is None:
         raise ValueError(
             f"unsupported predicate expression {expr!r}. "
-            "Only 'VARNAME OP VALUE' form is accepted (e.g. 'EQPS_2 > 1.0')."
+            "Only 'VARNAME OP VALUE' atoms are accepted (e.g. 'EQPS_2 > 1.0'), "
+            "optionally joined by ' AND ' or ' OR '."
         )
 
     name = match.group("name")
@@ -387,6 +359,54 @@ def _parse_predicate(
         field_values = np.asarray(exo.values(name, on=on, time=time), dtype=np.float64)
 
     return np.asarray(op_fn(field_values, threshold), dtype=np.bool_)
+
+
+# Top-level connector split: whitespace-delimited AND / OR (case-insensitive).
+# Requiring surrounding whitespace avoids matching substrings of variable names.
+_AND_RE = re.compile(r"\s+AND\s+", re.IGNORECASE)
+_OR_RE = re.compile(r"\s+OR\s+", re.IGNORECASE)
+
+
+def _parse_predicate(
+    expr: str, exo: ExodusFile, *, on: str, block_id: int | None, time: TimeSelector
+) -> BoolArray:
+    """Parse and evaluate a field predicate to a boolean mask.
+
+    Grammar (intentionally bounded; no ``eval``, no arbitrary Python):
+      - a single atom ``VARNAME OP VALUE`` (e.g. ``"EQPS_2 > 1.0"``), or
+      - several atoms joined by ``AND`` (all must hold), or
+      - several atoms joined by ``OR`` (any must hold).
+    Mixing ``AND`` and ``OR`` in one expression is rejected (no precedence /
+    parentheses) — split such selections into a composed region instead.
+    """
+    has_and = _AND_RE.search(expr) is not None
+    has_or = _OR_RE.search(expr) is not None
+    if has_and and has_or:
+        raise ValueError(
+            f"predicate {expr!r} mixes AND and OR; only all-AND or all-OR "
+            "expressions are supported (no operator precedence). Split into "
+            "separate region_stats calls or compose regions instead."
+        )
+
+    if has_or:
+        atoms = _OR_RE.split(expr)
+        result: BoolArray | None = None
+        for atom in atoms:
+            mask = _eval_atom(atom, exo, on=on, block_id=block_id, time=time)
+            result = mask if result is None else (result | mask)
+        assert result is not None
+        return result
+
+    if has_and:
+        atoms = _AND_RE.split(expr)
+        result = None
+        for atom in atoms:
+            mask = _eval_atom(atom, exo, on=on, block_id=block_id, time=time)
+            result = mask if result is None else (result & mask)
+        assert result is not None
+        return result
+
+    return _eval_atom(expr, exo, on=on, block_id=block_id, time=time)
 
 
 # ---------------------------------------------------------------------------

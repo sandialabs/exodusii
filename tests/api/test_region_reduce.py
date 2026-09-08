@@ -263,6 +263,66 @@ class TestRegionStats:
         assert result.stats["mean"] == pytest.approx(70.0)
         assert result.stats["count"] == pytest.approx(2.0)
 
+    def test_where_compound_and(self, tmp_path: Path) -> None:
+        """Compound AND predicate (EXODUSII-IMPROVEMENTS #10)."""
+        path = tmp_path / "rs.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo,
+                "ENERGY",
+                on="element",
+                block_id=1,
+                region=rect,
+                where="DENSITY > 3.0 AND ENERGY > 50.0",
+                reduce=["mean", "count"],
+                time="last",
+            )
+        # last step DENSITY=[2,4,6,8], ENERGY=[20,40,60,80]
+        # DENSITY>3 -> {2,3,4}; ENERGY>50 -> {3,4}; AND -> {3,4} => ENERGY mean 70
+        assert isinstance(result, RegionStatsResult)
+        assert result.count_selected == 2
+        assert result.stats["mean"] == pytest.approx(70.0)
+
+    def test_where_compound_or(self, tmp_path: Path) -> None:
+        """Compound OR predicate (EXODUSII-IMPROVEMENTS #10)."""
+        path = tmp_path / "rs.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo:
+            result = region_stats(
+                exo,
+                "ENERGY",
+                on="element",
+                block_id=1,
+                region=rect,
+                where="DENSITY > 7.0 OR ENERGY < 30.0",
+                reduce=["mean", "count"],
+                time="last",
+            )
+        # DENSITY>7 -> {4}(80); ENERGY<30 -> {1}(20); OR -> {1,4} => mean 50
+        assert isinstance(result, RegionStatsResult)
+        assert result.count_selected == 2
+        assert result.stats["mean"] == pytest.approx(50.0)
+
+    def test_where_compound_mixed_rejected(self, tmp_path: Path) -> None:
+        """Mixing AND and OR is rejected (no precedence)."""
+        path = tmp_path / "rs.exo"
+        _write_quad_mesh(path)
+        rect = Rectangle([0.0, 0.0], 2.0, 2.0)
+        with ExodusFile.open(path) as exo, pytest.raises(ValueError, match="mixes AND and OR"):
+            region_stats(
+                exo,
+                "ENERGY",
+                on="element",
+                block_id=1,
+                region=rect,
+                where="DENSITY > 3.0 AND ENERGY > 50.0 OR DENSITY < 3.0",
+                reduce=["mean"],
+                time="last",
+            )
+
     def test_symmetry_factor_applied_to_sum_not_mean(self, tmp_path: Path) -> None:
         path = tmp_path / "rs.exo"
         _write_quad_mesh(path)

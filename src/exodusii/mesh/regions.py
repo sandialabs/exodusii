@@ -35,8 +35,34 @@ class TimeDomain(Protocol):
         """Return whether time or times are inside the domain."""
 
 
+class _RegionOps:
+    """Mixin providing boolean composition operators for regions.
+
+    Any region implementing ``contains(points) -> BoolArray`` gains
+    intersection (``&``), union (``|``), and complement (``~``) so that
+    multi-condition selections compose into a single region object.  The
+    composed region's ``contains`` combines the child masks elementwise, so it
+    works unchanged with :func:`region_stats` / :func:`region_mass` (which only
+    ever call ``region.contains``).
+    """
+
+    __slots__ = ()
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def __and__(self, other: "Region") -> "Intersection":
+        return Intersection((self, other))
+
+    def __or__(self, other: "Region") -> "Union":
+        return Union((self, other))
+
+    def __invert__(self) -> "Complement":
+        return Complement(self)
+
+
 @dataclass(frozen=True, slots=True)
-class Circle:
+class Circle(_RegionOps):
     """Closed 2-D circle."""
 
     center: FloatArray
@@ -58,7 +84,7 @@ class Circle:
 
 
 @dataclass(frozen=True, slots=True)
-class Sphere:
+class Sphere(_RegionOps):
     """Closed 3-D sphere."""
 
     center: FloatArray
@@ -80,7 +106,7 @@ class Sphere:
 
 
 @dataclass(frozen=True, slots=True)
-class Rectangle:
+class Rectangle(_RegionOps):
     """Closed axis-aligned 2-D rectangle."""
 
     origin: FloatArray
@@ -111,7 +137,7 @@ class Rectangle:
 
 
 @dataclass(frozen=True, slots=True)
-class Quad:
+class Quad(_RegionOps):
     """Closed 2-D quadrilateral region."""
 
     vertices: FloatArray
@@ -140,7 +166,7 @@ class Quad:
 
 
 @dataclass(frozen=True, slots=True)
-class Cylinder:
+class Cylinder(_RegionOps):
     """Closed finite cylinder.
 
     In 2-D this behaves as a capsule around a line segment. In 3-D this is a
@@ -175,6 +201,161 @@ class Cylinder:
         points_array, _scalar = _points(points, dimension=self.dimension)
         result = _points_in_flat_capped_cylinder(points_array, self.p1, self.p2, self.radius)
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class Halfspace(_RegionOps):
+    """Closed half-space ``{ x : (x - point) . normal >= 0 }``.
+
+    Useful for an axial cut (e.g. "downstream of the plate back face") that a
+    finite Circle/Sphere/Cylinder cannot express.  Compose with a Cylinder via
+    ``Cylinder(...) & Halfspace(...)`` to bound both the radius and the axial
+    extent in one region.
+    """
+
+    point: FloatArray
+    normal: FloatArray
+
+    def __init__(self, point: npt.ArrayLike, normal: npt.ArrayLike) -> None:
+        pt = _point(point, name="point")
+        nrm = _point(normal, name="normal")
+        if pt.shape != nrm.shape:
+            raise ValueError("point and normal must have the same dimension")
+        if pt.size not in {2, 3}:
+            raise ValueError("half-space points must be two- or three-dimensional")
+        norm = float(np.linalg.norm(nrm))
+        if norm == 0.0:
+            raise ValueError("normal must be nonzero")
+        object.__setattr__(self, "point", pt)
+        object.__setattr__(self, "normal", nrm / norm)
+
+    @property
+    def dimension(self) -> int:
+        return int(self.point.size)
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
+        signed = (points_array - self.point) @ self.normal
+        return np.asarray(signed >= 0.0, dtype=np.bool_)
+
+
+@dataclass(frozen=True, slots=True)
+class Slab(_RegionOps):
+    """Axis-aligned closed slab bounding a single coordinate axis.
+
+    ``axis`` is ``0/1/2`` or ``'x'/'y'/'z'``.  ``lo``/``hi`` are optional bounds
+    (``None`` => unbounded on that side), matching the semi-infinite semantics of
+    :class:`BoundedTimeDomain`.  ``dimension`` (default 3) is the point-space
+    dimension the slab is tested against; it only affects input validation, not
+    which axis is bounded.
+    """
+
+    axis: int
+    lo: float | None
+    hi: float | None
+    dim: int
+
+    def __init__(
+        self,
+        axis: int | str,
+        *,
+        lo: float | None = None,
+        hi: float | None = None,
+        dimension: int = 3,
+    ) -> None:
+        ax = {"x": 0, "y": 1, "z": 2}.get(axis, axis) if isinstance(axis, str) else axis
+        if ax not in (0, 1, 2):
+            raise ValueError("axis must be one of 0/1/2 or 'x'/'y'/'z'")
+        if dimension not in (2, 3):
+            raise ValueError("dimension must be 2 or 3")
+        if ax >= dimension:
+            raise ValueError(f"axis {ax} out of range for dimension {dimension}")
+        if lo is None and hi is None:
+            raise ValueError("slab requires at least one of lo, hi")
+        if lo is not None and hi is not None and float(hi) < float(lo):
+            raise ValueError("slab hi must be >= lo")
+        object.__setattr__(self, "axis", int(ax))
+        object.__setattr__(self, "lo", None if lo is None else float(lo))
+        object.__setattr__(self, "hi", None if hi is None else float(hi))
+        object.__setattr__(self, "dim", int(dimension))
+
+    @property
+    def dimension(self) -> int:
+        return self.dim
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        points_array, _scalar = _points(points, dimension=self.dimension)
+        column = points_array[:, self.axis]
+        result = np.ones(column.shape, dtype=np.bool_)
+        if self.lo is not None:
+            result &= column >= self.lo
+        if self.hi is not None:
+            result &= column <= self.hi
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class Intersection(_RegionOps):
+    """Region that contains a point iff ALL child regions contain it."""
+
+    regions: tuple["Region", ...]
+
+    def __init__(self, regions: "tuple[Region, ...] | list[Region]") -> None:
+        regs = tuple(regions)
+        if len(regs) == 0:
+            raise ValueError("Intersection requires at least one region")
+        object.__setattr__(self, "regions", regs)
+
+    @property
+    def dimension(self) -> int:
+        return int(self.regions[0].dimension)
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        result: BoolArray | None = None
+        for region in self.regions:
+            mask = np.asarray(region.contains(points), dtype=np.bool_)
+            result = mask if result is None else (result & mask)
+        assert result is not None
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class Union(_RegionOps):
+    """Region that contains a point iff ANY child region contains it."""
+
+    regions: tuple["Region", ...]
+
+    def __init__(self, regions: "tuple[Region, ...] | list[Region]") -> None:
+        regs = tuple(regions)
+        if len(regs) == 0:
+            raise ValueError("Union requires at least one region")
+        object.__setattr__(self, "regions", regs)
+
+    @property
+    def dimension(self) -> int:
+        return int(self.regions[0].dimension)
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        result: BoolArray | None = None
+        for region in self.regions:
+            mask = np.asarray(region.contains(points), dtype=np.bool_)
+            result = mask if result is None else (result | mask)
+        assert result is not None
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class Complement(_RegionOps):
+    """Region that contains a point iff the wrapped region does NOT."""
+
+    region: "Region"
+
+    @property
+    def dimension(self) -> int:
+        return int(self.region.dimension)
+
+    def contains(self, points: npt.ArrayLike) -> BoolArray:
+        return ~np.asarray(self.region.contains(points), dtype=np.bool_)
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +394,7 @@ def circle(center: npt.ArrayLike, radius: float) -> Circle:
 
 
 @dataclass(frozen=True, slots=True)
-class Ring:
+class Ring(_RegionOps):
     """Closed 2-D annular (ring) region.
 
     A point is inside the ring when it is within *outer_radius* of *center*
@@ -291,6 +472,38 @@ def cylinder(p1: npt.ArrayLike, p2: npt.ArrayLike, radius: float) -> Cylinder:
     """Create a closed finite cylinder/capsule."""
 
     return Cylinder(p1, p2, radius)
+
+
+def halfspace(point: npt.ArrayLike, normal: npt.ArrayLike) -> Halfspace:
+    """Create a closed half-space ``{x : (x - point) . normal >= 0}``."""
+
+    return Halfspace(point, normal)
+
+
+def slab(
+    axis: int | str, *, lo: float | None = None, hi: float | None = None, dimension: int = 3
+) -> Slab:
+    """Create an axis-aligned closed slab bounding one coordinate axis."""
+
+    return Slab(axis, lo=lo, hi=hi, dimension=dimension)
+
+
+def intersection(*regions: "Region") -> Intersection:
+    """Create a region that is the intersection (AND) of the given regions."""
+
+    return Intersection(regions)
+
+
+def union(*regions: "Region") -> Union:
+    """Create a region that is the union (OR) of the given regions."""
+
+    return Union(regions)
+
+
+def complement(region: "Region") -> Complement:
+    """Create a region that is the complement (NOT) of the given region."""
+
+    return Complement(region)
 
 
 def unbounded_time_domain() -> UnboundedTimeDomain:

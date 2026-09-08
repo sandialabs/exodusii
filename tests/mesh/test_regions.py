@@ -5,14 +5,22 @@
 import numpy as np
 import pytest
 
+from exodusii.mesh.regions import Complement
+from exodusii.mesh.regions import Intersection
+from exodusii.mesh.regions import Union
 from exodusii.mesh.regions import bound_time_domain
 from exodusii.mesh.regions import bounded_time_domain
 from exodusii.mesh.regions import circle
+from exodusii.mesh.regions import complement
 from exodusii.mesh.regions import cylinder
+from exodusii.mesh.regions import halfspace
+from exodusii.mesh.regions import intersection
 from exodusii.mesh.regions import quad
 from exodusii.mesh.regions import rectangle
+from exodusii.mesh.regions import slab
 from exodusii.mesh.regions import sphere
 from exodusii.mesh.regions import unbounded_time_domain
+from exodusii.mesh.regions import union
 
 
 def test_region_cylinder_2d_axis_aligned() -> None:
@@ -205,3 +213,86 @@ def test_time_domain_rejects_bad_rank() -> None:
 
     with pytest.raises(ValueError, match="times must be scalar or one-dimensional"):
         domain.contains(np.zeros((2, 2)))
+
+
+# ---------------------------------------------------------------------------
+# Halfspace / Slab / composition (EXODUSII-IMPROVEMENTS #9)
+# ---------------------------------------------------------------------------
+
+
+def test_halfspace_basic() -> None:
+    hs = halfspace([0.012, 0.0, 0.0], [1.0, 0.0, 0.0])  # x >= 12mm
+    pts = [[0.02, 0, 0], [0.012, 0, 0], [0.005, 0, 0]]
+    assert hs.contains(pts).tolist() == [True, True, False]
+    assert hs.dimension == 3
+
+
+def test_halfspace_normalizes_normal() -> None:
+    hs = halfspace([0, 0, 0], [5.0, 0.0, 0.0])
+    assert np.allclose(np.linalg.norm(hs.normal), 1.0)
+
+
+def test_halfspace_rejects_zero_normal() -> None:
+    with pytest.raises(ValueError, match="normal must be nonzero"):
+        halfspace([0, 0, 0], [0, 0, 0])
+
+
+def test_slab_bounds_single_axis() -> None:
+    sl = slab("x", lo=0.012)
+    pts = [[0.02, 9, 9], [0.005, 0, 0]]
+    assert sl.contains(pts).tolist() == [True, False]
+
+
+def test_slab_semi_and_full() -> None:
+    assert slab(1, hi=1.0).contains([[0, 0.5, 0], [0, 2.0, 0]]).tolist() == [True, False]
+    assert slab("z", lo=-1.0, hi=1.0).contains([[0, 0, 0], [0, 0, 5]]).tolist() == [True, False]
+
+
+def test_slab_rejects_bad_args() -> None:
+    with pytest.raises(ValueError, match="axis must be one of"):
+        slab("w", lo=0.0)
+    with pytest.raises(ValueError, match="requires at least one"):
+        slab("x")
+    with pytest.raises(ValueError, match="hi must be >= lo"):
+        slab("x", lo=1.0, hi=0.0)
+
+
+def test_region_intersection_operator_and_factory() -> None:
+    cyl = cylinder([-0.05, 0, 0], [0.30, 0, 0], 0.011)
+    hs = halfspace([0.012, 0, 0], [1, 0, 0])
+    pts = [[0.02, 0, 0], [0.005, 0, 0], [0.02, 0.02, 0]]
+    expected = [True, False, False]  # inside radius AND downstream
+    assert (cyl & hs).contains(pts).tolist() == expected
+    assert isinstance(cyl & hs, Intersection)
+    assert intersection(cyl, hs).contains(pts).tolist() == expected
+
+
+def test_region_union_operator() -> None:
+    cyl = cylinder([-0.05, 0, 0], [0.30, 0, 0], 0.011)
+    hs = halfspace([0.012, 0, 0], [1, 0, 0])
+    pts = [[0.02, 0, 0], [0.005, 0, 0], [0.02, 0.02, 0], [-0.01, 0, 0]]
+    assert (cyl | hs).contains(pts).tolist() == [True, True, True, True]
+    assert isinstance(cyl | hs, Union)
+    assert union(cyl, hs).contains(pts).tolist() == [True, True, True, True]
+
+
+def test_region_complement_operator() -> None:
+    hs = halfspace([0.012, 0, 0], [1, 0, 0])
+    pts = [[0.02, 0, 0], [0.005, 0, 0]]
+    assert (~hs).contains(pts).tolist() == [False, True]
+    assert isinstance(~hs, Complement)
+    assert complement(hs).contains(pts).tolist() == [False, True]
+
+
+def test_region_composition_dimension() -> None:
+    cyl = cylinder([-0.05, 0, 0], [0.30, 0, 0], 0.011)
+    hs = halfspace([0.012, 0, 0], [1, 0, 0])
+    assert (cyl & hs).dimension == 3
+
+
+def test_hollow_shell_via_complement() -> None:
+    outer = cylinder([-0.05, 0, 0], [0.30, 0, 0], 0.013)
+    inner = cylinder([-0.05, 0, 0], [0.30, 0, 0], 0.007)
+    shell = outer & ~inner
+    pts = [[0.0, 0.010, 0], [0.0, 0.004, 0], [0.0, 0.020, 0]]  # rim, core, outside
+    assert shell.contains(pts).tolist() == [True, False, False]
