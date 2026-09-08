@@ -28,10 +28,11 @@ from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
 from exodusii.api.diff import TimeSelection
 from exodusii.api.diff import diff
+from exodusii.cli._command import Command
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
 
-__all__ = ["COMMAND", "add_arguments", "add_subparser", "build_parser", "main", "run_diff"]
+__all__ = ["COMMAND", "Diff", "add_arguments", "run_diff"]
 
 COMMAND = "diff"
 
@@ -56,7 +57,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0e-6,
         metavar="VALUE",
-        help="Default tolerance value (default: 1e-6).",
+        help="Default tolerance value. [default: 1e-6]",
     )
     mode = tol.add_mutually_exclusive_group()
     mode.add_argument(
@@ -64,7 +65,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="mode",
         action="store_const",
         const="relative",
-        help="Use relative tolerance (default).",
+        help="Use relative tolerance. [default]",
     )
     mode.add_argument(
         "--absolute",
@@ -120,7 +121,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=0.0,
         metavar="VALUE",
-        help="Floor below which values are treated as equal (default: 0).",
+        help="Floor below which values are treated as equal. [default: 0]",
     )
     tol.add_argument(
         "--use-old-floor", action="store_true", help="Use the older floor definition |a-b| < floor."
@@ -130,7 +131,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0e-6,
         metavar="VALUE",
-        help="Absolute tolerance for nodal coordinates (default: 1e-6).",
+        help="Absolute tolerance for nodal coordinates. [default: 1e-6]",
     )
 
     sel = parser.add_argument_group("selection")
@@ -172,7 +173,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="N|LAST",
         help=(
-            "First file-2 step to compare (1-based, default 1).  "
+            "First file-2 step to compare (1-based). [default: 1]  "
             "Use 'LAST' to compare only the final step on each file."
         ),
     )
@@ -181,10 +182,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=-1,
         metavar="N",
-        help="Last file-2 step to compare, inclusive (default: all).",
+        help="Last file-2 step to compare, inclusive. [default: all]",
     )
     ts.add_argument(
-        "--increment", type=int, default=1, metavar="N", help="Step stride (default 1)."
+        "--increment", type=int, default=1, metavar="N", help="Step stride. [default: 1]"
     )
     ts.add_argument(
         "--exclude-steps",
@@ -198,14 +199,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0,
         metavar="S",
-        help="Multiply file-1 time values by S before matching (default 1.0).",
+        help="Multiply file-1 time values by S before matching. [default: 1.0]",
     )
     ts.add_argument(
         "--time-offset",
         type=float,
         default=0.0,
         metavar="O",
-        help="Add O to file-1 time values before matching (default 0.0).",
+        help="Add O to file-1 time values before matching. [default: 0.0]",
     )
     ts.add_argument(
         "--interpolate",
@@ -232,8 +233,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1.0e-6,
         metavar="VALUE",
         help=(
-            "Per-axis spatial tolerance used when building the mesh map "
-            "(default: 1e-6).  Independent of --coordinate-tolerance."
+            "Per-axis spatial tolerance used when building the mesh map. "
+            "[default: 1e-6]  Independent of --coordinate-tolerance."
         ),
     )
     mm.add_argument(
@@ -248,7 +249,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
     out = parser.add_argument_group("output")
     out.add_argument(
-        "--format", choices=("text", "json"), default="text", help="Output format (default: text)."
+        "--format", choices=("text", "json"), default="text", help="Output format. [default: text]"
     )
     out.add_argument("--terse", action="store_true", help="For JSON output, emit compact JSON.")
     out.add_argument(
@@ -264,42 +265,36 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the standalone ``exodiff`` argument parser."""
-    parser = argparse.ArgumentParser(
-        prog="exodiff",
-        description=(
-            "Compare two ExodusII databases. "
-            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
-            "Supports both matched mesh ordering (default) and coordinate-based "
-            "mesh matching (--match-coordinates)."
-        ),
-    )
-    add_arguments(parser)
-    return parser
+class Diff(Command):
+    """Compare two ExodusII databases (pure-Python exodiff).
 
-
-def add_subparser(
-    subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser
-) -> argparse.ArgumentParser:
-    """Register the ``diff`` subparser under ``python -m exodusii``.
-
-    Note: ``common`` (which carries ``--terse``) is intentionally *not* used as
-    a parent here because :func:`add_arguments` defines exodiff's own ``--terse``
-    with its distinct meaning (compact JSON for ``--format json``).
+    Supports both matched mesh ordering (default) and coordinate-based
+    mesh matching (--match-coordinates).  Return codes follow the SEACAS
+    exodiff convention: 0 same / 1 error / 2 different.
     """
-    parser = subparsers.add_parser(
-        COMMAND,
-        help="Compare two ExodusII databases (pure-Python exodiff).",
-        description=(
-            "Compare two ExodusII databases. "
-            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
-            "Supports both matched mesh ordering (default) and coordinate-based "
-            "mesh matching (--match-coordinates)."
-        ),
-    )
-    add_arguments(parser)
-    return parser
+
+    name = "diff"
+
+    @staticmethod
+    def setup_parser(parser: argparse.ArgumentParser) -> None:
+        """Register exodiff arguments on *parser*.
+
+        Note: the ``--terse`` flag from the common parent is intentionally
+        not passed here because :func:`add_arguments` defines its own
+        ``--terse`` with a distinct meaning (compact JSON for
+        ``--format json``).
+        """
+        add_arguments(parser)
+
+    def execute(
+        self,
+        parser: argparse.ArgumentParser,
+        args: argparse.Namespace,
+        *,
+        file: TextIO | None = None,
+    ) -> int:
+        """Run the diff and return a SEACAS-style exit code."""
+        return run_diff(args, file=file)
 
 
 def _parse_start(value: str | None) -> int:
@@ -454,7 +449,16 @@ def run_diff(args: argparse.Namespace, *, file: TextIO | None = None) -> int:
 
 def main(argv: list[str] | None = None, *, file: TextIO | None = None) -> int:
     """Run the ``exodiff`` CLI and return an exit code."""
-    parser = build_parser()
+    parser = argparse.ArgumentParser(
+        prog="exodiff",
+        description=(
+            "Compare two ExodusII databases. "
+            "A pure-Python, exodusii-based counterpart to SEACAS exodiff. "
+            "Supports both matched mesh ordering (default) and coordinate-based "
+            "mesh matching (--match-coordinates)."
+        ),
+    )
+    Diff.setup_parser(parser)
     args = parser.parse_args(argv)
     return run_diff(args, file=file)
 

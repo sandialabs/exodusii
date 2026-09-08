@@ -19,96 +19,128 @@ list indexes. It is not jq.
 import argparse
 import json
 import re
+import sys
 from importlib import resources
 from pathlib import Path
 from typing import Any
+from typing import TextIO
+
+from exodusii.cli._command import Command
 
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 
-COMMAND = "learn"
+__all__ = [
+    "CapabilityDatasetNotFoundError",
+    "Learn",
+    "SkillDatasetNotFoundError",
+    "learn_instructions",
+    "load_capability_dataset",
+    "load_skill_dataset",
+    "parse_query",
+    "query_capabilities",
+    "query_json",
+    "query_skills",
+]
 
 
-def add_subparser(
-    subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser
-) -> argparse.ArgumentParser:
-    """Register the ``learn`` subparser and its ``capabilities``/``skills`` topics."""
-    parser = subparsers.add_parser(
-        COMMAND,
-        parents=[common],
-        help=(
-            "Query exodusii's static capabilities and skills for agent self-learning. "
-            "With no topic, prints instructions for using this command."
-        ),
-    )
-    learn_topics = parser.add_subparsers(dest="learn_topic", metavar="topic")
+class Learn(Command):
+    """Query exodusii's static capabilities and skills for agent self-learning."""
 
-    learn_capabilities = learn_topics.add_parser(
-        "capabilities",
-        parents=[common],
-        aliases=("capability", "caps", "cap"),
-        help="Query the static capability database.",
-    )
-    learn_capabilities.add_argument(
-        "query",
-        nargs="?",
-        default="overview",
-        help=(
-            "Capability path. Defaults to 'overview'. "
-            "Use 'all' (or 'capabilities') for the whole database, a top-level key "
-            "like 'query' or 'mesh_geometry', or a nested path like 'python_api.values'."
-        ),
-    )
+    name = "learn"
 
-    learn_skills = learn_topics.add_parser(
-        "skills", parents=[common], aliases=("skill",), help="Query the static skills database."
-    )
-    learn_skills.add_argument(
-        "query",
-        nargs="?",
-        default="list",
-        help=(
-            "Skill selector. Defaults to 'list' (skill names). "
-            "Use 'all' for every skill, or a skill name like 'exodusii-geometry' "
-            "optionally followed by a path, e.g. 'exodusii-querying .body'."
-        ),
-    )
-    learn_skills.add_argument(
-        "path",
-        nargs="?",
-        default=".",
-        help="Optional query path below the selected skill, e.g. '.body'.",
-    )
-    return parser
+    @staticmethod
+    def setup_parser(parser: argparse.ArgumentParser) -> None:
+        """Register the ``learn`` subparser and its ``capabilities``/``skills`` topics."""
+        learn_topics = parser.add_subparsers(dest="learn_topic", metavar="topic")
 
+        learn_capabilities = learn_topics.add_parser(
+            "capabilities",
+            aliases=("capability", "caps", "cap"),
+            help="Query the static capability database.",
+        )
+        learn_capabilities.add_argument(
+            "query",
+            nargs="?",
+            default="overview",
+            help=(
+                "Capability path. [default: overview] "
+                "Use 'all' (or 'capabilities') for the whole database, a top-level key "
+                "like 'query' or 'mesh_geometry', or a nested path like 'python_api.values'."
+            ),
+        )
+        Command.add_terse_argument(learn_capabilities)
 
-def learn_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Execute the static learning command and return JSON-safe data."""
+        learn_skills = learn_topics.add_parser(
+            "skills", aliases=("skill",), help="Query the static skills database."
+        )
+        learn_skills.add_argument(
+            "query",
+            nargs="?",
+            default="list",
+            help=(
+                "Skill selector. [default: list] "
+                "Use 'all' for every skill, or a skill name like 'exodusii-geometry' "
+                "optionally followed by a path, e.g. 'exodusii-querying .body'."
+            ),
+        )
+        learn_skills.add_argument(
+            "path",
+            nargs="?",
+            default=".",
+            help="Optional query path below the selected skill, e.g. '.body'.",
+        )
+        Command.add_terse_argument(learn_skills)
 
-    topic = getattr(args, "learn_topic", None)
+        Command.add_terse_argument(parser)
 
-    if topic in {"capabilities", "capability", "caps", "cap"}:
-        selector = args.query
-        data = query_capabilities(selector)
-        return {"command": "learn", "dataset": "capabilities", "selector": selector, "result": data}
+    def execute(
+        self,
+        parser: argparse.ArgumentParser,
+        args: argparse.Namespace,
+        *,
+        file: TextIO | None = None,
+    ) -> int:
+        """Execute the static learning command and return JSON."""
+        try:
+            topic = getattr(args, "learn_topic", None)
 
-    if topic in {"skills", "skill"}:
-        selector = args.query
-        path = getattr(args, "path", ".")
-        data = query_skills(selector, path)
-        return {
-            "command": "learn",
-            "dataset": "skills",
-            "selector": selector,
-            "query": path,
-            "result": data,
-        }
+            if topic in {"capabilities", "capability", "caps", "cap"}:
+                selector = args.query
+                data = query_capabilities(selector)
+                payload: dict[str, Any] = {
+                    "command": "learn",
+                    "dataset": "capabilities",
+                    "selector": selector,
+                    "result": data,
+                }
+            elif topic in {"skills", "skill"}:
+                selector = args.query
+                path = getattr(args, "path", ".")
+                data = query_skills(selector, path)
+                payload = {
+                    "command": "learn",
+                    "dataset": "skills",
+                    "selector": selector,
+                    "query": path,
+                    "result": data,
+                }
+            else:
+                payload = learn_instructions()
 
-    return learn_instructions()
+            payload.setdefault("ok", True)
+            self.emit_json(payload, terse=bool(getattr(args, "terse", False)), file=file)
+            return 0
+        except Exception as exc:
+            self.emit_json(
+                {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}},
+                terse=bool(getattr(args, "terse", False)),
+                file=file or sys.stderr,
+            )
+            return 1
 
 
 def learn_instructions() -> dict[str, Any]:
     """Return instructions for using the learn command."""
-
     return {
         "command": "learn",
         "purpose": (
@@ -125,9 +157,11 @@ def learn_instructions() -> dict[str, Any]:
             "commands": "Agent-oriented CLI command reference.",
             "query": "Variable selector, time selector, and lineout guidance.",
             "python_api": "Modern Python API usage.",
-            "mesh_geometry": "Mesh geometry helpers, geometric region predicates "
-            "(Cylinder/Sphere/Circle/Rectangle/Quad), element centers/volumes, "
-            "and mass/volume-weighted region reductions.",
+            "mesh_geometry": (
+                "Mesh geometry helpers, geometric region predicates "
+                "(Cylinder/Sphere/Circle/Rectangle/Quad), element centers/volumes, "
+                "and mass/volume-weighted region reductions."
+            ),
             "legacy": "Legacy compatibility API guidance.",
             "limitations": "Known limitations and caveats.",
             "all": "Entire capability database.",
@@ -139,9 +173,11 @@ def learn_instructions() -> dict[str, Any]:
             "exodusii-agent-orientation": "General orientation for agents.",
             "exodusii-querying": "How to query Exodus databases and produce JSON.",
             "exodusii-python-api": "How to write Python code using exodusii.",
-            "exodusii-geometry": "How to do geometry and region queries, "
-            "including selecting entities inside a shape, element centers/volumes, "
-            "region mass, and lineout profiles.",
+            "exodusii-geometry": (
+                "How to do geometry and region queries, "
+                "including selecting entities inside a shape, element centers/volumes, "
+                "region mass, and lineout profiles."
+            ),
             "exodusii-parallel-files": "How to work with decomposed parallel Exodus files.",
         },
         "query_language": {
@@ -177,8 +213,9 @@ def learn_instructions() -> dict[str, Any]:
                 "command": "python -m exodusii learn capabilities python_api.values",
             },
             {
-                "description": "Read geometry/region helper guidance "
-                "(Cylinder, element_volumes, etc.).",
+                "description": (
+                    "Read geometry/region helper guidance (Cylinder, element_volumes, etc.)."
+                ),
                 "command": "python -m exodusii learn capabilities mesh_geometry",
             },
             {
@@ -215,38 +252,22 @@ def learn_instructions() -> dict[str, Any]:
 
 def load_capability_dataset() -> Any:
     """Load exodusii's static capability database."""
-
     path = resources.files("exodusii").joinpath("data").joinpath("capabilities.json")
     if not path.is_file():
         raise CapabilityDatasetNotFoundError(path)
-
     return json.loads(path.read_text(encoding="utf-8"))["capabilities"]
 
 
 def load_skill_dataset() -> Any:
     """Load exodusii's static skills database."""
-
     path = resources.files("exodusii").joinpath("data").joinpath("skills.json")
     if not path.is_file():
         raise SkillDatasetNotFoundError(path)
-
     return json.loads(path.read_text(encoding="utf-8"))["skills"]
 
 
 def query_capabilities(selector: str, query: str = ".") -> Any:
-    """Query exodusii's static capability database.
-
-    Examples
-    --------
-    ``query_capabilities("all")`` returns the full database.
-
-    ``query_capabilities("overview")`` returns ``.overview``.
-
-    ``query_capabilities("python_api.values")`` returns ``.python_api.values``.
-
-    ``query_capabilities("query", ".selectors")`` returns ``.query.selectors``.
-    """
-
+    """Query exodusii's static capability database."""
     data = load_capability_dataset()
     selector = selector.strip()
     query = query.strip()
@@ -268,19 +289,7 @@ def query_capabilities(selector: str, query: str = ".") -> Any:
 
 
 def query_skills(selector: str, query: str = ".") -> Any:
-    """Query exodusii's static skills database.
-
-    Examples
-    --------
-    ``query_skills("list")`` returns skill names.
-
-    ``query_skills("all")`` returns all skills.
-
-    ``query_skills("exodusii-querying")`` returns that skill object.
-
-    ``query_skills("exodusii-querying", ".body")`` returns the skill body.
-    """
-
+    """Query exodusii's static skills database."""
     data = load_skill_dataset()
     selector = selector.strip()
     query = query.strip()
@@ -304,7 +313,6 @@ def query_skills(selector: str, query: str = ".") -> Any:
 
 def query_json(data: Any, query: str) -> Any:
     """Apply a lightweight path query to JSON-like data."""
-
     query = query.strip()
 
     if not query or query == ".":
@@ -322,7 +330,6 @@ def query_json(data: Any, query: str) -> Any:
                     f"cannot access key {token!r} on {type(current).__name__}; "
                     "current value is not an object"
                 )
-
             try:
                 current = current[token]
             except KeyError:
@@ -331,10 +338,9 @@ def query_json(data: Any, query: str) -> Any:
         elif isinstance(token, int):
             if not isinstance(current, list):
                 raise TypeError(
-                    f"cannot access index {token} on {type(current).__name__}; "
+                    f"cannot index {token} on {type(current).__name__}; "
                     "current value is not an array"
                 )
-
             try:
                 current = current[token]
             except IndexError:
@@ -349,21 +355,7 @@ def query_json(data: Any, query: str) -> Any:
 
 
 def parse_query(query: str) -> list[str | int]:
-    """Parse a simple JSON query path.
-
-    Supported syntax includes:
-
-    - ``.`` for the selected object, handled by ``query_json``
-    - ``a.b[0]``
-    - ``.a.b[0]``
-    - ``a["key.with.dots"]``
-    - ``a['key with spaces']``
-
-    Bare dotted keys intentionally accept only a conservative identifier-like
-    subset. Use bracket quotes for keys containing spaces, dots, punctuation, or
-    other special characters.
-    """
-
+    """Parse a simple JSON query path."""
     tokens: list[str | int] = []
     i = 0
 
@@ -372,20 +364,15 @@ def parse_query(query: str) -> list[str | int]:
 
         if ch == ".":
             i += 1
-
-            # Allow parse_query(".") to return [].
             if i >= len(query):
                 break
-
             start = i
             while i < len(query) and query[i] not in ".[":
                 i += 1
-
             if i > start:
                 key_token = query[start:i]
                 _validate_bare_key_token(key_token, column=start + 1, query=query)
                 tokens.append(key_token)
-
             continue
 
         if ch == "[":
@@ -397,7 +384,6 @@ def parse_query(query: str) -> list[str | int]:
             start = i
             while i < len(query) and query[i] not in ".[":
                 i += 1
-
             key_token = query[start:i]
             _validate_bare_key_token(key_token, column=start + 1, query=query)
             tokens.append(key_token)
@@ -409,21 +395,16 @@ def parse_query(query: str) -> list[str | int]:
 
 
 def _is_bare_key_start(ch: str) -> bool:
-    """Return true if ``ch`` can start an unquoted key token."""
-
     return ch.isalpha() or ch == "_"
 
 
 def _validate_bare_key_token(token: str, *, column: int, query: str) -> None:
-    """Validate an unquoted dotted-path key token."""
-
     if not _KEY_TOKEN_RE.fullmatch(token):
         raise ValueError(f"invalid query syntax at column {column}: {query!r}")
 
 
 def parse_bracket(query: str, i: int) -> tuple[str | int, int]:
     """Parse one bracket expression from a query path."""
-
     assert query[i] == "["
     j = i + 1
 
@@ -437,20 +418,17 @@ def parse_bracket(query: str, i: int) -> tuple[str | int, int]:
 
         while j < len(query):
             ch = query[j]
-
             if ch == "\\":
                 if j + 1 >= len(query):
                     raise ValueError(f"invalid escape in query: {query!r}")
                 chars.append(query[j + 1])
                 j += 2
                 continue
-
             if ch == quote:
                 j += 1
                 if j >= len(query) or query[j] != "]":
                     raise ValueError(f"expected closing bracket in query: {query!r}")
                 return "".join(chars), j + 1
-
             chars.append(ch)
             j += 1
 
@@ -460,10 +438,8 @@ def parse_bracket(query: str, i: int) -> tuple[str | int, int]:
     if match:
         value = int(match.group(0))
         j += len(match.group(0))
-
         if j >= len(query) or query[j] != "]":
             raise ValueError(f"expected closing bracket in query: {query!r}")
-
         return value, j + 1
 
     raise ValueError(f"invalid bracket expression in query: {query!r}")
@@ -471,16 +447,12 @@ def parse_bracket(query: str, i: int) -> tuple[str | int, int]:
 
 def format_missing_key_message(key: str, current: dict[str, Any]) -> str:
     """Return helpful missing-key text."""
-
     keys = sorted(str(k) for k in current)
-
     if not keys:
         return f"no such key: {key!r}. Current object has no keys."
-
     preview = ", ".join(keys[:24])
     if len(keys) > 24:
         preview += ", ..."
-
     return f"no such key: {key!r}. Available keys: {preview}"
 
 
@@ -500,15 +472,13 @@ class SkillDatasetNotFoundError(FileNotFoundError):
         super().__init__(f"exodusii skills database not found: {path}")
 
 
-__all__ = [
-    "CapabilityDatasetNotFoundError",
-    "SkillDatasetNotFoundError",
-    "learn_command",
-    "learn_instructions",
-    "load_capability_dataset",
-    "load_skill_dataset",
-    "parse_query",
-    "query_capabilities",
-    "query_json",
-    "query_skills",
-]
+def main(argv: list[str] | None = None, *, file=None) -> int:
+    """Standalone entry point for the ``learn`` subcommand."""
+    parser = argparse.ArgumentParser(prog="python -m exodusii learn", description=Learn.__doc__)
+    Learn.setup_parser(parser)
+    args = parser.parse_args(argv)
+    return Learn().execute(parser, args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

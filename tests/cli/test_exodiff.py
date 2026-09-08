@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from exodusii.api.writer import ExodusWriter
-from exodusii.cli.exodiff import build_parser
+from exodusii.cli.exodiff import Diff
 from exodusii.cli.exodiff import main
 
 _SAME = 0
@@ -186,7 +186,10 @@ def test_json_terse_is_single_line(tmp_path: Path) -> None:
 
 
 def test_parser_builds() -> None:
-    parser = build_parser()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    Diff.setup_parser(parser)
     args = parser.parse_args(["one.exo", "two.exo", "--absolute", "-t", "1e-3"])
     assert args.file1 == "one.exo"
     assert args.file2 == "two.exo"

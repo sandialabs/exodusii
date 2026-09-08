@@ -5,24 +5,23 @@
 """Shared helpers for the ``python -m exodusii`` subcommands.
 
 The JSON-oriented CLI is split into one module per subcommand under
-:mod:`exodusii.cli`.  This module holds the entity constants, argument-parsing
-helpers, and JSON-serialization utilities that those subcommand modules share,
-so no subcommand needs to import another (and ``main`` stays a thin
-coordinator).
+:mod:`exodusii.cli`.  This module holds the entity constants and domain-
+specific payload builders (block/set/variable stats, etc.) that subcommand
+modules share.
+
+Generic CLI utilities (JSON emission, value coercion, time-selector parsing,
+array statistics) live on :class:`exodusii.cli._command.Command` and are
+available to all subcommands through the base class.
 """
 
-import argparse
-import json
-import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from typing import TextIO
 
 import numpy as np
 import numpy.typing as npt
 
 from exodusii.api.file import ExodusFile
+from exodusii.cli._command import Command
 from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
 from exodusii.core.selectors import VariableSelector
@@ -51,25 +50,6 @@ SET_ENTITIES: tuple[Entity, ...] = (
     Entity.FACE_SET,
     Entity.ELEMENT_SET,
 )
-
-
-def make_common_parser() -> argparse.ArgumentParser:
-    """Return the shared parent parser carrying the ``--terse`` flag.
-
-    ``--terse`` is put on both the top-level parser and every subparser (via
-    this parent) so both invocation styles work::
-
-        python -m exodusii --terse inspect file.exo
-        python -m exodusii inspect file.exo --terse
-    """
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--terse",
-        action="store_true",
-        default=argparse.SUPPRESS,
-        help="Emit compact JSON with no extra whitespace. Default is indented JSON.",
-    )
-    return common
 
 
 def _piece_path(file_arg: str, piece: int | None) -> str:
@@ -135,78 +115,6 @@ def resolved_time_payload(
     }
 
 
-def parse_time_selector(value: str | None) -> TimeSelector:
-    """Parse a CLI time selector.
-
-    Supported forms
-    ---------------
-    first
-    last
-    index:N    zero-based Python time index
-    step:N     one-based Exodus time step
-    0.25       nearest physical time
-    """
-    if value is None:
-        return None
-
-    text = value.strip()
-    key = text.lower()
-
-    if key in {"first", "last"}:
-        return key
-
-    if key.startswith("index:"):
-        index_text = key.split(":", 1)[1]
-        return int(index_text)
-
-    if key.startswith("step:"):
-        step_text = key.split(":", 1)[1]
-        step = int(step_text)
-        if step < 1:
-            raise ValueError("step:N time selector must use a one-based positive step")
-        return step - 1
-
-    try:
-        return float(text)
-    except ValueError as exc:
-        raise ValueError(
-            "time must be 'first', 'last', a physical float time, 'index:N', or 'step:N'"
-        ) from exc
-
-
-def normalize_limit(value: int) -> int | None:
-    """Normalize row limit. Negative means unlimited."""
-    if value < 0:
-        return None
-    return value
-
-
-def array_stats(values: npt.ArrayLike) -> dict[str, Any]:
-    """Return JSON-safe numeric statistics."""
-    array = np.asarray(values, dtype=np.float64).reshape(-1)
-    finite = array[np.isfinite(array)]
-
-    result: dict[str, Any] = {
-        "count": int(array.size),
-        "nan_count": int(np.isnan(array).sum()),
-        "inf_count": int(np.isinf(array).sum()),
-    }
-
-    if finite.size:
-        result.update(
-            {
-                "min": float(np.min(finite)),
-                "max": float(np.max(finite)),
-                "mean": float(np.mean(finite)),
-                "std": float(np.std(finite)),
-            }
-        )
-    else:
-        result.update({"min": None, "max": None, "mean": None, "std": None})
-
-    return result
-
-
 def structured_to_records(
     array: npt.NDArray[np.void], *, limit: int | None = None
 ) -> list[dict[str, Any]]:
@@ -214,7 +122,7 @@ def structured_to_records(
     names = array.dtype.names or ()
     rows = array if limit is None else array[:limit]
 
-    return [{name: jsonable(row[name]) for name in names} for row in rows]
+    return [{name: Command.jsonable(row[name]) for name in names} for row in rows]
 
 
 def limited_array_payload(values: npt.ArrayLike | None, *, limit: int) -> dict[str, Any]:
@@ -239,7 +147,7 @@ def limited_array_payload(values: npt.ArrayLike | None, *, limit: int) -> dict[s
         "dtype": str(array.dtype),
         "returned": int(returned),
         "truncated": bool(returned < total),
-        "values": jsonable(preview),
+        "values": Command.jsonable(preview),
     }
 
 
@@ -251,7 +159,7 @@ def variable_stats_payload(
 
     if location in {Entity.ELEMENT, Entity.EDGE, Entity.FACE}:
         values = exo.values(selector.name, on=location, time=time)
-        payload: dict[str, Any] = {"overall": array_stats(values)}
+        payload: dict[str, Any] = {"overall": Command.array_stats(values)}
 
         if by_block:
             block_location = variable_block_location(location)
@@ -261,7 +169,9 @@ def variable_stats_payload(
                 block_values = exo.values(
                     selector.name, on=location, block_id=block_id_int, time=time
                 )
-                payload["blocks"].append({"block_id": block_id_int, **array_stats(block_values)})
+                payload["blocks"].append(
+                    {"block_id": block_id_int, **Command.array_stats(block_values)}
+                )
 
         return payload
 
@@ -273,19 +183,19 @@ def variable_stats_payload(
         Entity.ELEMENT_SET,
     }:
         values = exo.values(selector.name, on=location, time=time)
-        payload = {"overall": array_stats(values)}
+        payload = {"overall": Command.array_stats(values)}
 
         if by_set:
             payload["sets"] = []
             for set_id in exo.set_ids(location):
                 set_id_int = int(set_id)
                 set_values = exo.values(selector.name, on=location, set_id=set_id_int, time=time)
-                payload["sets"].append({"set_id": set_id_int, **array_stats(set_values)})
+                payload["sets"].append({"set_id": set_id_int, **Command.array_stats(set_values)})
 
         return payload
 
     values = exo.values(selector.name, on=location, time=time)
-    return array_stats(values)
+    return Command.array_stats(values)
 
 
 def block_payload(exo: ExodusFile, block_entity: Entity, block_id: int) -> dict[str, Any]:
@@ -375,40 +285,3 @@ def agent_hints() -> dict[str, Any]:
             "displaced_coordinates": "exo.coordinates(time='last', displaced=True)",
         },
     }
-
-
-def jsonable(value: Any) -> Any:
-    """Convert common Python/NumPy values to JSON-serializable values."""
-    if isinstance(value, np.ndarray):
-        return jsonable(value.tolist())
-
-    if isinstance(value, np.generic):
-        return value.item()
-
-    if isinstance(value, Path):
-        return str(value)
-
-    if isinstance(value, Mapping):
-        return {str(key): jsonable(item) for key, item in value.items()}
-
-    if isinstance(value, tuple | list):
-        return [jsonable(item) for item in value]
-
-    return value
-
-
-def emit_json(payload: dict[str, Any], *, terse: bool, file: TextIO | None = None) -> None:
-    """Emit JSON to a stream.
-
-    Default output is indented with two spaces.  ``terse=True`` removes all
-    optional whitespace.
-    """
-    stream = file or sys.stdout
-    converted = jsonable(payload)
-
-    if terse:
-        json.dump(converted, stream, separators=(",", ":"))
-    else:
-        json.dump(converted, stream, indent=2)
-
-    stream.write("\n")

@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from exodusii.api.writer import ExodusWriter
-from exodusii.cli._common import parse_time_selector
+from exodusii.cli._command import Command
 from exodusii.cli.main import main
 
 
@@ -335,35 +335,35 @@ def test_command_error_is_json() -> None:
 
 
 def test_parse_time_selector_none() -> None:
-    assert parse_time_selector(None) is None
+    assert Command.parse_time_selector(None) is None
 
 
 def test_parse_time_selector_keywords() -> None:
-    assert parse_time_selector("first") == "first"
-    assert parse_time_selector("last") == "last"
-    assert parse_time_selector(" FIRST ") == "first"
+    assert Command.parse_time_selector("first") == "first"
+    assert Command.parse_time_selector("last") == "last"
+    assert Command.parse_time_selector(" FIRST ") == "first"
 
 
 def test_parse_time_selector_index() -> None:
-    assert parse_time_selector("index:0") == 0
-    assert parse_time_selector("index:3") == 3
+    assert Command.parse_time_selector("index:0") == 0
+    assert Command.parse_time_selector("index:3") == 3
 
 
 def test_parse_time_selector_step() -> None:
-    assert parse_time_selector("step:1") == 0
-    assert parse_time_selector("step:4") == 3
+    assert Command.parse_time_selector("step:1") == 0
+    assert Command.parse_time_selector("step:4") == 3
 
 
 def test_parse_time_selector_float() -> None:
-    assert parse_time_selector("0.25") == 0.25
-    assert parse_time_selector("1") == 1.0
+    assert Command.parse_time_selector("0.25") == 0.25
+    assert Command.parse_time_selector("1") == 1.0
 
 
 def test_parse_time_selector_rejects_bad_step() -> None:
     with pytest.raises(ValueError, match="one-based positive"):
-        parse_time_selector("step:0")
+        Command.parse_time_selector("step:0")
 
 
 def test_parse_time_selector_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="time must be"):
-        parse_time_selector("middle")
+        Command.parse_time_selector("middle")

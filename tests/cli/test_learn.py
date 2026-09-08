@@ -140,10 +140,10 @@ def test_learn_terse_after_subcommand() -> None:
 
 
 def test_learn_terse_before_subcommand() -> None:
-    """Both `python -m exodusii --terse learn` and `... learn --terse` should work."""
+    """``python -m exodusii learn --terse`` should emit compact JSON."""
 
     stream = io.StringIO()
-    code = main(["--terse", "learn"], file=stream)
+    code = main(["learn", "--terse"], file=stream)
 
     assert code == 0
 
