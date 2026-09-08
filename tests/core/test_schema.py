@@ -196,7 +196,7 @@ def test_map_specs() -> None:
     node = map_spec("node_map")
     assert node.count_dimension == "num_node_maps"
     assert callable(node.map_variable)
-    assert node.map_variable(2) == "node_map2"  # ty: ignore[call-top-callable]
+    assert node.map_variable(2) == "node_map2"
     assert node.names_variable == "nmap_names"
     assert node.property_variable is not None
     assert node.property_variable(2) == "nm_prop2"
