@@ -4,7 +4,6 @@
 
 """Legacy exoread module."""
 
-
 from exodusii.cli.exoread import describe
 from exodusii.cli.exoread import main
 
