@@ -6,6 +6,7 @@
 
 from dataclasses import dataclass
 from typing import Protocol
+from typing import cast
 from typing import runtime_checkable
 
 import numpy as np
@@ -52,13 +53,13 @@ class _RegionOps:
         raise NotImplementedError
 
     def __and__(self, other: "Region") -> "Intersection":
-        return Intersection((self, other))
+        return Intersection((cast("Region", self), other))
 
     def __or__(self, other: "Region") -> "Union":
-        return Union((self, other))
+        return Union((cast("Region", self), other))
 
     def __invert__(self) -> "Complement":
-        return Complement(self)
+        return Complement(cast("Region", self))
 
 
 @dataclass(frozen=True, slots=True)
