@@ -202,6 +202,46 @@ python -m exodusii diff --format json --terse gold.exo test.exo
 
 Exit codes: `0` same, `1` error, `2` different.
 
+### Command (control) files
+
+Like SEACAS `exodiff`, a diff can be driven by a **command file** — a
+whitespace-delimited directive file setting tolerances and comparison
+behavior. Read it with `exodusii.read_command_file()` or pass it on the CLI
+with `-f`/`--command-file`; explicit CLI flags override values from the file.
+
+```
+# cmds.txt  (SEACAS exodiff command-file grammar)
+DEFAULT TOLERANCE relative 1e-6 floor 1e-12
+COORDINATES absolute 1e-8
+NODAL VARIABLES absolute 1e-7
+	DISPLX relative 1e-9      # per-variable override
+	!VELZ                     # exclude
+GLOBAL VARIABLES (all) relative 1e-4
+```
+
+```bash
+python -m exodusii diff -f cmds.txt gold.exo test.exo
+```
+
+```python
+import exodusii
+
+res = exodusii.read_command_file("cmds.txt")   # -> CommandFileResult
+result = exodusii.diff("gold.exo", "test.exo", res.options)
+for w in res.warnings:      # accepted-but-inert directives (e.g. PEDANTIC)
+    print("note:", w)
+```
+
+Directives: `DEFAULT TOLERANCE`, `COORDINATES`, `TIME STEPS`, `FINAL TIME
+TOLERANCE`, per-category `<GLOBAL|NODAL|ELEMENT|NODESET|SIDESET|EDGEBLOCK|
+FACEBLOCK> VARIABLES` blocks (with `(all)`, per-variable tolerances, and
+`!name` exclusions), `ELEMENT ATTRIBUTES`, `STEP OFFSET`, `EXCLUDE TIMES`,
+`INTERPOLATE`, `APPLY MATCHING`/`NODESET MATCH`/`SIDESET MATCH`, and `IGNORE
+CASE`/`CASE SENSITIVE`. Keywords are case-insensitive and abbreviable. A
+category block that lists specific names (without `(all)`) restricts the
+comparison to those names for that category.
+
+
 ---
 
 ## Query and stats CLI

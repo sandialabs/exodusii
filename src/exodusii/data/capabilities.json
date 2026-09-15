@@ -84,17 +84,81 @@
       },
       "entity_aliases": {
         "summary": "All entity-accepting API methods pass the string through a normalizer that strips, lowercases, and replaces hyphens/spaces with underscores. The following aliases are accepted.",
-        "global": ["g", "global", "globals", "global_variable", "global_variables"],
-        "node": ["n", "node", "nodes", "nodal"],
-        "element": ["e", "el", "elem", "elems", "element", "elements"],
-        "edge": ["d", "edge", "edges"],
-        "face": ["f", "face", "faces"],
-        "element_block": ["eb", "block", "blocks", "elem_block", "element_block", "element_blocks"],
-        "node_set": ["ns", "nset", "nodeset", "node_set", "node_sets"],
-        "side_set": ["ss", "sset", "sideset", "side_set", "side_sets"],
-        "edge_set": ["es", "eset", "edgeset", "edge_set", "edge_sets"],
-        "face_set": ["fs", "fset", "faceset", "face_set", "face_sets"],
-        "element_set": ["els", "elset", "elemset", "elementset", "element_set", "element_sets"]
+        "global": [
+          "g",
+          "global",
+          "globals",
+          "global_variable",
+          "global_variables"
+        ],
+        "node": [
+          "n",
+          "node",
+          "nodes",
+          "nodal"
+        ],
+        "element": [
+          "e",
+          "el",
+          "elem",
+          "elems",
+          "element",
+          "elements"
+        ],
+        "edge": [
+          "d",
+          "edge",
+          "edges"
+        ],
+        "face": [
+          "f",
+          "face",
+          "faces"
+        ],
+        "element_block": [
+          "eb",
+          "block",
+          "blocks",
+          "elem_block",
+          "element_block",
+          "element_blocks"
+        ],
+        "node_set": [
+          "ns",
+          "nset",
+          "nodeset",
+          "node_set",
+          "node_sets"
+        ],
+        "side_set": [
+          "ss",
+          "sset",
+          "sideset",
+          "side_set",
+          "side_sets"
+        ],
+        "edge_set": [
+          "es",
+          "eset",
+          "edgeset",
+          "edge_set",
+          "edge_sets"
+        ],
+        "face_set": [
+          "fs",
+          "fset",
+          "faceset",
+          "face_set",
+          "face_sets"
+        ],
+        "element_set": [
+          "els",
+          "elset",
+          "elemset",
+          "elementset",
+          "element_set",
+          "element_sets"
+        ]
       },
       "time_indexing": {
         "python_api": "Modern API time indexes are zero-based when integers are used.",
@@ -228,7 +292,31 @@
           "python -m exodusii diff --start LAST gold.exo test.exo",
           "python -m exodusii diff --interpolate --time-scale 0.5 gold.exo test.exo"
         ],
-        "limitation": "Supports matched mesh ordering (default) and coordinate-based mesh matching (--match-coordinates / DiffOptions(coordinate_matching=True)). See python_api.diff for matching options."
+        "limitation": "Supports matched mesh ordering (default) and coordinate-based mesh matching (--match-coordinates / DiffOptions(coordinate_matching=True)). See python_api.diff for matching options.",
+        "command_file_flag": {
+          "-f / --command-file PATH": "Read tolerances and comparison directives from a SEACAS exodiff command (control) file. Explicit command-line tolerance/selection flags override values from the file."
+        },
+        "command_file": {
+          "summary": "A whitespace-delimited (space/tab) directive file, compatible with SEACAS exodiff command files. One directive per line; '#' comments and blank lines ignored; keywords case-insensitive and abbreviable (usually 3-4 chars); tokens split on space/tab/'='/','.",
+          "directives": {
+            "DEFAULT TOLERANCE <mode> <value> [FLOOR <f>]": "Default tolerance for result variables.",
+            "COORDINATES [<mode> <value>] [FLOOR <f>]": "Coordinate tolerance (default absolute 1e-6).",
+            "TIME STEPS [<mode> <value>] [FLOOR <f>]": "Time-value comparison tolerance.",
+            "FINAL TIME TOLERANCE <value>": "Sets the time tolerance value.",
+            "<CATEGORY> VARIABLES [(all)] [<mode> <value> [FLOOR <f>]]": "CATEGORY in {GLOBAL, NODAL, ELEMENT, NODESET, SIDESET, EDGEBLOCK, FACEBLOCK}; ELEMENT ATTRIBUTES also accepted. Followed by indented 'NAME [<mode> <value>] [FLOOR <f>]' or '!NAME' (exclude) lines. Without (all) and with a name list, only the listed names are compared for that category.",
+            "STEP OFFSET automatic|match|<N>": "Time-step offset (automatic maps to match-by-index).",
+            "EXCLUDE TIMES <list>": "Skip the listed steps.",
+            "INTERPOLATE": "Linearly interpolate file2 onto file1 times.",
+            "APPLY MATCHING | NODESET MATCH | SIDESET MATCH": "Enable coordinate-based mesh matching.",
+            "IGNORE CASE | CASE SENSITIVE": "Variable-name case handling.",
+            "IGNORE ATTRIBUTES": "Skip element/block attribute comparison."
+          },
+          "modes": "relative, absolute, combine, ignore, eigen_relative, eigen_absolute, eigen_combine, ulps_float, ulps_double (abbreviable).",
+          "inert_directives": "CALCULATE NORMS/L1NORMS/L2NORMS, IGNORE MAPS/NANS/DUPS, IGNORE SIDESET DISTRIBUTION, SHORT BLOCKS/NO SHORT, PEDANTIC, RETURN/IGNORE STATUS, MAX NAMES, SIDESET DISTRIBUTION are parsed and accepted but have no runtime effect; each emits a warning.",
+          "example": "DEFAULT TOLERANCE relative 1e-6 floor 1e-12\\nCOORDINATES absolute 1e-8\\nNODAL VARIABLES absolute 1e-7\\n\\tDISPLX relative 1e-9\\n\\t!VELZ\\nGLOBAL VARIABLES (all) relative 1e-4",
+          "cli": "python -m exodusii diff -f cmds.txt file1.exo file2.exo",
+          "api": "exodusii.read_command_file(path) -> CommandFileResult(options: DiffOptions, warnings: list[str])"
+        }
       },
       "exoread": {
         "purpose": "Interactive extraction of named variables by entity. Registered console script.",
@@ -360,7 +448,7 @@
           "For element variables with block_id=None, values across all blocks are concatenated."
         ],
         "return_shapes": {
-          "global_with_time": "(num_steps,) — full history",
+          "global_with_time": "(num_steps,) \u2014 full history",
           "global_at_time": "scalar float",
           "node_with_time": "(num_steps, num_nodes)",
           "node_at_time": "(num_nodes,)",
@@ -433,7 +521,17 @@
         "initialize_signature": "writer.initialize(title, dimension, node_count, element_count, *, element_blocks=0, node_sets=0, side_sets=0, edge_count=0, edge_blocks=0, face_count=0, face_blocks=0, edge_sets=0, face_sets=0, element_sets=0, floating_point_word_size=8)",
         "critical_constraint": "The counts passed to initialize() (element_blocks, node_sets, etc.) must exactly match the number of blocks/sets subsequently defined. NetCDF4 dimensions cannot be resized after creation. Passing the wrong count raises ExodusWriteError.",
         "define_element_block_signature": "writer.define_element_block(block_id, element_type, connectivity, *, name='', zero_based=False, active=True)",
-        "element_types": ["quad", "quad4", "hex", "hex8", "tri3", "tet4", "wedge6", "shell4", "and others"],
+        "element_types": [
+          "quad",
+          "quad4",
+          "hex",
+          "hex8",
+          "tri3",
+          "tet4",
+          "wedge6",
+          "shell4",
+          "and others"
+        ],
         "set_variable_methods": [
           "writer.define_node_set_variables(['NSV'], truth_table=None)",
           "writer.define_side_set_variables(['SSV'], truth_table=None)",
@@ -456,65 +554,87 @@
         "diff_accepts": "file1 and file2 can be paths (str or Path) or open ExodusFile objects.",
         "DiffResult": {
           "fields": {
-            "same": "bool — True when no structural error and no variable exceeded tolerance.",
+            "same": "bool \u2014 True when no structural error and no variable exceeded tolerance.",
             "file1": "str path",
             "file2": "str path",
-            "errors": "list[str] — fatal structural mismatches (node count, missing variables, etc.)",
-            "warnings": "list[str] — non-fatal notices (time step count mismatch, time value differences)",
-            "variable_diffs": "list[VariableDiff] — one record per variable/location that exceeded tolerance (or all if show_all=True)",
-            "coordinate_max_delta": "float | None — worst coordinate difference if coordinates were compared"
+            "errors": "list[str] \u2014 fatal structural mismatches (node count, missing variables, etc.)",
+            "warnings": "list[str] \u2014 non-fatal notices (time step count mismatch, time value differences)",
+            "variable_diffs": "list[VariableDiff] \u2014 one record per variable/location that exceeded tolerance (or all if show_all=True)",
+            "coordinate_max_delta": "float | None \u2014 worst coordinate difference if coordinates were compared"
           },
           "bool_behavior": "bool(result) is True when result.same is True."
         },
         "VariableDiff": {
           "fields": {
-            "entity": "str — entity type string (e.g. 'element', 'node')",
-            "name": "str — variable name",
-            "max_delta": "float — worst delta found; inf for NaN mismatch or shape mismatch",
-            "tolerance_mode": "str — tolerance mode string",
-            "exceeded": "bool — True when tolerance was exceeded",
-            "time_index": "int | None — zero-based time step of worst value",
-            "entry_index": "int | None — entry position of worst value",
+            "entity": "str \u2014 entity type string (e.g. 'element', 'node')",
+            "name": "str \u2014 variable name",
+            "max_delta": "float \u2014 worst delta found; inf for NaN mismatch or shape mismatch",
+            "tolerance_mode": "str \u2014 tolerance mode string",
+            "exceeded": "bool \u2014 True when tolerance was exceeded",
+            "time_index": "int | None \u2014 zero-based time step of worst value",
+            "entry_index": "int | None \u2014 entry position of worst value",
             "block_id": "int | None",
             "set_id": "int | None",
-            "value1": "float | None — file1 value at worst location",
-            "value2": "float | None — file2 value at worst location"
+            "value1": "float | None \u2014 file1 value at worst location",
+            "value2": "float | None \u2014 file2 value at worst location"
           }
         },
         "DiffOptions": {
           "summary": "Frozen dataclass controlling all comparison behavior.",
           "key_fields": {
-            "default_tolerance": "Tolerance — applied when no per-category or per-variable override exists. Default: Tolerance(RELATIVE, 1e-6).",
-            "coordinate_tolerance": "Tolerance — for coordinates. Default: Tolerance(ABSOLUTE, 1e-6).",
-            "time_tolerance": "Tolerance — for time value matching. Default: Tolerance(RELATIVE, 1e-6, floor=1e-15).",
-            "nodal_tolerance / element_tolerance / ...": "Tolerance | None — per-category overrides; None falls back to default_tolerance.",
-            "variable_tolerances": "Mapping[str, Tolerance] — per-variable name overrides, highest priority.",
-            "exclude": "frozenset[str] — variable names to skip.",
-            "ignore_case": "bool — case-insensitive variable name matching (default True).",
-            "time_step_offset": "int — legacy scalar offset; prefer time_selection for full control.",
-            "time_selection": "TimeSelection | None — full time-step selection and interpolation settings.",
-            "compare_coordinates": "bool — default True.",
-            "compare_attributes": "bool — compare block element attributes (default True).",
-            "show_all": "bool — include within-tolerance records in variable_diffs (default False)."
+            "default_tolerance": "Tolerance \u2014 applied when no per-category or per-variable override exists. Default: Tolerance(RELATIVE, 1e-6).",
+            "coordinate_tolerance": "Tolerance \u2014 for coordinates. Default: Tolerance(ABSOLUTE, 1e-6).",
+            "time_tolerance": "Tolerance \u2014 for time value matching. Default: Tolerance(RELATIVE, 1e-6, floor=1e-15).",
+            "nodal_tolerance / element_tolerance / ...": "Tolerance | None \u2014 per-category overrides; None falls back to default_tolerance.",
+            "variable_tolerances": "Mapping[str, Tolerance] \u2014 per-variable name overrides, highest priority.",
+            "exclude": "frozenset[str] \u2014 variable names to skip.",
+            "ignore_case": "bool \u2014 case-insensitive variable name matching (default True).",
+            "time_step_offset": "int \u2014 legacy scalar offset; prefer time_selection for full control.",
+            "time_selection": "TimeSelection | None \u2014 full time-step selection and interpolation settings.",
+            "compare_coordinates": "bool \u2014 default True.",
+            "compare_attributes": "bool \u2014 compare block element attributes (default True).",
+            "show_all": "bool \u2014 include within-tolerance records in variable_diffs (default False).",
+            "include_variables": "Mapping[Entity, frozenset[str]] \u2014 per-category variable include lists (from a command file). When a category has an entry, only those names are compared for that category (minus 'exclude'). Categories absent here compare all common variables.",
+            "all_categories": "frozenset[Entity] \u2014 categories flagged '(all)' in a command file; these always compare every common variable regardless of include_variables."
           }
         },
         "Tolerance": {
           "constructor": "Tolerance(mode, value, floor=0.0, use_old_floor=False)",
           "factory": "Tolerance.make('relative', 1e-6, floor=1e-15)  # parses mode string",
-          "modes_via_ToleranceMode_enum": ["RELATIVE", "ABSOLUTE", "COMBINED", "IGNORE", "EIGEN_RELATIVE", "EIGEN_ABSOLUTE", "EIGEN_COMBINED", "ULPS_FLOAT", "ULPS_DOUBLE"],
-          "mode_strings": ["relative", "absolute", "combined", "ignore", "eigenrel", "eigenabs", "eigencom", "ulps_float", "ulps_double"]
+          "modes_via_ToleranceMode_enum": [
+            "RELATIVE",
+            "ABSOLUTE",
+            "COMBINED",
+            "IGNORE",
+            "EIGEN_RELATIVE",
+            "EIGEN_ABSOLUTE",
+            "EIGEN_COMBINED",
+            "ULPS_FLOAT",
+            "ULPS_DOUBLE"
+          ],
+          "mode_strings": [
+            "relative",
+            "absolute",
+            "combined",
+            "ignore",
+            "eigenrel",
+            "eigenabs",
+            "eigencom",
+            "ulps_float",
+            "ulps_double"
+          ]
         },
         "TimeSelection": {
           "summary": "Frozen dataclass for time-step range and interpolation control. All step numbers are 1-based and refer to file-2.",
           "fields": {
-            "start": "int — first file-2 step (1-based, default 1). -1 = LAST: compare only the final step on each file.",
-            "stop": "int — last file-2 step inclusive (-1 = all, default -1).",
-            "increment": "int — step stride (default 1).",
-            "time_step_offset": "int — file1_step = file2_step + offset (default 0).",
-            "exclude_steps": "frozenset[int] — 1-based file-2 steps to skip.",
-            "time_value_scale": "float — multiply file-1 times before matching (default 1.0).",
-            "time_value_offset": "float — add to file-1 times before matching (default 0.0).",
-            "interpolating": "bool — linearly interpolate file-2 values to each file-1 time (default False). Steps outside file-2 time range are skipped."
+            "start": "int \u2014 first file-2 step (1-based, default 1). -1 = LAST: compare only the final step on each file.",
+            "stop": "int \u2014 last file-2 step inclusive (-1 = all, default -1).",
+            "increment": "int \u2014 step stride (default 1).",
+            "time_step_offset": "int \u2014 file1_step = file2_step + offset (default 0).",
+            "exclude_steps": "frozenset[int] \u2014 1-based file-2 steps to skip.",
+            "time_value_scale": "float \u2014 multiply file-1 times before matching (default 1.0).",
+            "time_value_offset": "float \u2014 add to file-1 times before matching (default 0.0).",
+            "interpolating": "bool \u2014 linearly interpolate file-2 values to each file-1 time (default False). Steps outside file-2 time range are skipped."
           }
         },
         "examples": [
@@ -531,18 +651,23 @@
         "coordinate_matching": {
           "summary": "Enable with DiffOptions(coordinate_matching=True). Builds a permutation map from spatial coordinates before comparison. Allows comparing files whose nodes/elements are in different order but describe the same physical mesh.",
           "options": {
-            "coordinate_matching": "bool — enable coordinate-based matching (default False).",
-            "matching_tolerance": "float — per-axis spatial proximity tolerance for building the map (default 1e-6). Independent of coordinate_tolerance.",
-            "require_unique_mapping": "bool — raise MeshMatchError on unmatched nodes/elements (default True). Set False to warn and continue with partial map."
+            "coordinate_matching": "bool \u2014 enable coordinate-based matching (default False).",
+            "matching_tolerance": "float \u2014 per-axis spatial proximity tolerance for building the map (default 1e-6). Independent of coordinate_tolerance.",
+            "require_unique_mapping": "bool \u2014 raise MeshMatchError on unmatched nodes/elements (default True). Set False to warn and continue with partial map."
           },
           "result_fields": {
-            "mesh_map_built": "bool — True when the coordinate-based map was successfully built.",
-            "unmatched_nodes": "int — count of unmatched nodes (0 unless require_unique_mapping=False).",
-            "unmatched_elems": "int — count of unmatched elements."
+            "mesh_map_built": "bool \u2014 True when the coordinate-based map was successfully built.",
+            "unmatched_nodes": "int \u2014 count of unmatched nodes (0 unless require_unique_mapping=False).",
+            "unmatched_elems": "int \u2014 count of unmatched elements."
           },
           "sideset_note": "Sideset face ordinals are checked after element remapping; ordinal mismatches are emitted as warnings in result.warnings but are not fatal errors."
         },
-        "limitation": "Matched ordering is the default. Coordinate matching requires equal node and element counts in both files. Full face-ordinal correction from connectivity permutation is not performed."
+        "limitation": "Matched ordering is the default. Coordinate matching requires equal node and element counts in both files. Full face-ordinal correction from connectivity permutation is not performed.",
+        "command_file": {
+          "summary": "exodusii.read_command_file(path) parses a SEACAS exodiff command (control) file into a DiffOptions.",
+          "returns": "CommandFileResult with .options (DiffOptions) and .warnings (list[str] for accepted-but-inert directives).",
+          "example": "res = exodusii.read_command_file('cmds.txt'); result = exodusii.diff('a.exo','b.exo', res.options)"
+        }
       },
       "copy": {
         "import": "from exodusii.api.copy import copy_file",
@@ -606,12 +731,30 @@
           "behavior": "3-D: finite circular cylinder about the p1->p2 segment; containment is distance-to-segment <= radius (endpoints get spherical-cap inclusion). 2-D: a capsule around the segment.",
           "dimension": "Inferred from p1/p2 size (2 or 3)."
         },
-        "Sphere": {"constructor": "Sphere(center, radius)", "note": "Closed 3-D ball: ||point-center|| <= radius."},
-        "Circle": {"constructor": "Circle(center, radius)", "note": "Closed 2-D disk."},
-        "Rectangle": {"constructor": "Rectangle(origin, width, height)", "note": "Closed axis-aligned 2-D rectangle; lower=origin, upper=origin+[width,height]."},
-        "Quad": {"constructor": "Quad(p1, p2, p3, p4)", "note": "Closed 2-D quadrilateral defined by four vertices (point-in-polygon test)."},
-        "Halfspace": {"constructor": "Halfspace(point, normal)", "note": "Closed half-space {x : (x-point).normal >= 0}. Use for an unbounded axial cut (e.g. 'downstream of the plate back face' Halfspace([0.012,0,0],[1,0,0])) that finite Circle/Sphere/Cylinder cannot express. normal is auto-normalized; dimension 2 or 3 from point size."},
-        "Slab": {"constructor": "Slab(axis, lo=None, hi=None, dimension=3)", "note": "Axis-aligned closed slab bounding ONE coordinate axis. axis is 0/1/2 or 'x'/'y'/'z'; lo/hi optional (None => unbounded that side, like BoundedTimeDomain). Convenience alternative to Halfspace for axis-aligned cuts."},
+        "Sphere": {
+          "constructor": "Sphere(center, radius)",
+          "note": "Closed 3-D ball: ||point-center|| <= radius."
+        },
+        "Circle": {
+          "constructor": "Circle(center, radius)",
+          "note": "Closed 2-D disk."
+        },
+        "Rectangle": {
+          "constructor": "Rectangle(origin, width, height)",
+          "note": "Closed axis-aligned 2-D rectangle; lower=origin, upper=origin+[width,height]."
+        },
+        "Quad": {
+          "constructor": "Quad(p1, p2, p3, p4)",
+          "note": "Closed 2-D quadrilateral defined by four vertices (point-in-polygon test)."
+        },
+        "Halfspace": {
+          "constructor": "Halfspace(point, normal)",
+          "note": "Closed half-space {x : (x-point).normal >= 0}. Use for an unbounded axial cut (e.g. 'downstream of the plate back face' Halfspace([0.012,0,0],[1,0,0])) that finite Circle/Sphere/Cylinder cannot express. normal is auto-normalized; dimension 2 or 3 from point size."
+        },
+        "Slab": {
+          "constructor": "Slab(axis, lo=None, hi=None, dimension=3)",
+          "note": "Axis-aligned closed slab bounding ONE coordinate axis. axis is 0/1/2 or 'x'/'y'/'z'; lo/hi optional (None => unbounded that side, like BoundedTimeDomain). Convenience alternative to Halfspace for axis-aligned cuts."
+        },
         "composition": "Regions compose with the boolean operators & (intersection/AND), | (union/OR), ~ (complement/NOT) into a single region object whose .contains ANDs/ORs/negates the child masks. Also factory forms intersection(a,b,...), union(a,b,...), complement(a). Works with any region (Cylinder, Sphere, Halfspace, ...) and passes straight into region_stats/region_mass. Example (radially-bounded AND downstream): plug = Cylinder([-0.05,0,0],[0.3,0,0],0.011) & Halfspace([0.012,0,0],[1,0,0]).",
         "hollow_shell_recipe": "For an annulus/tube (e.g. a shear band at a fixed radius range on a cylindrical surface), intersect an outer cylinder with the complement of an inner one: shell = Cylinder(p1,p2,r_outer) & ~Cylinder(p1,p2,r_inner). (Old numpy-mask form Cylinder(...).contains(c) & ~Cylinder(...).contains(c) still works.)",
         "time_domains": "BoundedTimeDomain(lower, upper) and UnboundedTimeDomain expose contains(times) for temporal masking (either bound may be None for semi-bounded)."
@@ -667,13 +810,39 @@
         "MeshMatchError": "Raised when matching fails and require_unique_mapping=True.",
         "check_sideset_ordinals": "Check sideset face ordinals after element remapping; returns list of warning strings."
       },
-      "elements": ["Quad4", "Hex8", "Tri3", "Tet4", "Wedge6"],
+      "elements": [
+        "Quad4",
+        "Hex8",
+        "Tri3",
+        "Tet4",
+        "Wedge6"
+      ],
       "element_type_aliases": {
-        "Quad4": ["quad", "quad4", "shell4"],
-        "Hex8": ["hex", "hex8"],
-        "Tri3": ["tri", "tri3", "triangle", "triangle3"],
-        "Tet4": ["tet", "tet4", "tetra", "tetra4"],
-        "Wedge6": ["wedge", "wedge6"]
+        "Quad4": [
+          "quad",
+          "quad4",
+          "shell4"
+        ],
+        "Hex8": [
+          "hex",
+          "hex8"
+        ],
+        "Tri3": [
+          "tri",
+          "tri3",
+          "triangle",
+          "triangle3"
+        ],
+        "Tet4": [
+          "tet",
+          "tet4",
+          "tetra",
+          "tetra4"
+        ],
+        "Wedge6": [
+          "wedge",
+          "wedge6"
+        ]
       }
     },
     "legacy": {
@@ -691,15 +860,25 @@
         "exo.get_element_variable_values(block_id, 'ENERGY', time_step=1)"
       ]
     },
-      "region_reduce": {
+    "region_reduce": {
       "summary": "Native spatial reduction over a geometric region with optional field-threshold predicate. Replaces the common pattern of manually computing element centers, building a region mask, AND-ing with a field threshold, and reducing. Available as ExodusFile.region_stats(), ExodusFile.region_mass(), and the CLI subcommand 'python -m exodusii region-stats'.",
       "imports": "from exodusii import region_stats, region_mass, RegionStatsResult, RegionMassResult, RegionStatsHistory, BLOCKS_AUTO, BLOCKS_ALL",
       "region_stats": {
         "signature": "exo.region_stats(name, *, on='element', block_id=None, blocks=None, region, where=None, reduce, time=None, symmetry_factor=1.0) -> RegionStatsResult | RegionStatsHistory",
-        "reducers": ["mean", "max", "min", "sum", "count", "std"],
-        "extensive_reducers": ["sum", "count"],
+        "reducers": [
+          "mean",
+          "max",
+          "min",
+          "sum",
+          "count",
+          "std"
+        ],
+        "extensive_reducers": [
+          "sum",
+          "count"
+        ],
         "blocks_parameter": {
-          "None_or_all": "All non-empty blocks (skips empty blocks safely — fixes crash on joined files with 16+ empty material blocks).",
+          "None_or_all": "All non-empty blocks (skips empty blocks safely \u2014 fixes crash on joined files with 16+ empty material blocks).",
           "auto": "Only non-empty blocks that define the requested variable. Natural 'target material' selection for Alegra multi-material Eulerian output.",
           "single_block": "Use block_id= for a single block (mutually exclusive with blocks=)."
         },
@@ -710,15 +889,15 @@
           "single_selector": "That step; returns RegionStatsResult."
         },
         "RegionStatsResult_fields": {
-          "stats": "dict[str, float] — reducer values keyed by reducer name, e.g. r.stats['mean'], r.stats['max']. Extensive reducers (sum, count) are already multiplied by symmetry_factor.",
-          "count_selected": "int — number of entities passing region + predicate (BEFORE symmetry scaling). Use r.count_selected or the convenience alias r.count.",
-          "count_total": "int — total entities in all contributing blocks (before masking).",
-          "time_value": "float | None — physical time at the reduction step.",
-          "time_index": "int | None — zero-based step index.",
-          "blocks_used": "tuple[int, ...] | None — block IDs that contributed (set when block_id=None or blocks= used).",
-          "symmetry_factor": "float — factor used for extensive reducers.",
-          "variable": "str — variable name.",
-          "entity": "str — entity type (e.g. 'element')."
+          "stats": "dict[str, float] \u2014 reducer values keyed by reducer name, e.g. r.stats['mean'], r.stats['max']. Extensive reducers (sum, count) are already multiplied by symmetry_factor.",
+          "count_selected": "int \u2014 number of entities passing region + predicate (BEFORE symmetry scaling). Use r.count_selected or the convenience alias r.count.",
+          "count_total": "int \u2014 total entities in all contributing blocks (before masking).",
+          "time_value": "float | None \u2014 physical time at the reduction step.",
+          "time_index": "int | None \u2014 zero-based step index.",
+          "blocks_used": "tuple[int, ...] | None \u2014 block IDs that contributed (set when block_id=None or blocks= used).",
+          "symmetry_factor": "float \u2014 factor used for extensive reducers.",
+          "variable": "str \u2014 variable name.",
+          "entity": "str \u2014 entity type (e.g. 'element')."
         },
         "RegionStatsResult_convenience_properties": {
           "r.mean": "Shorthand for r.stats['mean']. Raises KeyError if 'mean' not in reduce=.",
@@ -730,21 +909,26 @@
         },
         "count_reducer_note": "The 'count' reducer name in reduce=[] populates r.stats['count'] with the symmetry-scaled selected-entity count. r.count (the property) returns r.count_selected, which is the raw unscaled count. These differ when symmetry_factor != 1.0.",
         "RegionStatsHistory": {
-          "properties": ["steps (tuple[RegionStatsResult, ...])", "times (ndarray)", "counts (ndarray — count_selected per step)", "variable (str)"],
-          "method": "stats_table(reducer) -> ndarray, shape (n_steps,) — values for one reducer across all steps"
+          "properties": [
+            "steps (tuple[RegionStatsResult, ...])",
+            "times (ndarray)",
+            "counts (ndarray \u2014 count_selected per step)",
+            "variable (str)"
+          ],
+          "method": "stats_table(reducer) -> ndarray, shape (n_steps,) \u2014 values for one reducer across all steps"
         },
         "notes": [
-          "region must implement region.contains(points) — use Cylinder, Sphere, Circle, Rectangle, Quad, Halfspace, Slab from exodusii.mesh, and compose them with & | ~ (e.g. Cylinder(...) & Halfspace(...) for a radially-bounded AND axially-cut region).",
-          "where is a safe field-threshold predicate. A single atom 'VARNAME OP VALUE' (e.g. 'EQPS_2 > 1.0'), or several atoms joined by ' AND ' (all hold) or ' OR ' (any hold), e.g. 'EQPS_2 > 1.0 AND DAMAGE_2 > 0.5'. Mixing AND and OR in one string is rejected (no precedence) — compose regions or make separate calls. No arbitrary Python.",
+          "region must implement region.contains(points) \u2014 use Cylinder, Sphere, Circle, Rectangle, Quad, Halfspace, Slab from exodusii.mesh, and compose them with & | ~ (e.g. Cylinder(...) & Halfspace(...) for a radially-bounded AND axially-cut region).",
+          "where is a safe field-threshold predicate. A single atom 'VARNAME OP VALUE' (e.g. 'EQPS_2 > 1.0'), or several atoms joined by ' AND ' (all hold) or ' OR ' (any hold), e.g. 'EQPS_2 > 1.0 AND DAMAGE_2 > 0.5'. Mixing AND and OR in one string is rejected (no precedence) \u2014 compose regions or make separate calls. No arbitrary Python.",
           "symmetry_factor is applied only to extensive reducers (sum, count). Mean, max, min, std are intensive and are NOT scaled.",
           "time='all' computes element centers once; where predicate and field values re-read per step for moving selections.",
           "blocks_used field on RegionStatsResult lists which block IDs contributed."
         ],
         "python_examples": [
-          "# Single block, last step — access stats via dict or convenience properties",
+          "# Single block, last step \u2014 access stats via dict or convenience properties",
           "r = exo.region_stats('YIELD_STRESS_2', block_id=3, region=cyl, where='EQPS_2 > 1.0', reduce=['mean','max'], time='last', symmetry_factor=4.0)",
           "print(r.stats['mean'])   # canonical access",
-          "print(r.mean)            # convenience property — same value",
+          "print(r.mean)            # convenience property \u2014 same value",
           "print(r.stats['max'])    # canonical",
           "print(r.max)             # convenience",
           "print(r.count_selected)  # unscaled selected-entity count",
@@ -752,7 +936,7 @@
           "# Target material only (skip empty blocks and wrong-material blocks)",
           "r = exo.region_stats('YIELD_STRESS_2', blocks='auto', region=cyl, reduce='mean', time='last')",
           "print(r.blocks_used)  # e.g. (3, 7)",
-          "# Time history — band metric over all steps (returns RegionStatsHistory)",
+          "# Time history \u2014 band metric over all steps (returns RegionStatsHistory)",
           "h = exo.region_stats('DAMAGE', block_id=3, region=cyl, reduce='max', time='all')",
           "import matplotlib.pyplot as plt",
           "plt.plot(h.times, h.stats_table('max'))"
@@ -765,7 +949,7 @@
           "element_volumes is computed automatically from the block element type.",
           "volfrac_name is optional; omit for pure materials, set for mixed-material cells.",
           "symmetry_factor=4.0 for a quarter-symmetry model.",
-          "region may be a composed region — e.g. an EJECTED-PLUG mass (radially bounded AND downstream of a plane AND real material): plug = Cylinder([-0.05,0,0],[0.3,0,0],0.011) & Halfspace([0.012,0,0],[1,0,0]); exo.region_mass(blocks='auto' or block_id=b, region=plug, density_name='DENSITY_2', volfrac_name='VOLFRC_2', where='VOLFRC_2 > 0.1', symmetry_factor=4.0). This replaces hand-rolled entity_centers/element_volumes loops.",
+          "region may be a composed region \u2014 e.g. an EJECTED-PLUG mass (radially bounded AND downstream of a plane AND real material): plug = Cylinder([-0.05,0,0],[0.3,0,0],0.011) & Halfspace([0.012,0,0],[1,0,0]); exo.region_mass(blocks='auto' or block_id=b, region=plug, density_name='DENSITY_2', volfrac_name='VOLFRC_2', where='VOLFRC_2 > 0.1', symmetry_factor=4.0). This replaces hand-rolled entity_centers/element_volumes loops.",
           "Returns RegionMassResult with fields: block_id, blocks_used, time_index, time_value, count_total, count_selected, density_name, volfrac_name, symmetry_factor, mass."
         ]
       },

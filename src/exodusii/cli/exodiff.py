@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from typing import TextIO
 
 from exodusii.api.diff import DiffOptions
@@ -49,6 +50,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument("file1", help="First Exodus database path.")
     parser.add_argument("file2", help="Second Exodus database path.")
+
+    parser.add_argument(
+        "-f",
+        "--command-file",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Read tolerances and comparison directives from a SEACAS exodiff "
+            "command (control) file.  Explicit command-line tolerance/selection "
+            "flags override values from the file."
+        ),
+    )
 
     tol = parser.add_argument_group("tolerance")
     tol.add_argument(
@@ -312,7 +325,22 @@ def _parse_exclude_steps(value: str | None) -> frozenset[int]:
     return frozenset(int(s.strip()) for s in value.split(",") if s.strip())
 
 
-def _options_from_args(args: argparse.Namespace) -> DiffOptions:
+def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]]:
+    """Build :class:`DiffOptions` from parsed *args*.
+
+    Returns the options plus any warnings (e.g. from parsing a command file).
+    When ``--command-file`` is given, the file provides the base options and
+    any *explicitly set* command-line flags override the corresponding fields.
+    """
+    warnings: list[str] = []
+    base: DiffOptions | None = None
+    if getattr(args, "command_file", None):
+        from exodusii.api.command_file import read_command_file
+
+        parsed = read_command_file(args.command_file)
+        base = parsed.options
+        warnings.extend(parsed.warnings)
+
     mode = ToleranceMode.parse(args.mode) if args.mode else ToleranceMode.RELATIVE
     default_tol = Tolerance(
         mode=mode,
@@ -338,18 +366,65 @@ def _options_from_args(args: argparse.Namespace) -> DiffOptions:
         time_value_offset=float(args.time_offset),
         interpolating=bool(args.interpolate),
     )
-    return DiffOptions(
-        default_tolerance=default_tol,
-        coordinate_tolerance=coord_tol,
-        exclude=frozenset(args.exclude),
-        ignore_case=not args.case_sensitive,
-        time_selection=time_sel,
-        compare_coordinates=not args.no_coordinates,
-        compare_attributes=not args.no_attributes,
-        show_all=bool(args.show_all),
-        coordinate_matching=bool(args.match_coordinates),
-        matching_tolerance=float(args.matching_tolerance),
-        require_unique_mapping=not bool(args.allow_partial_match),
+
+    if base is None:
+        options = DiffOptions(
+            default_tolerance=default_tol,
+            coordinate_tolerance=coord_tol,
+            exclude=frozenset(args.exclude),
+            ignore_case=not args.case_sensitive,
+            time_selection=time_sel,
+            compare_coordinates=not args.no_coordinates,
+            compare_attributes=not args.no_attributes,
+            show_all=bool(args.show_all),
+            coordinate_matching=bool(args.match_coordinates),
+            matching_tolerance=float(args.matching_tolerance),
+            require_unique_mapping=not bool(args.allow_partial_match),
+        )
+        return options, warnings
+
+    # A command file supplied the base options; layer explicitly-set CLI flags
+    # on top (CLI wins).  A flag is "explicitly set" when it differs from its
+    # argparse default.
+    overrides: dict[str, object] = {}
+    if args.mode is not None or float(args.tolerance) != 1.0e-6 or float(args.floor) != 0.0:
+        overrides["default_tolerance"] = default_tol
+    if float(args.coordinate_tolerance) != 1.0e-6:
+        overrides["coordinate_tolerance"] = coord_tol
+    if args.exclude:
+        overrides["exclude"] = base.exclude | frozenset(args.exclude)
+    if args.case_sensitive:
+        overrides["ignore_case"] = False
+    if args.no_coordinates:
+        overrides["compare_coordinates"] = False
+    if args.no_attributes:
+        overrides["compare_attributes"] = False
+    if args.show_all:
+        overrides["show_all"] = True
+    if args.match_coordinates:
+        overrides["coordinate_matching"] = True
+    if float(args.matching_tolerance) != 1.0e-6:
+        overrides["matching_tolerance"] = float(args.matching_tolerance)
+    if args.allow_partial_match:
+        overrides["require_unique_mapping"] = False
+    if _time_flags_set(args):
+        overrides["time_selection"] = time_sel
+
+    options = replace(base, **overrides) if overrides else base
+    return options, warnings
+
+
+def _time_flags_set(args: argparse.Namespace) -> bool:
+    """Return ``True`` if any time-step selection flag was explicitly set."""
+    return (
+        args.start is not None
+        or int(args.stop) != -1
+        or int(args.increment) != 1
+        or int(args.time_step_offset) != 0
+        or bool(args.exclude_steps)
+        or float(args.time_scale) != 1.0
+        or float(args.time_offset) != 0.0
+        or bool(args.interpolate)
     )
 
 
@@ -424,7 +499,7 @@ def run_diff(args: argparse.Namespace, *, file: TextIO | None = None) -> int:
     out = file or sys.stdout
 
     try:
-        options = _options_from_args(args)
+        options, cmdfile_warnings = _options_from_args(args)
         result = diff(args.file1, args.file2, options)
     except Exception as exc:
         if args.format == "json":
@@ -434,6 +509,10 @@ def run_diff(args: argparse.Namespace, *, file: TextIO | None = None) -> int:
         else:
             print(f"exodiff: error: {exc}", file=sys.stderr)
         return _ERROR
+
+    if cmdfile_warnings:
+        # Surface command-file parse warnings alongside diff warnings.
+        result.warnings[:0] = cmdfile_warnings
 
     if args.format == "json":
         payload = {"ok": True, **_result_to_json(result)}

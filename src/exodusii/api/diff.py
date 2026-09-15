@@ -335,6 +335,21 @@ class DiffOptions:
     coordinate_matching: bool = False
     matching_tolerance: float = 1.0e-6
     require_unique_mapping: bool = True
+    # ── Command-file: per-category variable include lists ─────────────────
+    #
+    # ``include_variables`` maps a variable-location :class:`Entity` to the set
+    # of variable names to compare for that category.  When a category has an
+    # entry here, only those names are compared (still minus :attr:`exclude`).
+    # Categories absent from the mapping fall back to "compare all common
+    # names".  This mirrors the SEACAS ``exodiff`` command-file behavior where
+    # a ``NODAL VARIABLES`` block listing specific names restricts the
+    # comparison to those names unless ``(all)`` is given.
+    #
+    # ``all_categories`` records the categories for which ``(all)`` was
+    # requested (or which had no explicit name list); such categories always
+    # compare every common variable regardless of ``include_variables``.
+    include_variables: Mapping[Entity, frozenset[str]] = field(default_factory=dict)
+    all_categories: frozenset[Entity] = field(default_factory=frozenset)
 
     def _effective_time_selection(self) -> TimeSelection:
         """Return the active :class:`TimeSelection`, merging legacy offset."""
@@ -406,6 +421,25 @@ class DiffOptions:
         if self.ignore_case:
             return name.lower() in {n.lower() for n in self.exclude}
         return name in self.exclude
+
+    def is_included(self, name: str, ent: Entity) -> bool:
+        """Return ``True`` if *name* should be compared for category *ent*.
+
+        A category is unrestricted (all common variables compared) when it is
+        listed in :attr:`all_categories` or has no entry in
+        :attr:`include_variables`.  Otherwise only the names in that category's
+        include set are compared.  Case handling follows :attr:`ignore_case`.
+        Exclusion (:meth:`is_excluded`) is applied separately by the caller.
+        """
+
+        if ent in self.all_categories:
+            return True
+        includes = self.include_variables.get(ent)
+        if not includes:
+            return True
+        if self.ignore_case:
+            return name.lower() in {n.lower() for n in includes}
+        return name in includes
 
 
 def _open_if_needed(file: ExodusFileLike) -> tuple[ExodusFile, bool]:
@@ -923,13 +957,17 @@ def _names_to_compare(
     names1 = exo1.variable_names(ent)
     names2 = exo2.variable_names(ent)
     common, only1, only2 = _match_names(names1, names2, ignore_case=opts.ignore_case)
+
+    def _wanted(name: str) -> bool:
+        return opts.is_included(name, ent) and not opts.is_excluded(name)
+
     for name in only1:
-        if not opts.is_excluded(name):
+        if _wanted(name):
             result.errors.append(f"{ent.value} variable {name!r} missing from file2")
     for name in only2:
-        if not opts.is_excluded(name):
+        if _wanted(name):
             result.errors.append(f"{ent.value} variable {name!r} missing from file1")
-    return [n for n in common if not opts.is_excluded(n)]
+    return [n for n in common if _wanted(n)]
 
 
 def _compare_global_variables(

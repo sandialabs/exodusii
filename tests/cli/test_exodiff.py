@@ -372,3 +372,91 @@ def test_module_diff_matches_standalone(tmp_path: Path) -> None:
 
     assert standalone_rc == module_rc
     assert standalone.getvalue() == via_module.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Command file (-f / --command-file)
+# ---------------------------------------------------------------------------
+
+
+def test_command_file_loose_tolerance_makes_same(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=0.5)  # TEMP differs by 0.5
+
+    cmd = tmp_path / "cmds"
+    cmd.write_text("DEFAULT TOLERANCE absolute 1.0\n")
+    stream = StringIO()
+
+    status = main(["-f", str(cmd), str(a), str(b)], file=stream)
+
+    assert status == _SAME
+    assert "Files are the same" in stream.getvalue()
+
+
+def test_command_file_exclude_hides_difference(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=5.0)
+
+    cmd = tmp_path / "cmds"
+    cmd.write_text("NODAL VARIABLES (all)\n\t!TEMP\n")
+    stream = StringIO()
+
+    status = main(["-f", str(cmd), str(a), str(b)], file=stream)
+
+    assert status == _SAME
+
+
+def test_cli_flag_overrides_command_file(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=0.5)
+
+    # File says "loose" (same), but a tight CLI tolerance overrides -> different.
+    cmd = tmp_path / "cmds"
+    cmd.write_text("DEFAULT TOLERANCE absolute 1.0\n")
+    stream = StringIO()
+
+    status = main(
+        ["-f", str(cmd), "--absolute", "--tolerance", "1e-9", str(a), str(b)], file=stream
+    )
+
+    assert status == _DIFFERENT
+
+
+def test_command_file_inert_directive_warns(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b)
+
+    cmd = tmp_path / "cmds"
+    cmd.write_text("PEDANTIC\n")
+    stream = StringIO()
+
+    status = main(["-f", str(cmd), str(a), str(b)], file=stream)
+
+    assert status == _SAME
+    assert "no effect" in stream.getvalue()
+
+
+def test_command_file_bad_directive_is_error(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b)
+
+    cmd = tmp_path / "cmds"
+    cmd.write_text("NONSENSE directive\n")
+    stream = StringIO()
+
+    status = main(["-f", str(cmd), str(a), str(b), "--format", "json"], file=stream)
+
+    assert status == _ERROR
+    payload = json.loads(stream.getvalue())
+    assert payload["ok"] is False
+    assert payload["error"]["type"] == "CommandFileError"

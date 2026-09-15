@@ -73,6 +73,9 @@ import importlib
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
+from exodusii.api.command_file import CommandFileError
+from exodusii.api.command_file import CommandFileResult
+from exodusii.api.command_file import read_command_file
 from exodusii.api.compare import ComparisonResult
 from exodusii.api.compare import allclose
 from exodusii.api.compare import similar
@@ -129,6 +132,8 @@ except PackageNotFoundError:  # pragma: no cover
 __all__ = [
     "BLOCKS_ALL",
     "BLOCKS_AUTO",
+    "CommandFileError",
+    "CommandFileResult",
     "ComparisonResult",
     "DiffOptions",
     "DiffResult",
@@ -168,6 +173,7 @@ __all__ = [
     "parallel_exodusii_file",
     "print_query",
     "query",
+    "read_command_file",
     "region",
     "region_mass",
     "region_stats",
