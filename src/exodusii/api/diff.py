@@ -422,6 +422,31 @@ class DiffOptions:
             return name.lower() in {n.lower() for n in self.exclude}
         return name in self.exclude
 
+    def to_yaml(self, path: str | Path | None = None) -> str:
+        """Serialize these options to a YAML command-file string.
+
+        The emitted document is full/explicit (every field with its current
+        value) and round-trips through
+        :func:`exodusii.read_command_file`.
+
+        Parameters
+        ----------
+        path
+            If given, also write the YAML to this path.
+
+        Returns
+        -------
+        str
+            The YAML document.
+        """
+
+        from exodusii.api.command_file import diff_options_to_yaml
+
+        text = diff_options_to_yaml(self)
+        if path is not None:
+            Path(path).write_text(text)
+        return text
+
     def is_included(self, name: str, ent: Entity) -> bool:
         """Return ``True`` if *name* should be compared for category *ent*.
 

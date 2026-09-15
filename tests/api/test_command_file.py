@@ -205,3 +205,204 @@ def test_loose_default_tolerance_makes_same(tmp_path: Path) -> None:
     cmd.write_text("DEFAULT TOLERANCE absolute 1e-3\n")
     opts = read_command_file(cmd).options
     assert diff(a, b, opts).same
+
+
+# ---------------------------------------------------------------------------
+# YAML format
+# ---------------------------------------------------------------------------
+
+from exodusii.api.command_file import ExodiffCommandFileReader  # noqa: E402
+from exodusii.api.command_file import YamlCommandFileReader  # noqa: E402
+from exodusii.api.command_file import command_file_reader  # noqa: E402
+from exodusii.api.diff import DiffOptions  # noqa: E402
+from exodusii.api.diff import TimeSelection  # noqa: E402
+from exodusii.core.tolerance import Tolerance  # noqa: E402
+
+
+def test_yaml_reader_basic(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text(
+        "tolerances:\n"
+        "  default: {mode: absolute, value: 1.0e-4, floor: 1.0e-9}\n"
+        "  coordinate: {mode: absolute, value: 1.0e-8}\n"
+        "  categories:\n"
+        "    nodal: {mode: absolute, value: 1.0e-7}\n"
+        "  variables:\n"
+        "    DISPLX: {mode: relative, value: 1.0e-9}\n"
+        "variables:\n"
+        "  ignore_case: false\n"
+        "  exclude: [VELZ]\n"
+        "  include:\n"
+        "    nodal: [DISPLX, DISPLY]\n"
+        "    global: all\n"
+        "mesh_matching: {enabled: true, tolerance: 1.0e-9}\n"
+        "time: {start: 2, stop: 8, exclude_steps: [3], interpolate: true}\n"
+        "report: {show_all: true}\n"
+    )
+    opts = read_command_file(cmd).options
+    assert opts.default_tolerance.mode is ToleranceMode.ABSOLUTE
+    assert opts.default_tolerance.value == pytest.approx(1e-4)
+    assert opts.default_tolerance.floor == pytest.approx(1e-9)
+    assert opts.coordinate_tolerance.value == pytest.approx(1e-8)
+    assert opts.nodal_tolerance is not None
+    assert opts.nodal_tolerance.mode is ToleranceMode.ABSOLUTE
+    assert opts.variable_tolerances["DISPLX"].value == pytest.approx(1e-9)
+    assert opts.ignore_case is False
+    assert opts.exclude == frozenset({"VELZ"})
+    assert opts.include_variables[Entity.NODE] == frozenset({"DISPLX", "DISPLY"})
+    assert Entity.GLOBAL in opts.all_categories
+    assert opts.coordinate_matching is True
+    assert opts.matching_tolerance == pytest.approx(1e-9)
+    assert opts.time_selection is not None
+    assert opts.time_selection.start == 2
+    assert opts.time_selection.exclude_steps == frozenset({3})
+    assert opts.time_selection.interpolating is True
+    assert opts.show_all is True
+
+
+def test_yaml_tolerance_shorthand(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("tolerances:\n  default: absolute 1e-3\n  time: 1e-9\n")
+    opts = read_command_file(cmd).options
+    assert opts.default_tolerance.mode is ToleranceMode.ABSOLUTE
+    assert opts.default_tolerance.value == pytest.approx(1e-3)
+    # bare number -> relative
+    assert opts.time_tolerance.mode is ToleranceMode.RELATIVE
+    assert opts.time_tolerance.value == pytest.approx(1e-9)
+
+
+def test_yaml_bare_number_tolerance(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("tolerances:\n  default: 1.0e-6\n")
+    opts = read_command_file(cmd).options
+    assert opts.default_tolerance.mode is ToleranceMode.RELATIVE
+    assert opts.default_tolerance.value == pytest.approx(1e-6)
+
+
+def test_yaml_empty_document(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("# nothing here\n")
+    opts = read_command_file(cmd).options
+    assert opts == DiffOptions()  # all defaults
+
+
+def test_yaml_bad_category_raises(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("tolerances:\n  categories:\n    bogus: 1e-6\n")
+    with pytest.raises(CommandFileError):
+        read_command_file(cmd)
+
+
+def test_yaml_top_level_not_mapping_raises(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("- 1\n- 2\n")
+    with pytest.raises(CommandFileError):
+        read_command_file(cmd)
+
+
+# ---------------------------------------------------------------------------
+# Emit + round-trip
+# ---------------------------------------------------------------------------
+
+
+def _rich_options() -> DiffOptions:
+    return DiffOptions(
+        default_tolerance=Tolerance(ToleranceMode.RELATIVE, 1e-5, 1e-12),
+        coordinate_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1e-8),
+        time_tolerance=Tolerance(ToleranceMode.RELATIVE, 1e-6, 1e-15),
+        nodal_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1e-7),
+        attribute_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1e-10),
+        variable_tolerances={"DISPLX": Tolerance(ToleranceMode.RELATIVE, 1e-9)},
+        exclude=frozenset({"VELZ"}),
+        include_variables={Entity.NODE: frozenset({"DISPLX", "DISPLY"})},
+        all_categories=frozenset({Entity.GLOBAL}),
+        ignore_case=False,
+        compare_coordinates=False,
+        compare_attributes=False,
+        show_all=True,
+        coordinate_matching=True,
+        matching_tolerance=1e-9,
+        require_unique_mapping=False,
+        time_selection=TimeSelection(
+            start=2,
+            stop=10,
+            increment=2,
+            time_step_offset=1,
+            exclude_steps=frozenset({3, 4}),
+            time_value_scale=2.0,
+            time_value_offset=0.5,
+            interpolating=True,
+        ),
+    )
+
+
+def test_to_yaml_roundtrip_preserves_everything(tmp_path: Path) -> None:
+    o = _rich_options()
+    path = tmp_path / "emitted.yaml"
+    text = o.to_yaml(path)
+    assert path.read_text() == text
+
+    o2 = read_command_file(path).options
+    assert o2.default_tolerance == o.default_tolerance
+    assert o2.coordinate_tolerance == o.coordinate_tolerance
+    assert o2.time_tolerance == o.time_tolerance
+    assert o2.nodal_tolerance == o.nodal_tolerance
+    assert o2.attribute_tolerance == o.attribute_tolerance
+    assert o2.variable_tolerances == o.variable_tolerances
+    assert o2.exclude == o.exclude
+    assert o2.include_variables == o.include_variables
+    assert o2.all_categories == o.all_categories
+    assert o2.ignore_case == o.ignore_case
+    assert o2.compare_coordinates == o.compare_coordinates
+    assert o2.compare_attributes == o.compare_attributes
+    assert o2.show_all == o.show_all
+    assert o2.coordinate_matching == o.coordinate_matching
+    assert o2.matching_tolerance == o.matching_tolerance
+    assert o2.require_unique_mapping == o.require_unique_mapping
+    assert o2.time_selection == o.time_selection
+
+
+def test_default_options_roundtrip(tmp_path: Path) -> None:
+    o = DiffOptions()
+    path = tmp_path / "d.yaml"
+    o.to_yaml(path)
+    o2 = read_command_file(path).options
+    assert o2 == o
+
+
+def test_emit_is_valid_yaml_with_header(tmp_path: Path) -> None:
+    text = DiffOptions().to_yaml()
+    assert text.startswith("#")
+    assert "version: 1" in text
+
+
+# ---------------------------------------------------------------------------
+# Factory sniffing
+# ---------------------------------------------------------------------------
+
+
+def test_factory_selects_yaml_by_suffix(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("tolerances: {default: 1e-6}\n")
+    assert isinstance(command_file_reader(cmd), YamlCommandFileReader)
+
+
+def test_factory_selects_yaml_by_content(tmp_path: Path) -> None:
+    cmd = tmp_path / "opts.cfg"  # non-yaml suffix
+    cmd.write_text("tolerances:\n  default: {mode: relative, value: 1e-6}\n")
+    assert isinstance(command_file_reader(cmd), YamlCommandFileReader)
+
+
+def test_factory_falls_back_to_exodiff(tmp_path: Path) -> None:
+    cmd = tmp_path / "cmds"
+    cmd.write_text("DEFAULT TOLERANCE absolute 1e-4\n")
+    reader = command_file_reader(cmd)
+    assert isinstance(reader, ExodiffCommandFileReader)
+    assert reader.read().options.default_tolerance.mode is ToleranceMode.ABSOLUTE
+
+
+def test_exodiff_still_parses_via_factory(tmp_path: Path) -> None:
+    cmd = tmp_path / "cmds"
+    cmd.write_text("NODAL VARIABLES\n\tDISPLX\n")
+    opts = read_command_file(cmd).options
+    assert opts.include_variables[Entity.NODE] == frozenset({"DISPLX"})

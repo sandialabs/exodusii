@@ -74,8 +74,14 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
 
 from exodusii.api.command_file import CommandFileError
+from exodusii.api.command_file import CommandFileReader
 from exodusii.api.command_file import CommandFileResult
+from exodusii.api.command_file import ExodiffCommandFileReader
+from exodusii.api.command_file import YamlCommandFileReader
+from exodusii.api.command_file import command_file_reader
+from exodusii.api.command_file import diff_options_to_yaml
 from exodusii.api.command_file import read_command_file
+from exodusii.api.command_file import write_command_file
 from exodusii.api.compare import ComparisonResult
 from exodusii.api.compare import allclose
 from exodusii.api.compare import similar
@@ -133,10 +139,12 @@ __all__ = [
     "BLOCKS_ALL",
     "BLOCKS_AUTO",
     "CommandFileError",
+    "CommandFileReader",
     "CommandFileResult",
     "ComparisonResult",
     "DiffOptions",
     "DiffResult",
+    "ExodiffCommandFileReader",
     "ExodusFile",
     "ExodusIIFile",
     "ExodusWriter",
@@ -153,8 +161,10 @@ __all__ = [
     "Tolerance",
     "ToleranceMode",
     "VariableDiff",
+    "YamlCommandFileReader",
     "__version__",
     "allclose",
+    "command_file_reader",
     "compute_edge_centers",
     "compute_element_centers",
     "compute_element_volumes",
@@ -164,6 +174,7 @@ __all__ = [
     "copy",
     "copy_file",
     "diff",
+    "diff_options_to_yaml",
     "exo_file",
     "exodusii_file",
     "exoread",
@@ -178,5 +189,6 @@ __all__ = [
     "region_mass",
     "region_stats",
     "similar",
+    "write_command_file",
     "write_globals",
 ]

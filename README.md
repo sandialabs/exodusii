@@ -204,10 +204,76 @@ Exit codes: `0` same, `1` error, `2` different.
 
 ### Command (control) files
 
-Like SEACAS `exodiff`, a diff can be driven by a **command file** — a
-whitespace-delimited directive file setting tolerances and comparison
-behavior. Read it with `exodusii.read_command_file()` or pass it on the CLI
-with `-f`/`--command-file`; explicit CLI flags override values from the file.
+A diff can be driven by a **command file** on disk. Two formats are supported;
+`exodusii.read_command_file()` (and the CLI `-f`/`--command-file`) auto-detect
+which one a file uses. Explicit CLI flags override values from the file.
+
+#### YAML (preferred, modern)
+
+A structured, self-documenting format with full feature parity with the SEACAS
+exodiff command file:
+
+```yaml
+# opts.yaml
+tolerances:
+  default:    {mode: relative, value: 1.0e-6, floor: 1.0e-12}
+  coordinate: {mode: absolute, value: 1.0e-8}
+  time:       {mode: relative, value: 1.0e-6, floor: 1.0e-15}
+  categories:                         # per-category default tolerances
+    nodal:  {mode: absolute, value: 1.0e-7}
+  variables:                          # per-variable overrides (highest priority)
+    DISPLX: {mode: relative, value: 1.0e-9}
+variables:
+  ignore_case: true
+  exclude: [VELZ]
+  include:                            # per-category include lists
+    nodal:  [DISPLX, DISPLY]
+    global: all                       # 'all' => compare all variables
+coordinates:  {compare: true}
+attributes:   {compare: true}
+mesh_matching: {enabled: false, tolerance: 1.0e-6, require_unique: true}
+time:
+  start: 1
+  stop: -1
+  increment: 1
+  step_offset: 0
+  exclude_steps: []
+  interpolate: false
+report: {show_all: false}
+```
+
+Any tolerance may be an explicit mapping, a shorthand string
+(`"absolute 1e-8"` / `"1e-6"`), or a bare number.
+
+```bash
+python -m exodusii diff -f opts.yaml gold.exo test.exo
+```
+
+```python
+import exodusii
+
+res = exodusii.read_command_file("opts.yaml")     # -> CommandFileResult
+result = exodusii.diff("gold.exo", "test.exo", res.options)
+```
+
+**Emit** a YAML command file from a `DiffOptions` (full/explicit; round-trips):
+
+```python
+opts = exodusii.DiffOptions(...)
+opts.to_yaml("opts.yaml")            # write to a file
+print(opts.to_yaml())                 # or get the string
+```
+
+```bash
+# Emit the effective options (command file + CLI flags) and exit, no compare
+python -m exodusii diff --absolute -t 1e-8 --emit-options opts.yaml gold.exo test.exo
+python -m exodusii diff --emit-options - gold.exo test.exo   # to stdout
+```
+
+#### SEACAS exodiff text (legacy, backward compatible)
+
+The original whitespace-delimited `exodiff` command-file grammar is also
+accepted (auto-detected):
 
 ```
 # cmds.txt  (SEACAS exodiff command-file grammar)
@@ -223,15 +289,6 @@ GLOBAL VARIABLES (all) relative 1e-4
 python -m exodusii diff -f cmds.txt gold.exo test.exo
 ```
 
-```python
-import exodusii
-
-res = exodusii.read_command_file("cmds.txt")   # -> CommandFileResult
-result = exodusii.diff("gold.exo", "test.exo", res.options)
-for w in res.warnings:      # accepted-but-inert directives (e.g. PEDANTIC)
-    print("note:", w)
-```
-
 Directives: `DEFAULT TOLERANCE`, `COORDINATES`, `TIME STEPS`, `FINAL TIME
 TOLERANCE`, per-category `<GLOBAL|NODAL|ELEMENT|NODESET|SIDESET|EDGEBLOCK|
 FACEBLOCK> VARIABLES` blocks (with `(all)`, per-variable tolerances, and
@@ -239,7 +296,12 @@ FACEBLOCK> VARIABLES` blocks (with `(all)`, per-variable tolerances, and
 `INTERPOLATE`, `APPLY MATCHING`/`NODESET MATCH`/`SIDESET MATCH`, and `IGNORE
 CASE`/`CASE SENSITIVE`. Keywords are case-insensitive and abbreviable. A
 category block that lists specific names (without `(all)`) restricts the
-comparison to those names for that category.
+comparison to those names for that category. Accepted-but-inert directives
+(e.g. `PEDANTIC`, `CALCULATE NORMS`) are reported via `CommandFileResult.warnings`.
+
+The reader classes (`YamlCommandFileReader`, `ExodiffCommandFileReader`) share
+the abstract `CommandFileReader` base; `command_file_reader(path)` is the
+format-detecting factory (YAML preferred).
 
 
 ---

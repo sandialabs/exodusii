@@ -57,9 +57,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help=(
-            "Read tolerances and comparison directives from a SEACAS exodiff "
-            "command (control) file.  Explicit command-line tolerance/selection "
-            "flags override values from the file."
+            "Read tolerances and comparison directives from a command file.  "
+            "The format is auto-detected: YAML (preferred, modern) or the "
+            "legacy SEACAS exodiff text grammar.  Explicit command-line "
+            "tolerance/selection flags override values from the file."
+        ),
+    )
+    parser.add_argument(
+        "--emit-options",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write the effective diff options (after applying the command "
+            "file and any CLI flags) to PATH as a YAML command file, then "
+            "exit without comparing.  Use '-' to write to stdout."
         ),
     )
 
@@ -500,6 +511,29 @@ def run_diff(args: argparse.Namespace, *, file: TextIO | None = None) -> int:
 
     try:
         options, cmdfile_warnings = _options_from_args(args)
+    except Exception as exc:
+        if args.format == "json":
+            payload = {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+            json.dump(payload, out, indent=None if args.terse else 2)
+            out.write("\n")
+        else:
+            print(f"exodiff: error: {exc}", file=sys.stderr)
+        return _ERROR
+
+    # Emit the effective options as a YAML command file and exit (no compare).
+    if getattr(args, "emit_options", None):
+        from exodusii.api.command_file import diff_options_to_yaml
+
+        yaml_text = diff_options_to_yaml(options)
+        if args.emit_options == "-":
+            out.write(yaml_text)
+        else:
+            from pathlib import Path
+
+            Path(args.emit_options).write_text(yaml_text)
+        return _SAME
+
+    try:
         result = diff(args.file1, args.file2, options)
     except Exception as exc:
         if args.format == "json":

@@ -294,28 +294,53 @@
         ],
         "limitation": "Supports matched mesh ordering (default) and coordinate-based mesh matching (--match-coordinates / DiffOptions(coordinate_matching=True)). See python_api.diff for matching options.",
         "command_file_flag": {
-          "-f / --command-file PATH": "Read tolerances and comparison directives from a SEACAS exodiff command (control) file. Explicit command-line tolerance/selection flags override values from the file."
+          "-f / --command-file PATH": "Read tolerances and comparison directives from a command file. Format auto-detected: YAML (preferred) or legacy SEACAS exodiff text. Explicit CLI flags override the file.",
+          "--emit-options PATH": "Write the effective diff options (command file + CLI flags) to PATH as a YAML command file, then exit without comparing. Use '-' for stdout."
         },
         "command_file": {
-          "summary": "A whitespace-delimited (space/tab) directive file, compatible with SEACAS exodiff command files. One directive per line; '#' comments and blank lines ignored; keywords case-insensitive and abbreviable (usually 3-4 chars); tokens split on space/tab/'='/','.",
-          "directives": {
-            "DEFAULT TOLERANCE <mode> <value> [FLOOR <f>]": "Default tolerance for result variables.",
-            "COORDINATES [<mode> <value>] [FLOOR <f>]": "Coordinate tolerance (default absolute 1e-6).",
-            "TIME STEPS [<mode> <value>] [FLOOR <f>]": "Time-value comparison tolerance.",
-            "FINAL TIME TOLERANCE <value>": "Sets the time tolerance value.",
-            "<CATEGORY> VARIABLES [(all)] [<mode> <value> [FLOOR <f>]]": "CATEGORY in {GLOBAL, NODAL, ELEMENT, NODESET, SIDESET, EDGEBLOCK, FACEBLOCK}; ELEMENT ATTRIBUTES also accepted. Followed by indented 'NAME [<mode> <value>] [FLOOR <f>]' or '!NAME' (exclude) lines. Without (all) and with a name list, only the listed names are compared for that category.",
-            "STEP OFFSET automatic|match|<N>": "Time-step offset (automatic maps to match-by-index).",
-            "EXCLUDE TIMES <list>": "Skip the listed steps.",
-            "INTERPOLATE": "Linearly interpolate file2 onto file1 times.",
-            "APPLY MATCHING | NODESET MATCH | SIDESET MATCH": "Enable coordinate-based mesh matching.",
-            "IGNORE CASE | CASE SENSITIVE": "Variable-name case handling.",
-            "IGNORE ATTRIBUTES": "Skip element/block attribute comparison."
+          "summary": "A diff can be configured from a command file. Two formats are supported and auto-detected by exodusii.read_command_file() / command_file_reader(): YAML (preferred, modern) and the legacy SEACAS exodiff whitespace-delimited text grammar.",
+          "yaml_format": {
+            "summary": "Structured YAML with full feature parity with the exodiff command file. Preferred for new files.",
+            "sections": {
+              "tolerances.default / .coordinate / .time / .attribute": "Tolerance specs (mapping {mode,value,floor}, shorthand string like 'absolute 1e-8', or a bare number).",
+              "tolerances.categories.<global|nodal|element|edge|face|node_set|side_set|edge_set|face_set|element_set>": "Per-category default tolerances.",
+              "tolerances.variables.<NAME>": "Per-variable tolerance overrides (highest priority).",
+              "variables.ignore_case": "bool.",
+              "variables.exclude": "list[str] of names to skip.",
+              "variables.include.<category>": "list[str] to restrict a category to those names, or 'all' (or true) to compare all.",
+              "coordinates.compare / attributes.compare": "bool.",
+              "mesh_matching.enabled / .tolerance / .require_unique": "Coordinate-based mesh matching.",
+              "time.start/stop/increment/step_offset/exclude_steps/value_scale/value_offset/interpolate": "Time-step selection + interpolation.",
+              "report.show_all": "bool."
+            },
+            "tolerance_forms": "Explicit mapping {mode:, value:, floor:}; shorthand string '<mode> <value>' or '<value>'; or a bare number (relative).",
+            "cli": "python -m exodusii diff -f opts.yaml file1.exo file2.exo",
+            "api_read": "exodusii.read_command_file('opts.yaml') -> CommandFileResult(options, warnings)",
+            "api_emit": "DiffOptions.to_yaml(path=None) -> str  (full/explicit; round-trips). Also exodusii.diff_options_to_yaml(options) and exodusii.write_command_file(options, path).",
+            "cli_emit": "python -m exodusii diff --emit-options opts.yaml file1.exo file2.exo   (or --emit-options - for stdout)",
+            "example": "tolerances:\n  default: {mode: relative, value: 1.0e-6, floor: 1.0e-12}\n  categories: {nodal: {mode: absolute, value: 1.0e-7}}\n  variables: {DISPLX: {mode: relative, value: 1.0e-9}}\nvariables:\n  exclude: [VELZ]\n  include: {nodal: [DISPLX, DISPLY], global: all}\nmesh_matching: {enabled: true, tolerance: 1.0e-9}\ntime: {start: 2, interpolate: true}"
           },
-          "modes": "relative, absolute, combine, ignore, eigen_relative, eigen_absolute, eigen_combine, ulps_float, ulps_double (abbreviable).",
-          "inert_directives": "CALCULATE NORMS/L1NORMS/L2NORMS, IGNORE MAPS/NANS/DUPS, IGNORE SIDESET DISTRIBUTION, SHORT BLOCKS/NO SHORT, PEDANTIC, RETURN/IGNORE STATUS, MAX NAMES, SIDESET DISTRIBUTION are parsed and accepted but have no runtime effect; each emits a warning.",
-          "example": "DEFAULT TOLERANCE relative 1e-6 floor 1e-12\\nCOORDINATES absolute 1e-8\\nNODAL VARIABLES absolute 1e-7\\n\\tDISPLX relative 1e-9\\n\\t!VELZ\\nGLOBAL VARIABLES (all) relative 1e-4",
-          "cli": "python -m exodusii diff -f cmds.txt file1.exo file2.exo",
-          "api": "exodusii.read_command_file(path) -> CommandFileResult(options: DiffOptions, warnings: list[str])"
+          "exodiff_format": {
+            "summary": "Legacy SEACAS exodiff whitespace-delimited grammar (backward compatible). One directive/line; '#' comments; case-insensitive + abbreviable keywords.",
+            "directives": {
+              "DEFAULT TOLERANCE <mode> <value> [FLOOR <f>]": "Default tolerance for result variables.",
+              "COORDINATES [<mode> <value>] [FLOOR <f>]": "Coordinate tolerance (default absolute 1e-6).",
+              "TIME STEPS [<mode> <value>] [FLOOR <f>]": "Time-value comparison tolerance.",
+              "FINAL TIME TOLERANCE <value>": "Sets the time tolerance value.",
+              "<CATEGORY> VARIABLES [(all)] [<mode> <value> [FLOOR <f>]]": "CATEGORY in {GLOBAL, NODAL, ELEMENT, NODESET, SIDESET, EDGEBLOCK, FACEBLOCK}; ELEMENT ATTRIBUTES also accepted. Followed by indented 'NAME [<mode> <value>] [FLOOR <f>]' or '!NAME' (exclude) lines. Without (all) and with a name list, only the listed names are compared for that category.",
+              "STEP OFFSET automatic|match|<N>": "Time-step offset (automatic maps to match-by-index).",
+              "EXCLUDE TIMES <list>": "Skip the listed steps.",
+              "INTERPOLATE": "Linearly interpolate file2 onto file1 times.",
+              "APPLY MATCHING | NODESET MATCH | SIDESET MATCH": "Enable coordinate-based mesh matching.",
+              "IGNORE CASE | CASE SENSITIVE": "Variable-name case handling.",
+              "IGNORE ATTRIBUTES": "Skip element/block attribute comparison."
+            },
+            "modes": "relative, absolute, combine, ignore, eigen_relative, eigen_absolute, eigen_combine, ulps_float, ulps_double (abbreviable).",
+            "inert_directives": "CALCULATE NORMS/L1NORMS/L2NORMS, IGNORE MAPS/NANS/DUPS, IGNORE SIDESET DISTRIBUTION, SHORT BLOCKS/NO SHORT, PEDANTIC, RETURN/IGNORE STATUS, MAX NAMES, SIDESET DISTRIBUTION are parsed and accepted but have no runtime effect; each emits a warning.",
+            "example": "DEFAULT TOLERANCE relative 1e-6 floor 1e-12\\nCOORDINATES absolute 1e-8\\nNODAL VARIABLES absolute 1e-7\\n\\tDISPLX relative 1e-9\\n\\t!VELZ\\nGLOBAL VARIABLES (all) relative 1e-4",
+            "cli": "python -m exodusii diff -f cmds.txt file1.exo file2.exo"
+          },
+          "readers": "Abstract CommandFileReader base with YamlCommandFileReader (preferred) and ExodiffCommandFileReader (legacy) subclasses; command_file_reader(path) is the format-detecting factory."
         }
       },
       "exoread": {
@@ -664,9 +689,11 @@
         },
         "limitation": "Matched ordering is the default. Coordinate matching requires equal node and element counts in both files. Full face-ordinal correction from connectivity permutation is not performed.",
         "command_file": {
-          "summary": "exodusii.read_command_file(path) parses a SEACAS exodiff command (control) file into a DiffOptions.",
-          "returns": "CommandFileResult with .options (DiffOptions) and .warnings (list[str] for accepted-but-inert directives).",
-          "example": "res = exodusii.read_command_file('cmds.txt'); result = exodusii.diff('a.exo','b.exo', res.options)"
+          "summary": "exodusii.read_command_file(path) parses a YAML or legacy exodiff command file into a DiffOptions (format auto-detected, YAML preferred).",
+          "returns": "CommandFileResult with .options (DiffOptions) and .warnings (list[str]).",
+          "emit": "DiffOptions.to_yaml(path=None) emits a full/explicit YAML command file that round-trips. exodusii.write_command_file(options, path) and exodusii.diff_options_to_yaml(options) are module-level equivalents.",
+          "readers": "CommandFileReader (ABC), YamlCommandFileReader, ExodiffCommandFileReader, command_file_reader(path) factory.",
+          "example": "res = exodusii.read_command_file('opts.yaml'); result = exodusii.diff('a.exo','b.exo', res.options)"
         }
       },
       "copy": {

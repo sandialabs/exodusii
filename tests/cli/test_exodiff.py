@@ -460,3 +460,62 @@ def test_command_file_bad_directive_is_error(tmp_path: Path) -> None:
     payload = json.loads(stream.getvalue())
     assert payload["ok"] is False
     assert payload["error"]["type"] == "CommandFileError"
+
+
+# ---------------------------------------------------------------------------
+# YAML command file + --emit-options
+# ---------------------------------------------------------------------------
+
+
+def test_yaml_command_file_loose_tolerance(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=0.5)
+
+    cmd = tmp_path / "opts.yaml"
+    cmd.write_text("tolerances:\n  default: {mode: absolute, value: 1.0}\n")
+    stream = StringIO()
+
+    status = main(["-f", str(cmd), str(a), str(b)], file=stream)
+
+    assert status == _SAME
+    assert "Files are the same" in stream.getvalue()
+
+
+def test_emit_options_to_stdout(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b)
+    stream = StringIO()
+
+    status = main(["--absolute", "-t", "1e-8", "--emit-options", "-", str(a), str(b)], file=stream)
+
+    assert status == _SAME
+    text = stream.getvalue()
+    assert "version: 1" in text
+    assert "mode: absolute" in text
+    # No diff was performed.
+    assert "Files are" not in text
+
+
+def test_emit_options_to_file_then_reload(tmp_path: Path) -> None:
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    _write(a)
+    _write(b, temp_offset=0.5)
+
+    emitted = tmp_path / "emitted.yaml"
+
+    # Emit options that would make the files compare equal (loose absolute tol).
+    rc_emit = main(
+        ["--absolute", "-t", "1.0", "--emit-options", str(emitted), str(a), str(b)], file=StringIO()
+    )
+    assert rc_emit == _SAME
+    assert emitted.exists()
+
+    # Feed the emitted YAML back in as the command file.
+    stream = StringIO()
+    status = main(["-f", str(emitted), str(a), str(b)], file=stream)
+    assert status == _SAME

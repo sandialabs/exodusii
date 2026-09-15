@@ -2,56 +2,56 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""Reader for SEACAS ``exodiff`` *command files* (a.k.a. control files).
+"""Readers and writer for exodiff *command files* (a.k.a. control files).
 
-A command file is a whitespace-delimited (space/tab) text file of directives
-that configure an ``exodiff`` comparison: default and per-category tolerances,
-per-variable tolerance overrides and include/exclude lists, time-step
-selection, and various behavioral switches.  This module parses such a file
-into a :class:`~exodusii.api.diff.DiffOptions`.
+Two on-disk formats are supported for configuring a :func:`~exodusii.api.diff.diff`:
 
-The grammar mirrors ``ED_SystemInterface.C`` (``Parse_Command_File`` /
-``Parse_Variables``) from SEACAS ``exodiff``:
+* **YAML** (preferred, modern) -- a structured, self-documenting format with
+  full feature parity with the SEACAS exodiff command file.  See
+  :class:`YamlCommandFileReader` and :func:`diff_options_to_yaml`.
+* **SEACAS exodiff text** (legacy, for backward compatibility) -- the
+  whitespace-delimited directive grammar of ``exodiff``.  See
+  :class:`ExodiffCommandFileReader`.
 
+Use the format-detecting factory :func:`read_command_file` (or
+:func:`command_file_reader`) to parse either; YAML is preferred when the format
+is ambiguous.  A :class:`~exodusii.api.diff.DiffOptions` can be serialized back
+to YAML with :func:`diff_options_to_yaml` / :meth:`DiffOptions.to_yaml`.
+
+Legacy exodiff grammar
+----------------------
 * One directive per line; blank lines and lines whose first non-blank
   character is ``#`` are ignored.
 * Keywords are case-insensitive and may be abbreviated to (generally) their
   first three characters (four for a few, e.g. ``coordinates``, ``global``).
 * Tokens are separated by spaces, tabs, ``=`` and ``,``.
 
-Supported directives
---------------------
-``DEFAULT TOLERANCE <mode> <value> [FLOOR <f>]``
-    Set the default tolerance for result variables.
-``COORDINATES [<mode> <value>] [FLOOR <f>]``
-    Coordinate comparison tolerance (default absolute 1e-6).
-``TIME STEPS [<mode> <value>] [FLOOR <f>]``
-    Time-value comparison tolerance.
-``FINAL TIME TOLERANCE <value>``
-    (accepted; mapped onto the time tolerance value)
-``<CATEGORY> VARIABLES [(all)] [<mode> <value> [FLOOR <f>]]`` then an indented
-list of ``NAME [<mode> <value>] [FLOOR <f>]`` or ``!NAME`` (exclude) lines.
-    ``CATEGORY`` is one of GLOBAL, NODAL, ELEMENT, NODESET, SIDESET,
-    EDGEBLOCK, FACEBLOCK; ``ELEMENT ATTRIBUTES`` is also accepted.
-``STEP OFFSET automatic|match|<N>``
-``EXCLUDE TIMES <list>``
-``INTERPOLATE``
-``APPLY MATCHING`` / ``NODESET MATCH`` / ``SIDESET MATCH``
-``IGNORE CASE`` / ``CASE SENSITIVE``
+Supported exodiff directives: ``DEFAULT TOLERANCE``, ``COORDINATES``, ``TIME
+STEPS``, ``FINAL TIME TOLERANCE``, per-category ``<GLOBAL|NODAL|ELEMENT|
+NODESET|SIDESET|EDGEBLOCK|FACEBLOCK> VARIABLES`` blocks (with ``(all)``,
+per-variable tolerances and ``!NAME`` exclusions), ``ELEMENT ATTRIBUTES``,
+``STEP OFFSET``, ``EXCLUDE TIMES``, ``INTERPOLATE``, ``APPLY MATCHING`` /
+``NODESET MATCH`` / ``SIDESET MATCH``, and ``IGNORE CASE`` / ``CASE
+SENSITIVE``.
 
-Accepted-but-inert directives (parsed, then reported as an unsupported-directive
-warning on the returned :class:`CommandFileResult`): ``CALCULATE
-NORMS/L1NORMS/L2NORMS``, ``IGNORE MAPS/NANS/DUPS/ATTRIBUTES``, ``IGNORE
-SIDESET DISTRIBUTION``, ``SHORT BLOCKS`` / ``NO SHORT``, ``PEDANTIC``, ``RETURN
-STATUS`` / ``IGNORE STATUS``, ``MAX NAMES``, ``SIDESET DISTRIBUTION``.
+Accepted-but-inert exodiff directives (parsed, then reported as a warning on
+the returned :class:`CommandFileResult`): ``CALCULATE NORMS/L1NORMS/L2NORMS``,
+``IGNORE MAPS/NANS/DUPS/ATTRIBUTES``, ``IGNORE SIDESET DISTRIBUTION``, ``SHORT
+BLOCKS`` / ``NO SHORT``, ``PEDANTIC``, ``RETURN STATUS`` / ``IGNORE STATUS``,
+``MAX NAMES``, ``SIDESET DISTRIBUTION``.
 """
 
 from __future__ import annotations
 
 import re
+from abc import ABC
+from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import TimeSelection
@@ -59,7 +59,17 @@ from exodusii.core.entities import Entity
 from exodusii.core.tolerance import Tolerance
 from exodusii.core.tolerance import ToleranceMode
 
-__all__ = ["CommandFileError", "CommandFileResult", "read_command_file"]
+__all__ = [
+    "CommandFileError",
+    "CommandFileReader",
+    "CommandFileResult",
+    "ExodiffCommandFileReader",
+    "YamlCommandFileReader",
+    "command_file_reader",
+    "diff_options_to_yaml",
+    "read_command_file",
+    "write_command_file",
+]
 
 _TOKEN_SEP = re.compile(r"[ \t=,]+")
 
@@ -109,6 +119,98 @@ class CommandFileResult:
 
     options: DiffOptions
     warnings: list[str] = field(default_factory=list)
+
+
+class CommandFileReader(ABC):
+    """Abstract base class for command-file readers.
+
+    A reader is constructed from a path and produces a
+    :class:`CommandFileResult` via :meth:`read`.  Concrete subclasses parse a
+    specific on-disk format:
+
+    * :class:`YamlCommandFileReader` -- the modern, preferred YAML format.
+    * :class:`ExodiffCommandFileReader` -- the legacy SEACAS exodiff text
+      format, retained for backward compatibility.
+
+    Use :func:`command_file_reader` to pick the right reader for a file.
+    """
+
+    #: Human-readable name of the format this reader parses.
+    format_name: str = ""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    @classmethod
+    @abstractmethod
+    def sniff(cls, path: Path, head: str) -> bool:
+        """Return ``True`` if *path* appears to be in this reader's format.
+
+        Parameters
+        ----------
+        path
+            The file path (its suffix may be inspected).
+        head
+            The first portion of the file's text content.
+        """
+
+    @abstractmethod
+    def read(self) -> CommandFileResult:
+        """Parse the file and return a :class:`CommandFileResult`."""
+
+
+def command_file_reader(path: str | Path) -> CommandFileReader:
+    """Return a :class:`CommandFileReader` for *path*, auto-detecting format.
+
+    YAML is the preferred format: a ``.yaml``/``.yml`` suffix, or content that
+    parses as a YAML mapping, selects :class:`YamlCommandFileReader`.  The
+    legacy exodiff text format is used otherwise.
+
+    Raises
+    ------
+    OSError
+        If the file cannot be read.
+    """
+
+    p = Path(path)
+    head = p.read_text()[:4096]
+    # YAML is preferred; try it first, then fall back to the exodiff text form.
+    if YamlCommandFileReader.sniff(p, head):
+        return YamlCommandFileReader(p)
+    return ExodiffCommandFileReader(p)
+
+
+def read_command_file(path: str | Path) -> CommandFileResult:
+    """Parse a command file (YAML or exodiff text) into a result.
+
+    The format is auto-detected via :func:`command_file_reader` (YAML
+    preferred).  This is the top-level entry point most callers want.
+
+    Parameters
+    ----------
+    path
+        Path to the command file.
+
+    Returns
+    -------
+    CommandFileResult
+        The parsed :class:`~exodusii.api.diff.DiffOptions` and any warnings.
+
+    Raises
+    ------
+    CommandFileError
+        On a malformed file.
+    OSError
+        If the file cannot be read.
+    """
+
+    return command_file_reader(path).read()
+
+
+def write_command_file(options: DiffOptions, path: str | Path) -> None:
+    """Write *options* to *path* as a YAML command file (full/explicit)."""
+
+    Path(path).write_text(diff_options_to_yaml(options))
 
 
 def _abbrev(token: str, word: str, minlen: int) -> bool:
@@ -216,31 +318,28 @@ def _parse_tolerance_spec(toks: _Tokens, base: Tolerance, line: str) -> Toleranc
     return Tolerance(mode=mode, value=value, floor=floor)
 
 
-def read_command_file(path: str | Path) -> CommandFileResult:
-    """Parse an ``exodiff`` command file into a :class:`CommandFileResult`.
+class ExodiffCommandFileReader(CommandFileReader):
+    """Reader for the legacy SEACAS ``exodiff`` command-file text grammar.
 
-    Parameters
-    ----------
-    path
-        Path to the command file.
-
-    Returns
-    -------
-    CommandFileResult
-        The parsed :class:`~exodusii.api.diff.DiffOptions` and any
-        unsupported-directive warnings.
-
-    Raises
-    ------
-    CommandFileError
-        On a malformed directive.
-    OSError
-        If the file cannot be read.
+    Retained for backward compatibility; new files should use the YAML format
+    (:class:`YamlCommandFileReader`).  Mirrors ``ED_SystemInterface.C``
+    (``Parse_Command_File`` / ``Parse_Variables``).
     """
 
-    text = Path(path).read_text()
-    lines = text.splitlines()
+    format_name = "exodiff"
 
+    @classmethod
+    def sniff(cls, path: Path, head: str) -> bool:
+        # This reader is the fallback; it accepts anything that is not YAML.
+        return True
+
+    def read(self) -> CommandFileResult:
+        """Parse the exodiff command file into a :class:`CommandFileResult`."""
+
+        return _parse_exodiff_lines(self.path.read_text().splitlines())
+
+
+def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
     warnings: list[str] = []
 
     default_tol = Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 0.0)
@@ -537,3 +636,369 @@ def _is_inert(t1: str, t2: str) -> bool:
         if _abbrev(t1, w1, m1) and (not w2 or _abbrev(t2, w2, m2)):
             return True
     return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# YAML command file (modern, preferred)
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: YAML category key  ->  (variable-location Entity, DiffOptions tolerance field)
+#
+# These keys are used both under ``tolerances.categories`` (per-category
+# default tolerances) and under ``variables.include`` (per-category include
+# lists / ``all``).
+_YAML_CATEGORIES: dict[str, tuple[Entity, str]] = {
+    "global": (Entity.GLOBAL, "global_tolerance"),
+    "nodal": (Entity.NODE, "nodal_tolerance"),
+    "element": (Entity.ELEMENT, "element_tolerance"),
+    "edge": (Entity.EDGE, "edge_tolerance"),
+    "face": (Entity.FACE, "face_tolerance"),
+    "node_set": (Entity.NODE_SET, "node_set_tolerance"),
+    "side_set": (Entity.SIDE_SET, "side_set_tolerance"),
+    "edge_set": (Entity.EDGE_SET, "edge_set_tolerance"),
+    "face_set": (Entity.FACE_SET, "face_set_tolerance"),
+    "element_set": (Entity.ELEMENT_SET, "element_set_tolerance"),
+}
+_ENTITY_TO_YAML_CATEGORY: dict[Entity, str] = {
+    ent: key for key, (ent, _) in _YAML_CATEGORIES.items()
+}
+
+
+def _tolerance_from_yaml(spec: Any, where: str) -> Tolerance:
+    """Build a :class:`Tolerance` from a YAML node.
+
+    Accepts:
+
+    * a mapping ``{mode: <str>, value: <num>, floor: <num>, use_old_floor: bool}``
+      (any subset; ``mode`` defaults to ``relative``, ``value``/``floor`` to 0);
+    * a shorthand string ``"<mode> <value>"`` or ``"<value>"`` (mode defaults
+      to relative), e.g. ``"absolute 1e-8"`` or ``"1e-6"``;
+    * a bare number (relative tolerance of that value).
+    """
+
+    if isinstance(spec, dict):
+        mode = spec.get("mode", "relative")
+        try:
+            mode_enum = ToleranceMode.parse(mode)
+        except ValueError as exc:
+            raise CommandFileError(f"{where}: {exc}") from exc
+        return Tolerance(
+            mode=mode_enum,
+            value=float(spec.get("value", 0.0)),
+            floor=float(spec.get("floor", 0.0)),
+            use_old_floor=bool(spec.get("use_old_floor", False)),
+        )
+    if isinstance(spec, (int, float)) and not isinstance(spec, bool):
+        return Tolerance(mode=ToleranceMode.RELATIVE, value=float(spec), floor=0.0)
+    if isinstance(spec, str):
+        parts = spec.split()
+        if len(parts) == 1:
+            try:
+                return Tolerance(ToleranceMode.RELATIVE, float(parts[0]), 0.0)
+            except ValueError:
+                mode_enum = _parse_yaml_mode(parts[0], where)
+                return Tolerance(mode=mode_enum, value=0.0, floor=0.0)
+        if len(parts) == 2:
+            mode_enum = _parse_yaml_mode(parts[0], where)
+            return Tolerance(mode=mode_enum, value=float(parts[1]), floor=0.0)
+        raise CommandFileError(f"{where}: cannot parse tolerance shorthand {spec!r}")
+    raise CommandFileError(f"{where}: invalid tolerance specification {spec!r}")
+
+
+def _parse_yaml_mode(token: str, where: str) -> ToleranceMode:
+    try:
+        return ToleranceMode.parse(token)
+    except ValueError as exc:
+        raise CommandFileError(f"{where}: {exc}") from exc
+
+
+def _tolerance_to_yaml(tol: Tolerance) -> dict[str, Any]:
+    """Serialize a :class:`Tolerance` to an explicit YAML mapping."""
+
+    out: dict[str, Any] = {
+        "mode": tol.mode.value,
+        "value": float(tol.value),
+        "floor": float(tol.floor),
+    }
+    if tol.use_old_floor:
+        out["use_old_floor"] = True
+    return out
+
+
+class YamlCommandFileReader(CommandFileReader):
+    """Reader for the modern YAML command-file format (preferred).
+
+    The document is a mapping with these optional top-level sections::
+
+        version: 1
+        tolerances:
+          default:    {mode: relative, value: 1.0e-6, floor: 0.0}
+          coordinate: {mode: absolute, value: 1.0e-6}
+          time:       {mode: relative, value: 1.0e-6, floor: 1.0e-15}
+          attribute:  {mode: relative, value: 1.0e-6}
+          categories:                 # per-category default tolerances
+            nodal:   {mode: absolute, value: 1.0e-7}
+          variables:                  # per-variable overrides (highest priority)
+            DISPLX:  {mode: relative, value: 1.0e-9}
+        variables:
+          ignore_case: true
+          exclude: [VELZ]
+          include:                    # per-category include lists
+            nodal: [DISPLX, DISPLY]
+            global: all               # 'all' (or true) => compare all
+        coordinates:  {compare: true}
+        attributes:   {compare: true}
+        mesh_matching:
+          enabled: false
+          tolerance: 1.0e-6
+          require_unique: true
+        time:
+          start: 1
+          stop: -1
+          increment: 1
+          step_offset: 0
+          exclude_steps: [2, 4]
+          value_scale: 1.0
+          value_offset: 0.0
+          interpolate: false
+        report: {show_all: false}
+
+    Any tolerance may be given as an explicit mapping, a shorthand string
+    (``"absolute 1e-8"`` / ``"1e-6"``), or a bare number.
+    """
+
+    format_name = "yaml"
+
+    @classmethod
+    def sniff(cls, path: Path, head: str) -> bool:
+        if path.suffix.lower() in (".yaml", ".yml"):
+            return True
+        # Content sniff: parses as a YAML mapping with a known top-level key.
+        try:
+            doc = yaml.safe_load(head)
+        except yaml.YAMLError:
+            return False
+        if not isinstance(doc, dict):
+            return False
+        known = {
+            "version",
+            "tolerances",
+            "variables",
+            "coordinates",
+            "attributes",
+            "mesh_matching",
+            "time",
+            "report",
+        }
+        return bool(known.intersection(doc))
+
+    def read(self) -> CommandFileResult:
+        text = self.path.read_text()
+        try:
+            doc = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise CommandFileError(f"invalid YAML in {self.path}: {exc}") from exc
+        if doc is None:
+            doc = {}
+        if not isinstance(doc, dict):
+            raise CommandFileError(
+                f"{self.path}: top-level YAML must be a mapping, got {type(doc).__name__}"
+            )
+        return _diff_options_from_yaml(doc)
+
+
+def _diff_options_from_yaml(doc: dict[str, Any]) -> CommandFileResult:
+    warnings: list[str] = []
+    kwargs: dict[str, Any] = {}
+
+    tol_sec = doc.get("tolerances") or {}
+    if not isinstance(tol_sec, dict):
+        raise CommandFileError("'tolerances' must be a mapping")
+    if "default" in tol_sec and tol_sec["default"] is not None:
+        kwargs["default_tolerance"] = _tolerance_from_yaml(tol_sec["default"], "tolerances.default")
+    if "coordinate" in tol_sec and tol_sec["coordinate"] is not None:
+        kwargs["coordinate_tolerance"] = _tolerance_from_yaml(
+            tol_sec["coordinate"], "tolerances.coordinate"
+        )
+    if "time" in tol_sec and tol_sec["time"] is not None:
+        kwargs["time_tolerance"] = _tolerance_from_yaml(tol_sec["time"], "tolerances.time")
+    if "attribute" in tol_sec and tol_sec["attribute"] is not None:
+        kwargs["attribute_tolerance"] = _tolerance_from_yaml(
+            tol_sec["attribute"], "tolerances.attribute"
+        )
+    categories = tol_sec.get("categories") or {}
+    if not isinstance(categories, dict):
+        raise CommandFileError("'tolerances.categories' must be a mapping")
+    for key, spec in categories.items():
+        if spec is None:
+            continue
+        entry = _YAML_CATEGORIES.get(str(key).lower())
+        if entry is None:
+            raise CommandFileError(f"unknown tolerance category {key!r}")
+        _ent, field_name = entry
+        kwargs[field_name] = _tolerance_from_yaml(spec, f"tolerances.categories.{key}")
+    variable_tolerances: dict[str, Tolerance] = {}
+    var_tols = tol_sec.get("variables") or {}
+    if not isinstance(var_tols, dict):
+        raise CommandFileError("'tolerances.variables' must be a mapping")
+    for name, spec in var_tols.items():
+        variable_tolerances[str(name)] = _tolerance_from_yaml(spec, f"tolerances.variables.{name}")
+    if variable_tolerances:
+        kwargs["variable_tolerances"] = variable_tolerances
+
+    var_sec = doc.get("variables") or {}
+    if not isinstance(var_sec, dict):
+        raise CommandFileError("'variables' must be a mapping")
+    if "ignore_case" in var_sec:
+        kwargs["ignore_case"] = bool(var_sec["ignore_case"])
+    if "exclude" in var_sec:
+        exclude = var_sec["exclude"] or []
+        if not isinstance(exclude, list):
+            raise CommandFileError("'variables.exclude' must be a list")
+        kwargs["exclude"] = frozenset(str(x) for x in exclude)
+    include = var_sec.get("include") or {}
+    if not isinstance(include, dict):
+        raise CommandFileError("'variables.include' must be a mapping")
+    include_variables: dict[Entity, frozenset[str]] = {}
+    all_categories: set[Entity] = set()
+    for key, names in include.items():
+        entry = _YAML_CATEGORIES.get(str(key).lower())
+        if entry is None:
+            raise CommandFileError(f"unknown include category {key!r}")
+        ent = entry[0]
+        if names in (True, "all", "ALL", "(all)"):
+            all_categories.add(ent)
+        elif isinstance(names, list):
+            include_variables[ent] = frozenset(str(x) for x in names)
+        else:
+            raise CommandFileError(f"'variables.include.{key}' must be a list of names or 'all'")
+    if include_variables:
+        kwargs["include_variables"] = include_variables
+    if all_categories:
+        kwargs["all_categories"] = frozenset(all_categories)
+
+    coord_sec = doc.get("coordinates") or {}
+    if not isinstance(coord_sec, dict):
+        raise CommandFileError("'coordinates' must be a mapping")
+    if "compare" in coord_sec:
+        kwargs["compare_coordinates"] = bool(coord_sec["compare"])
+
+    attr_sec = doc.get("attributes") or {}
+    if not isinstance(attr_sec, dict):
+        raise CommandFileError("'attributes' must be a mapping")
+    if "compare" in attr_sec:
+        kwargs["compare_attributes"] = bool(attr_sec["compare"])
+
+    mm_sec = doc.get("mesh_matching") or {}
+    if not isinstance(mm_sec, dict):
+        raise CommandFileError("'mesh_matching' must be a mapping")
+    if "enabled" in mm_sec:
+        kwargs["coordinate_matching"] = bool(mm_sec["enabled"])
+    if "tolerance" in mm_sec:
+        kwargs["matching_tolerance"] = float(mm_sec["tolerance"])
+    if "require_unique" in mm_sec:
+        kwargs["require_unique_mapping"] = bool(mm_sec["require_unique"])
+
+    time_sec = doc.get("time") or {}
+    if not isinstance(time_sec, dict):
+        raise CommandFileError("'time' must be a mapping")
+    if time_sec:
+        exclude_steps = time_sec.get("exclude_steps") or []
+        if not isinstance(exclude_steps, list):
+            raise CommandFileError("'time.exclude_steps' must be a list")
+        selection = TimeSelection(
+            start=int(time_sec.get("start", 1)),
+            stop=int(time_sec.get("stop", -1)),
+            increment=int(time_sec.get("increment", 1)),
+            time_step_offset=int(time_sec.get("step_offset", 0)),
+            exclude_steps=frozenset(int(s) for s in exclude_steps),
+            time_value_scale=float(time_sec.get("value_scale", 1.0)),
+            time_value_offset=float(time_sec.get("value_offset", 0.0)),
+            interpolating=bool(time_sec.get("interpolate", False)),
+        )
+        # Leave time_selection unset (None) when it is entirely default, so a
+        # default DiffOptions round-trips exactly.  _effective_time_selection()
+        # treats the two identically at diff time.
+        if selection != TimeSelection():
+            kwargs["time_selection"] = selection
+
+    report_sec = doc.get("report") or {}
+    if not isinstance(report_sec, dict):
+        raise CommandFileError("'report' must be a mapping")
+    if "show_all" in report_sec:
+        kwargs["show_all"] = bool(report_sec["show_all"])
+
+    return CommandFileResult(options=DiffOptions(**kwargs), warnings=warnings)
+
+
+def diff_options_to_yaml(options: DiffOptions) -> str:
+    """Serialize *options* to a YAML command-file string (full/explicit).
+
+    Every field is written with its current value (self-documenting).  The
+    output round-trips through :func:`read_command_file` /
+    :class:`YamlCommandFileReader`.
+    """
+
+    ts = options._effective_time_selection()
+
+    categories: dict[str, Any] = {}
+    for key, (_ent, field_name) in _YAML_CATEGORIES.items():
+        tol = getattr(options, field_name)
+        if tol is not None:
+            categories[key] = _tolerance_to_yaml(tol)
+
+    variables_tols = {
+        name: _tolerance_to_yaml(tol) for name, tol in options.variable_tolerances.items()
+    }
+
+    include: dict[str, Any] = {}
+    for ent in sorted(options.all_categories, key=lambda e: e.value):
+        include[_ENTITY_TO_YAML_CATEGORY.get(ent, ent.value)] = "all"
+    for ent, names in options.include_variables.items():
+        include[_ENTITY_TO_YAML_CATEGORY.get(ent, ent.value)] = sorted(names)
+
+    doc: dict[str, Any] = {
+        "version": 1,
+        "tolerances": {
+            "default": _tolerance_to_yaml(options.default_tolerance),
+            "coordinate": _tolerance_to_yaml(options.coordinate_tolerance),
+            "time": _tolerance_to_yaml(options.time_tolerance),
+            "attribute": (
+                _tolerance_to_yaml(options.attribute_tolerance)
+                if options.attribute_tolerance is not None
+                else None
+            ),
+            "categories": categories,
+            "variables": variables_tols,
+        },
+        "variables": {
+            "ignore_case": options.ignore_case,
+            "exclude": sorted(options.exclude),
+            "include": include,
+        },
+        "coordinates": {"compare": options.compare_coordinates},
+        "attributes": {"compare": options.compare_attributes},
+        "mesh_matching": {
+            "enabled": options.coordinate_matching,
+            "tolerance": float(options.matching_tolerance),
+            "require_unique": options.require_unique_mapping,
+        },
+        "time": {
+            "start": ts.start,
+            "stop": ts.stop,
+            "increment": ts.increment,
+            "step_offset": ts.time_step_offset,
+            "exclude_steps": sorted(ts.exclude_steps),
+            "value_scale": ts.time_value_scale,
+            "value_offset": ts.time_value_offset,
+            "interpolate": ts.interpolating,
+        },
+        "report": {"show_all": options.show_all},
+    }
+
+    header = (
+        "# exodusii diff options (YAML command file)\n"
+        "# Preferred, modern replacement for the SEACAS exodiff command file.\n"
+        "# Read with exodusii.read_command_file(); emit with DiffOptions.to_yaml().\n"
+    )
+    return header + yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
