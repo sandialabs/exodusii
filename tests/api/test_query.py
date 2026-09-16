@@ -107,6 +107,48 @@ def test_query_element_single_time(tmp_path: Path) -> None:
     assert np.allclose(result.data["ENERGY"], [1.5])
 
 
+def test_query_element_coordinates_and_displacements(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "coordinates", "displacements", "e/ENERGY", time="last")
+
+    assert result.names == ("COORDX", "COORDY", "DISPLX", "DISPLY", "ENERGY")
+    assert result.metadata["entity"] == "element"
+    # Single quad on the unit square: centroid at (0.5, 0.5).
+    assert np.allclose(result.data["COORDX"], [0.5])
+    assert np.allclose(result.data["COORDY"], [0.5])
+    # Uniform nodal displacement averages to the same value at the center.
+    assert np.allclose(result.data["DISPLX"], [0.1])
+    assert np.allclose(result.data["DISPLY"], [0.0])
+    assert np.allclose(result.data["ENERGY"], [1.5])
+
+
+def test_query_element_index_with_coordinates(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "e/ENERGY", "coordinates", time="last", object_index=True)
+
+    assert result.names == ("index", "ENERGY", "COORDX", "COORDY")
+    assert np.allclose(result.data["index"], [1.0])
+    assert np.allclose(result.data["COORDX"], [0.5])
+
+
+def test_query_special_only_defaults_to_node(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "coordinates", time="last")
+
+    assert result.names == ("COORDX", "COORDY")
+    assert result.metadata["entity"] == "node"
+    assert np.allclose(result.data["COORDX"], [0.0, 1.0, 1.0, 0.0])
+
+
 def test_query_rejects_empty_variables(tmp_path: Path) -> None:
     path = tmp_path / "query.exo"
     _write_query_file(path)

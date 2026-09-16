@@ -11,6 +11,19 @@ from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
 from exodusii.core.errors import ExodusInvalidEntityError
 
+#: Unqualified selector names that expand to per-axis spatial columns
+#: (e.g. ``COORDX``/``COORDY``/``COORDZ``).  These are entity-agnostic: they
+#: may be combined with node *or* element variable selectors and are resolved
+#: at node positions or element centers accordingly.
+SPECIAL_SELECTOR_NAMES = frozenset({"coordinates", "displacements"})
+
+
+def is_special_selector(value: "VariableSelector | str") -> bool:
+    """Return true if *value* names a special spatial pseudo-variable."""
+
+    name = value.name if isinstance(value, VariableSelector) else value
+    return isinstance(name, str) and name.strip().lower() in SPECIAL_SELECTOR_NAMES
+
 
 @dataclass(frozen=True, slots=True)
 class VariableSelector:
@@ -113,6 +126,12 @@ def parse_variable_selector(
         entity_part, name = _split_qualified_selector(text)
         return VariableSelector(name=name, entity=entity_part, original=value)
 
+    if text.lower() in SPECIAL_SELECTOR_NAMES:
+        # Special spatial pseudo-variables are entity-agnostic; bind them to a
+        # placeholder NODE entity so they parse, and let the query layer resolve
+        # them at the appropriate positions (nodes or element centers).
+        return VariableSelector(name=text, entity=Entity.NODE, original=value)
+
     if default_entity is None:
         raise ValueError(f"unqualified variable selector {value!r} requires a default_entity")
 
@@ -147,11 +166,15 @@ def parse_variable_selectors(
     )
 
     if require_same_entity and selectors:
-        first = entity(selectors[0].entity)
-        different = [selector for selector in selectors if entity(selector.entity) is not first]
-        if different:
-            entities = ", ".join(sorted({entity(selector.entity).value for selector in selectors}))
-            raise ValueError(f"variable selectors must have the same entity; got {entities}")
+        # Special spatial pseudo-variables (coordinates/displacements) are
+        # entity-agnostic and excluded from the same-entity requirement.
+        real = [selector for selector in selectors if not is_special_selector(selector)]
+        if real:
+            first = entity(real[0].entity)
+            different = [selector for selector in real if entity(selector.entity) is not first]
+            if different:
+                entities = ", ".join(sorted({entity(selector.entity).value for selector in real}))
+                raise ValueError(f"variable selectors must have the same entity; got {entities}")
 
     return selectors
 
@@ -170,4 +193,10 @@ def _split_qualified_selector(value: str) -> tuple[str, str]:
     return entity_part, name
 
 
-__all__ = ["VariableSelector", "parse_variable_selector", "parse_variable_selectors"]
+__all__ = [
+    "SPECIAL_SELECTOR_NAMES",
+    "VariableSelector",
+    "is_special_selector",
+    "parse_variable_selector",
+    "parse_variable_selectors",
+]

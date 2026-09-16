@@ -35,9 +35,11 @@ from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
 from exodusii.core.errors import ExodusInvalidEntityError
 from exodusii.core.selectors import VariableSelector
+from exodusii.core.selectors import is_special_selector
 from exodusii.core.selectors import parse_variable_selectors
 from exodusii.core.time import TimeSelector
 from exodusii.core.time import resolve_time
+from exodusii.mesh.geometry import connected_average
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +187,12 @@ def query(
     if not selectors:
         raise ValueError("at least one variable selector is required")
 
-    location = entity(selectors[0].entity)
+    # Special spatial pseudo-variables (coordinates/displacements) are
+    # entity-agnostic; the primary query entity is determined by the first
+    # real variable selector.  When only special selectors are given, the query
+    # is treated as nodal.
+    real_selectors = [s for s in selectors if not is_special_selector(s)]
+    location = entity(real_selectors[0].entity) if real_selectors else Entity.NODE
 
     if location is Entity.GLOBAL:
         data = _query_global(exo, selectors, time=time)
@@ -327,6 +334,24 @@ def _query_node(
     )
 
 
+def _element_center_values(
+    exo: ExodusFile, nodal_values: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Average nodal values onto element centers, ordered across all blocks.
+
+    Mirrors the block ordering used for element variables so the resulting
+    rows line up with element-variable columns.
+    """
+
+    parts = [
+        connected_average(exo.element_connectivity(int(block_id), zero_based=True), nodal_values)
+        for block_id in exo.element_block_ids()
+    ]
+    if not parts:
+        return np.empty((0, nodal_values.shape[1]) if nodal_values.ndim == 2 else (0,))
+    return np.concatenate(parts, axis=0)
+
+
 def _query_element(
     exo: ExodusFile,
     selectors: tuple[VariableSelector, ...],
@@ -344,12 +369,22 @@ def _query_element(
         names.append("index")
 
     for selector in selectors:
-        columns.append(
-            np.asarray(
-                exo.values(selector.name, on=Entity.ELEMENT, time=selection.index), dtype=np.float64
+        if selector.name.lower() == "coordinates":
+            # Coordinates at element centers (centroid of each element's nodes).
+            centers = _element_center_values(exo, exo.coordinates())
+            _append_components(columns, names, centers, ("COORDX", "COORDY", "COORDZ"))
+        elif selector.name.lower() == "displacements":
+            # Displacements averaged onto element centers.
+            displ = _element_center_values(exo, exo.displacements(time=selection.index))
+            _append_components(columns, names, displ, ("DISPLX", "DISPLY", "DISPLZ"))
+        else:
+            columns.append(
+                np.asarray(
+                    exo.values(selector.name, on=Entity.ELEMENT, time=selection.index),
+                    dtype=np.float64,
+                )
             )
-        )
-        names.append(selector.name)
+            names.append(selector.name)
 
     dense = np.column_stack(columns) if columns else np.empty((element_count, 0), dtype=np.float64)
     return _structured(
