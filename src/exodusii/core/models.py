@@ -10,6 +10,7 @@ initialization parameters, block and set descriptors, variable metadata,
 QA records, and information records.
 """
 
+import numbers
 from dataclasses import dataclass
 from typing import Any
 from typing import cast
@@ -702,14 +703,14 @@ class InfoRecord:
 
 
 def _require_positive_int(name: str, value: Any) -> None:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
         raise TypeError(f"{name} must be an int")
     if value < 1:
         raise ValueError(f"{name} must be positive")
 
 
 def _require_nonnegative_int(name: str, value: Any) -> None:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
         raise TypeError(f"{name} must be an int")
     if value < 0:
         raise ValueError(f"{name} must be nonnegative")

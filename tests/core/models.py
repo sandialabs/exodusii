@@ -159,6 +159,35 @@ def test_block_rejects_negative_count() -> None:
         )
 
 
+def test_block_accepts_numpy_integer_fields() -> None:
+    # Block/set IDs routinely arrive as numpy integers (e.g. from
+    # get_element_block_ids()); these must be accepted like plain ints.
+    block = Block(
+        id=np.int64(10),
+        index=np.int32(1),
+        entity="element_block",
+        element_type="quad",
+        count=np.int64(4),
+        nodes_per_entity=np.int64(4),
+    )
+    assert block.id == 10
+    assert block.index == 1
+    assert block.count == 4
+
+
+def test_block_rejects_bool_id() -> None:
+    # bool is a subclass of int but is not a valid identifier.
+    with pytest.raises(TypeError, match="id must be an int"):
+        Block(
+            id=True,
+            index=1,
+            entity="element_block",
+            element_type="quad",
+            count=1,
+            nodes_per_entity=4,
+        )
+
+
 def test_set_info_node_set_payload() -> None:
     info = SetInfo(
         id=100,
