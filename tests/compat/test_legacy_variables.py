@@ -54,6 +54,12 @@ def test_legacy_edge_face_variable_methods(tmp_path: Path) -> None:
         assert np.allclose(exo.get_face_variable_truth_table(), [[1]])
         assert np.allclose(exo.get_edge_variable_values(20, "EDGEVAR", 1), [1.0, 2.0, 3.0, 4.0])
         assert np.allclose(exo.get_face_variable_values(30, "FACEVAR", 1), [5.0])
+        assert exo.is_edge_variable("EDGEVAR")
+        assert exo.is_face_variable("FACEVAR")
+        assert not exo.is_edge_variable("FACEVAR")
+        assert not exo.is_face_variable("EDGEVAR")
+        assert not exo.is_edge_variable("MISSING")
+        assert not exo.is_face_variable("MISSING")
 
 
 def test_legacy_set_variable_methods(tmp_path: Path) -> None:
