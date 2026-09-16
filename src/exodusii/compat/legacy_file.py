@@ -714,10 +714,10 @@ class ExodusIIFile:
         return variable in self.get_element_variable_names().tolist()
 
     def is_edge_variable(self, variable: str) -> bool:
-        return False
+        return variable in self.get_edge_variable_names().tolist()
 
     def is_face_variable(self, variable: str) -> bool:
-        return False
+        return variable in self.get_face_variable_names().tolist()
 
     def get_element_property_names(self) -> list[str]:
         return list(self.reader.property_names(Entity.ELEMENT_BLOCK))
