@@ -215,7 +215,7 @@ class Lineout:
 
         header = list(header_or_structured)
         dense = np.asarray(data, dtype=np.float64)
-        return self._apply_dense(header, dense)  # type: ignore[arg-type]
+        return self._apply_dense(header, dense)  # type: ignore[invalid-argument-type]
 
     def _apply_dense(
         self, header: list[str], data: npt.NDArray[np.float64]
