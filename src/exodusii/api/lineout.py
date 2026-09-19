@@ -213,9 +213,9 @@ class Lineout:
             dtype = np.dtype([(name, "f8") for name in output_header])
             return np.asarray(list(zip(*output_dense.T, strict=False)), dtype=dtype)
 
-        header = list(header_or_structured)  # type: ignore[arg-type]
+        header = list(header_or_structured)
         dense = np.asarray(data, dtype=np.float64)
-        return self._apply_dense(header, dense)
+        return self._apply_dense(header, dense)  # type: ignore[arg-type]
 
     def _apply_dense(
         self, header: list[str], data: npt.NDArray[np.float64]
