@@ -252,7 +252,7 @@ python -m exodusii diff -f opts.yaml gold.exo test.exo
 ```python
 import exodusii
 
-res = exodusii.read_command_file("opts.yaml")     # -> CommandFileResult
+res = exodusii.read_command_file("opts.yaml")  # -> CommandFileResult
 result = exodusii.diff("gold.exo", "test.exo", res.options)
 ```
 
@@ -260,8 +260,8 @@ result = exodusii.diff("gold.exo", "test.exo", res.options)
 
 ```python
 opts = exodusii.DiffOptions(...)
-opts.to_yaml("opts.yaml")            # write to a file
-print(opts.to_yaml())                 # or get the string
+opts.to_yaml("opts.yaml")  # write to a file
+print(opts.to_yaml())  # or get the string
 ```
 
 ```bash
