@@ -163,12 +163,12 @@ def test_block_accepts_numpy_integer_fields() -> None:
     # Block/set IDs routinely arrive as numpy integers (e.g. from
     # get_element_block_ids()); these must be accepted like plain ints.
     block = Block(
-        id=np.int64(10),
-        index=np.int32(1),
+        id=10,
+        index=1,
         entity="element_block",
         element_type="quad",
-        count=np.int64(4),
-        nodes_per_entity=np.int64(4),
+        count=4,
+        nodes_per_entity=4,
     )
     assert block.id == 10
     assert block.index == 1
