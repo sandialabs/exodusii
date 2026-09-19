@@ -576,7 +576,9 @@ def _points_in_polygon(points: FloatArray, vertices: FloatArray) -> BoolArray:
     result = np.zeros(points.shape[0], dtype=np.bool_)
 
     for index, point in enumerate(points):
-        result[index] = _point_in_polygon(point, vertices)
+        result[index] = _point_in_polygon(cast(FloatArray, point), vertices)
+
+    return result
 
     return result
 
