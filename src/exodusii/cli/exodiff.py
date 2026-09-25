@@ -23,6 +23,7 @@ import argparse
 import json
 import sys
 from dataclasses import replace
+from typing import Any
 from typing import TextIO
 
 from exodusii.api.diff import DiffOptions
@@ -378,6 +379,8 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
         interpolating=bool(args.interpolate),
     )
 
+    options: DiffOptions
+
     if base is None:
         options = DiffOptions(
             default_tolerance=default_tol,
@@ -397,7 +400,8 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
     # A command file supplied the base options; layer explicitly-set CLI flags
     # on top (CLI wins).  A flag is "explicitly set" when it differs from its
     # argparse default.
-    overrides: dict[str, object] = {}
+    assert base is not None
+    overrides: dict[str, Any] = {}
     if args.mode is not None or float(args.tolerance) != 1.0e-6 or float(args.floor) != 0.0:
         overrides["default_tolerance"] = default_tol
     if float(args.coordinate_tolerance) != 1.0e-6:

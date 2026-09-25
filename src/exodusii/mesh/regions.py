@@ -264,7 +264,7 @@ class Slab(_RegionOps):
         hi: float | None = None,
         dimension: int = 3,
     ) -> None:
-        ax = {"x": 0, "y": 1, "z": 2}.get(axis, axis) if isinstance(axis, str) else axis
+        ax: int = axis if isinstance(axis, int) else {"x": 0, "y": 1, "z": 2}.get(axis, -1)
         if ax not in (0, 1, 2):
             raise ValueError("axis must be one of 0/1/2 or 'x'/'y'/'z'")
         if dimension not in (2, 3):

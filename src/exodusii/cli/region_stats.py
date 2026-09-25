@@ -123,7 +123,9 @@ class RegionStats(Command):
             from exodusii.mesh.regions import Cylinder
             from exodusii.mesh.regions import Rectangle
             from exodusii.mesh.regions import Sphere
+            from exodusii.mesh.regions import _RegionOps
 
+            region_obj: _RegionOps
             if args.cylinder is not None:
                 ax, ay, az, bx, by, bz, r = args.cylinder
                 region_obj = Cylinder([ax, ay, az], [bx, by, bz], r)

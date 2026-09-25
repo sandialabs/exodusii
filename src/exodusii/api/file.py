@@ -1663,9 +1663,10 @@ class ExodusFile:
         else:
             # Derive dynamically: probe whether vals_*_varN*M exists for every
             # (variable_index, location_index) pair — mirrors ex_get_truth_table.c.
-            array = self._derive_truth_table(spec)
-            if array is None:
+            arr = self._derive_truth_table(spec)
+            if arr is None:
                 return None
+            array = arr
 
         if id is None:
             return array
