@@ -25,6 +25,7 @@ bounding_box
     Coordinate-wise minimum and maximum extents.
 """
 
+from typing import cast
 import numpy as np
 import numpy.typing as npt
 
@@ -229,7 +230,7 @@ def nodal_volumes(
     nodal = np.zeros(num_nodes, dtype=np.float64)
 
     for element_index, node_indices in enumerate(connectivity):
-        nodal[node_indices] += volumes[element_index] / len(node_indices)
+        nodal[node_indices] += volumes[element_index] / len(cast(IntArray, node_indices))
 
     return nodal
 
