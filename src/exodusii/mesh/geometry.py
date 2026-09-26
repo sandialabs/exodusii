@@ -26,6 +26,7 @@ bounding_box
 """
 
 from typing import cast
+
 import numpy as np
 import numpy.typing as npt
 
