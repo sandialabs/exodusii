@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "exodusii"
-version = "26.9.25"
+version = "26.10.1"
 description = "A modern pure-Python interface for Sandia Exodus II finite element databases."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -118,3 +118,11 @@ skips = [
 include = ["src", "tests"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
+
+
+[tool.mypy]
+python_version = "3.13"
+
+[[tool.mypy.overrides]]
+module = ["yaml", "yaml.*"]
+ignore_missing_imports = true

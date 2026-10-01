@@ -1,14 +1,55 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+cd "$(git rev-parse --show-toplevel)"
 
-cd $SCRIPT_DIR/..
+python - <<'PY'
+from __future__ import annotations
 
-ruff format src
-ruff format tests
-ruff check --fix src
-ruff check --fix tests
+import datetime
+import re
+from pathlib import Path
+
+pyproject = Path("pyproject.toml")
+text = pyproject.read_text(encoding="utf-8")
+
+today = datetime.date.today()
+expected = f"{today.year - 2000}.{today.month}.{today.day}"
+
+project_section = re.search(
+    r"(?ms)^(\[project\]\s*)(.*?)(?=^\[|\Z)",
+    text,
+)
+
+if project_section is None:
+    raise SystemExit("Could not find [project] section in pyproject.toml")
+
+section = project_section.group(0)
+
+new_section, count = re.subn(
+    r'(?m)^(\s*version\s*=\s*)(["\'])(.*?)(\2)(.*)$',
+    rf"\g<1>\g<2>{expected}\g<4>\g<5>",
+    section,
+    count=1,
+)
+
+if count != 1:
+    raise SystemExit("Could not find version entry in [project] section of pyproject.toml")
+
+if new_section != section:
+    updated = text[: project_section.start()] + new_section + text[project_section.end() :]
+    pyproject.write_text(updated, encoding="utf-8")
+    print(f"Updated pyproject.toml version to {expected}")
+else:
+    print(f"pyproject.toml version already current: {expected}")
+PY
+
+ruff format src tests
+ruff check --fix src tests
 mypy src
 pytest tests
+bandit -c pytproject.toml src
+
+# Include the version bump in the commit automatically.
+git add pyproject.toml
