@@ -11,6 +11,7 @@ from typing import Literal
 
 import numpy as np
 from netCDF4 import Dataset  # type: ignore[reportMissingTypeStubs]
+from netCDF4 import default_fillvals  # type: ignore[reportMissingTypeStubs]
 
 from exodusii.core.errors import ExodusDimensionError
 from exodusii.core.errors import ExodusVariableError
@@ -183,7 +184,11 @@ class NetCDF4Backend:
                 f"cannot create variable {name!r}; missing dimensions: {missing_text}"
             )
 
-        self._dataset.createVariable(name, _dtype_code(dtype), tuple(dimensions))
+        dtype_code = _dtype_code(dtype)
+
+        self._dataset.createVariable(
+            name, dtype_code, tuple(dimensions), fill_value=_default_fill_value(dtype_code)
+        )
 
     def write_variable(self, name: str, value: Any, *indices: int) -> None:
         """Write a variable or indexed slice of a variable.
@@ -293,6 +298,18 @@ def _is_string_like(value: Any) -> bool:
         return value.dtype.kind in {"S", "U"}
 
     return False
+
+
+def _default_fill_value(dtype_code: str) -> Any:
+    """Return an explicit NetCDF fill value for a variable dtype."""
+
+    if dtype_code == "S1":
+        return b"\x00"
+
+    if dtype_code in default_fillvals:
+        return default_fillvals[dtype_code]
+
+    return "default"
 
 
 __all__ = ["NetCDF4Backend", "open_netcdf4"]

@@ -164,8 +164,24 @@ def _join_character_vector(array: np.ndarray | np.ma.MaskedArray, *, strip: bool
 
 
 def _encode_one_fixed_width(value: str, *, width: int, dtype: str) -> np.ndarray:
-    text = f"{value:<{width}}"[:width]
-    return np.asarray(list(text), dtype=dtype)
+    text = str(value).split("\x00", 1)[0]
+
+    np_dtype = np.dtype(dtype)
+    out = np.zeros(width, dtype=dtype)
+
+    if np_dtype.kind == "S":
+        raw = text.encode("utf-8")[:width]
+        if raw:
+            out[: len(raw)] = np.frombuffer(raw, dtype="S1")
+        return out
+
+    if np_dtype.kind == "U":
+        text = text[:width]
+        if text:
+            out[: len(text)] = np.asarray(list(text), dtype=dtype)
+        return out
+
+    raise ValueError(f"unsupported fixed-width character dtype {dtype!r}")
 
 
 __all__ = ["decode_text", "encode_fixed_width", "string_array", "stringify"]

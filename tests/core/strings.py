@@ -136,7 +136,8 @@ def test_encode_fixed_width_single_string() -> None:
 
     assert encoded.shape == (5,)
     assert encoded.dtype.kind == "S"
-    assert stringify(encoded, strip=False) == "abc  "
+    assert stringify(encoded, strip=False) == "abc"
+    assert encoded.tobytes() == b"abc\x00\x00"
 
 
 def test_encode_fixed_width_iterable_of_strings() -> None:
