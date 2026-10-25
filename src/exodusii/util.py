@@ -13,7 +13,7 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Generator
 from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -73,7 +73,7 @@ def which(*names: str) -> str:
 
 
 @contextmanager
-def working_dir(dirname: str | os.PathLike[str]) -> Iterator[None]:
+def working_dir(dirname: str | os.PathLike[str]) -> Generator[None]:
     """Temporarily change the working directory."""
 
     cwd = Path.cwd()
