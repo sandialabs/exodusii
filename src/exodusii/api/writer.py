@@ -219,7 +219,7 @@ class ExodusWriter:
         Parameters
         ----------
         title : str
-            Descriptive title stored in the file (maximum ~80 characters for
+            Descriptive title stored in the file (maximum ~81 characters for
             broad compatibility).
         dimension : int
             Spatial dimensionality of the mesh: ``1``, ``2``, or ``3``.
@@ -384,7 +384,7 @@ class ExodusWriter:
         Parameters
         ----------
         records : sequence of str
-            Lines of text to store.  Each line is padded or truncated to 80
+            Lines of text to store.  Each line is padded or truncated to 81
             characters.  An empty sequence is a no-op.
 
         Examples
@@ -409,7 +409,7 @@ class ExodusWriter:
             )
 
         self._backend.write_variable(
-            VariableName.INFO_RECORDS.value, encode_fixed_width(records, width=80)
+            VariableName.INFO_RECORDS.value, encode_fixed_width(records, width=81)
         )
 
     def write_qa_records(self, records: Sequence[Sequence[str]]) -> None:
@@ -459,7 +459,7 @@ class ExodusWriter:
                 ),
             )
 
-        encoded = np.asarray([encode_fixed_width(record, width=32) for record in normalized])
+        encoded = np.asarray([encode_fixed_width(record, width=33) for record in normalized])
         self._backend.write_variable(VariableName.QA_RECORDS.value, encoded)
 
     def define_property(self, on: Entity, name: str, values: npt.ArrayLike) -> None:
@@ -595,9 +595,9 @@ class ExodusWriter:
 
         self._backend.create_dimension(spec.count_dimension, len(names))
         self._backend.create_variable(
-            spec.names_variable, str, (spec.count_dimension, DimensionName.STRING_LENGTH.value)
+            spec.names_variable, str, (spec.count_dimension, DimensionName.NAME_LENGTH.value)
         )
-        self._backend.write_variable(spec.names_variable, encode_fixed_width(names, width=32))
+        self._backend.write_variable(spec.names_variable, encode_fixed_width(names, width=256))
 
         if on is Entity.GLOBAL:
             self._backend.create_variable(
@@ -730,9 +730,9 @@ class ExodusWriter:
             name_var = spec.attribute_names_variable(block_index)
             if not self._backend.has_variable(name_var):
                 self._backend.create_variable(
-                    name_var, str, (attr_dim, DimensionName.STRING_LENGTH.value)
+                    name_var, str, (attr_dim, DimensionName.NAME_LENGTH.value)
                 )
-            self._backend.write_variable(name_var, encode_fixed_width(names, width=32))
+            self._backend.write_variable(name_var, encode_fixed_width(names, width=256))
 
     def set_block_status(self, entity: Entity, block_id: int, active: bool) -> None:
         """Set the active/inactive status flag for a block.
@@ -835,7 +835,7 @@ class ExodusWriter:
             raise ValueError("coordinate name count must match dimension")
 
         self._backend.write_variable(
-            VariableName.COORDINATE_NAMES.value, encode_fixed_width(coordinate_names, width=32)
+            VariableName.COORDINATE_NAMES.value, encode_fixed_width(coordinate_names, width=256)
         )
 
         for axis in range(dimension):
@@ -1072,7 +1072,7 @@ class ExodusWriter:
         self._backend.write_variable(spec.ids_variable, int(block_id), block_index - 1)
         self._backend.write_variable(spec.status_variable, 1 if active else 0, block_index - 1)
         self._backend.write_variable(
-            spec.names_variable, encode_fixed_width(name, width=32), block_index - 1
+            spec.names_variable, encode_fixed_width(name, width=256), block_index - 1
         )
 
     def define_element_block(
@@ -1336,7 +1336,7 @@ class ExodusWriter:
         self._backend.write_variable(spec.ids_variable, int(set_id), set_index - 1)
         self._backend.write_variable(spec.status_variable, 1 if active else 0, set_index - 1)
         self._backend.write_variable(
-            spec.names_variable, encode_fixed_width(name, width=32), set_index - 1
+            spec.names_variable, encode_fixed_width(name, width=256), set_index - 1
         )
 
     def define_node_set(
@@ -2201,9 +2201,9 @@ class ExodusWriter:
 
     def _create_standard_dimensions(self) -> None:
         self._backend.create_dimension(DimensionName.TIME.value, None)
-        self._backend.create_dimension(DimensionName.STRING_LENGTH.value, 32)
+        self._backend.create_dimension(DimensionName.STRING_LENGTH.value, 33)
         self._backend.create_dimension(DimensionName.NAME_LENGTH.value, 256)
-        self._backend.create_dimension(DimensionName.LINE_LENGTH.value, 80)
+        self._backend.create_dimension(DimensionName.LINE_LENGTH.value, 81)
         self._backend.create_dimension(DimensionName.FOUR.value, 4)
 
     def _create_time_variable(self) -> None:
@@ -2213,7 +2213,7 @@ class ExodusWriter:
         self._backend.create_variable(
             VariableName.COORDINATE_NAMES.value,
             str,
-            (DimensionName.NUM_DIMENSIONS.value, DimensionName.STRING_LENGTH.value),
+            (DimensionName.NUM_DIMENSIONS.value, DimensionName.NAME_LENGTH.value),
         )
         for axis in range(dimension):
             self._backend.create_variable(
@@ -2230,11 +2230,11 @@ class ExodusWriter:
         self._backend.create_variable(ids_name, int, (dimension_name,))
         self._backend.create_variable(status_name, int, (dimension_name,))
         self._backend.create_variable(
-            names_name, str, (dimension_name, DimensionName.STRING_LENGTH.value)
+            names_name, str, (dimension_name, DimensionName.NAME_LENGTH.value)
         )
         self._backend.write_variable(ids_name, np.zeros(count, dtype=np.int32))
         self._backend.write_variable(status_name, np.zeros(count, dtype=np.int32))
-        self._backend.write_variable(names_name, encode_fixed_width([""] * count, width=32))
+        self._backend.write_variable(names_name, encode_fixed_width([""] * count, width=256))
         self._backend.set_variable_attribute(ids_name, AttributeName.PROPERTY_NAME.value, "ID")
 
     def _allocate_sets(
