@@ -27,6 +27,28 @@ from exodusii.core.names import VariableName
 from exodusii.core.schema import variable_spec
 
 
+class LegacyQueryArray(np.ndarray):
+    """Structured array with legacy field-name aliases."""
+
+    _legacy_aliases: dict[str, str]
+
+    def __new__(cls, array: npt.NDArray[Any], aliases: Mapping[str, str]) -> "LegacyQueryArray":
+        obj = np.asarray(array).view(cls)
+        obj._legacy_aliases = dict(aliases)
+        return obj
+
+    def __array_finalize__(self, obj: Any) -> None:
+        if obj is None:
+            self._legacy_aliases = {}
+        else:
+            self._legacy_aliases = getattr(obj, "_legacy_aliases", {})
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, str):
+            key = self._legacy_aliases.get(key, key)
+        return super().__getitem__(key)
+
+
 class ExodusIIFile:
     """Compatibility adapter preserving much of the historical ``exodusii_file`` API."""
 
@@ -913,7 +935,8 @@ class ExodusIIFile:
             raise NotImplementedError("cycle selection is not implemented in the refreshed adapter")
 
         selector_time = index if index is not None else time
-        return query(self.reader, *variables, time=selector_time, lineout=lineout).data
+        data = query(self.reader, *variables, time=selector_time, lineout=lineout).data
+        return self._add_legacy_query_aliases(data, variables)
 
     def put_init(
         self,
@@ -1375,6 +1398,118 @@ class ExodusIIFile:
         self.writer.backend.write_variable(
             VariableName.ELEMENT_SET_NAMES.value, _fixed_name(name), set_index - 1
         )
+
+    def _add_legacy_query_aliases(self, data: Any, variables: tuple[str, ...]) -> Any:
+        """Add legacy TYPE/NAME aliases to modern query results."""
+
+        aliases = self._legacy_query_aliases(variables)
+        if not aliases:
+            return data
+
+        if isinstance(data, Mapping):
+            return self._add_mapping_aliases(data, aliases)
+
+        if isinstance(data, np.ndarray) and data.dtype.names:
+            return self._add_structured_array_aliases(data, aliases)
+
+        columns = getattr(data, "columns", None)
+        if columns is not None and hasattr(data, "copy"):
+            return self._add_column_aliases(data, aliases)
+
+        return data
+
+    def _legacy_query_aliases(self, variables: tuple[str, ...]) -> dict[str, str]:
+        """Map legacy requested names to modern plain result names."""
+
+        aliases: dict[str, str] = {}
+
+        for variable in variables:
+            prefix, sep, requested_name = variable.partition("/")
+            if not sep:
+                continue
+
+            if prefix not in {"g", "n", "e", "f", "d"}:
+                continue
+
+            target_name = self._legacy_query_target_name(prefix, requested_name)
+            aliases[f"{prefix}/{requested_name}"] = target_name
+
+        return aliases
+
+    def _legacy_query_target_name(self, prefix: str, requested_name: str) -> str:
+        """Return the plain modern result name for a legacy TYPE/NAME request."""
+
+        if prefix == "g":
+            available = self.reader.variable_names("global")
+        elif prefix == "n":
+            # Legacy get allowed n/x, n/y, n/z as coordinate shortcuts.
+            if requested_name.lower() in {"x", "y", "z"}:
+                return requested_name
+            available = self.reader.variable_names("node")
+        elif prefix == "e":
+            available = self.reader.variable_names("element")
+        elif prefix == "f":
+            available = self.reader.variable_names(Entity.FACE)
+        elif prefix == "d":
+            available = self.reader.variable_names(Entity.EDGE)
+        else:
+            return requested_name
+
+        names = [str(name) for name in available]
+
+        for name in names:
+            if name == requested_name:
+                return name
+
+        requested_lower = requested_name.lower()
+        for name in names:
+            if name.lower() == requested_lower:
+                return name
+
+        return requested_name
+
+    @staticmethod
+    def _add_mapping_aliases(data: Mapping[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+        """Add legacy aliases to mapping-style query data."""
+
+        result = dict(data)
+
+        for alias, target in aliases.items():
+            if alias not in result and target in result:
+                result[alias] = result[target]
+
+        return result
+
+    @staticmethod
+    def _add_column_aliases(data: Any, aliases: dict[str, str]) -> Any:
+        """Add legacy aliases to DataFrame-like query data."""
+
+        result = data.copy()
+
+        for alias, target in aliases.items():
+            if alias not in result.columns and target in result.columns:
+                result[alias] = result[target]
+
+        return result
+
+    @staticmethod
+    def _add_structured_array_aliases(
+        data: npt.NDArray[Any], aliases: dict[str, str]
+    ) -> npt.NDArray[Any]:
+        """Add legacy aliases to structured ndarray query data."""
+
+        fields = cast(Mapping[str, tuple[Any, ...]], data.dtype.fields or {})
+
+        active_aliases = {
+            alias: target
+            for alias, target in aliases.items()
+            if alias not in fields and target in fields
+        }
+
+        if not active_aliases:
+            return data
+
+        return LegacyQueryArray(data, active_aliases)
 
     def _put_variable_params(self, on: Entity, num_vars: int) -> None:
         self.writer.define_variables(on, [""] * num_vars)

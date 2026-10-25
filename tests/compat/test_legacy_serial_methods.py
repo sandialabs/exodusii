@@ -71,6 +71,16 @@ def test_legacy_serial_info_and_qa_defaults(tmp_path: Path) -> None:
         assert exo.get_qa_records() is None
 
 
+def test_legacy_get_preserves_global_prefixed_field(tmp_path: Path) -> None:
+    path = tmp_path / "serial.exo"
+    _write_serial(path)
+
+    with exodusii.File(path) as exo:
+        table = exo.get("g/TM_STEP")
+    assert table.dtype.names == ("TIME", "TM_STEP")
+    np.testing.assert_allclose(table["g/TM_STEP"], table["TM_STEP"])
+
+
 def _write_serial(path: Path) -> None:
     with exodusii.File(path, mode="w") as exo:
         exo.put_init("serial", 2, 4, 1, 1, 0, 0)
