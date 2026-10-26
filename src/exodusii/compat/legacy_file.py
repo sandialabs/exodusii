@@ -18,6 +18,7 @@ from exodusii.api.file import ExodusFile
 from exodusii.api.query import print_query
 from exodusii.api.query import query
 from exodusii.api.writer import ExodusWriter
+from exodusii.compat._time import legacy_time_index
 from exodusii.core.entities import Entity
 from exodusii.core.errors import ExodusInvalidModeError
 from exodusii.core.errors import ExodusWriteError
@@ -217,7 +218,7 @@ class ExodusIIFile:
         return self.reader.times()
 
     def get_time(self, time_step: int) -> float:
-        return float(self.get_times()[time_step - 1])
+        return float(self.get_times()[cast(int, legacy_time_index(time_step))])
 
     def get_time_step(self, target: float, pcttol: float = 1.0e-5) -> int:
         """Legacy API: return one-based nearest time-step index."""
@@ -243,7 +244,7 @@ class ExodusIIFile:
     def get_coords(self, time_step: int | None = None) -> npt.NDArray[np.float64]:
         if time_step is None:
             return self.reader.coordinates()
-        return self.reader.coordinates(time=time_step - 1, displaced=True)
+        return self.reader.coordinates(time=legacy_time_index(time_step), displaced=True)
 
     def get_displ_variable_names(self, default: Any = None) -> tuple[str, ...] | Any:
         names = self.reader.displacement_variable_names()
@@ -253,7 +254,7 @@ class ExodusIIFile:
         names = self.reader.displacement_variable_names()
         if not names:
             return default
-        return self.reader.displacements(time=time_step - 1)
+        return self.reader.displacements(time=legacy_time_index(time_step))
 
     def get_node_id_map(self) -> npt.NDArray[np.int64]:
         return self.reader.ids("node")
@@ -414,13 +415,15 @@ class ExodusIIFile:
         if values is None:
             return None
         array = np.asarray(values, dtype=np.float64)
-        return array if time_step is None else array[time_step - 1]
+        return array if time_step is None else array[cast(int, legacy_time_index(time_step))]
 
     def get_global_variable_values(self, var_name: str) -> npt.NDArray[np.float64]:
         return self.reader.values(var_name, on="global")
 
     def get_global_variable_value(self, var_name: str, time_step: int) -> float:
-        return float(self.get_global_variable_values(var_name)[time_step - 1])
+        return float(
+            self.get_global_variable_values(var_name)[cast(int, legacy_time_index(time_step))]
+        )
 
     def get_global_variable_iid(self, var_name: str) -> int:
         """Return the one-based index of *var_name* among the global variables."""
@@ -434,18 +437,13 @@ class ExodusIIFile:
     def get_node_variable_values(
         self, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
-        return self.reader.values(
-            var_name, on="node", time=None if time_step is None else time_step - 1
-        )
+        return self.reader.values(var_name, on="node", time=legacy_time_index(time_step))
 
     def get_element_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self.reader.values(
-            var_name,
-            on="element",
-            block=block_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on="element", block=block_id, time=legacy_time_index(time_step)
         )
 
     def get_element_variable_values_across_blocks(
@@ -847,7 +845,11 @@ class ExodusIIFile:
 
         if type == "g":
             values = self.get_global_variable_values(name)
-            return values if time_step is None else np.asarray(values[time_step - 1])
+            return (
+                values
+                if time_step is None
+                else np.asarray(values[cast(int, legacy_time_index(time_step))])
+            )
         if type == "n":
             return self.get_node_variable_values(name, time_step=time_step)
         if type == "e":
@@ -1586,7 +1588,7 @@ class ExodusIIFile:
     def _legacy_variable_values(
         self, on: Entity, id_value: int | None, name: str, time_step: int | None
     ) -> npt.NDArray[np.float64]:
-        time = None if time_step is None else time_step - 1
+        time = legacy_time_index(time_step)
 
         if on in {Entity.ELEMENT, Entity.EDGE, Entity.FACE}:
             return self.reader.values(name, on=on, block_id=id_value, time=time)

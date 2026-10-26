@@ -7,12 +7,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
 
 from exodusii.api.file import ExodusFile
 from exodusii.api.parallel import ParallelExodusFile
+from exodusii.compat._time import legacy_time_index
 from exodusii.core.entities import Entity
 from exodusii.core.errors import ExodusLookupError
 from exodusii.core.names import VariableName
@@ -171,7 +173,7 @@ class ParallelExodusIIFile:
         return self._parallel.times()
 
     def get_time(self, time_step: int) -> float:
-        return float(self._parallel.times()[time_step - 1])
+        return float(self._parallel.times()[cast(int, legacy_time_index(time_step))])
 
     def get_time_step(self, target: float, pcttol: float = 1.0e-5) -> int:
         times = np.asarray(self._parallel.times(), dtype=np.float64)
@@ -198,7 +200,7 @@ class ParallelExodusIIFile:
 
     def get_coords(self, time_step: int | None = None) -> npt.NDArray[np.float64]:
         return self._parallel.coordinates(
-            time=None if time_step is None else time_step - 1, displaced=time_step is not None
+            time=legacy_time_index(time_step), displaced=time_step is not None
         )
 
     def get_displ_variable_names(self, default: Any = None):
@@ -209,7 +211,7 @@ class ParallelExodusIIFile:
         names = self._parallel.displacement_variable_names()
         if not names:
             return default
-        return self._parallel.displacements(time=time_step - 1)
+        return self._parallel.displacements(time=legacy_time_index(time_step))
 
     # ------------------------------------------------------------------
     # ID maps
@@ -540,93 +542,67 @@ class ParallelExodusIIFile:
     ) -> npt.NDArray[np.float64]:
         names = self._parallel.variable_names(Entity.GLOBAL)
         values = np.column_stack([self._parallel.values(name, on=Entity.GLOBAL) for name in names])
-        return values if time_step is None else values[time_step - 1]
+        return values if time_step is None else values[cast(int, legacy_time_index(time_step))]
 
     def get_node_variable_values(
         self, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
-        return self._parallel.values(
-            var_name, on=Entity.NODE, time=None if time_step is None else time_step - 1
-        )
+        return self._parallel.values(var_name, on=Entity.NODE, time=legacy_time_index(time_step))
 
     def get_element_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.ELEMENT,
-            block_id=block_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.ELEMENT, block_id=block_id, time=legacy_time_index(time_step)
         )
 
     def get_edge_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.EDGE,
-            block_id=block_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.EDGE, block_id=block_id, time=legacy_time_index(time_step)
         )
 
     def get_face_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.FACE,
-            block_id=block_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.FACE, block_id=block_id, time=legacy_time_index(time_step)
         )
 
     def get_node_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.NODE_SET,
-            set_id=set_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.NODE_SET, set_id=set_id, time=legacy_time_index(time_step)
         )
 
     def get_side_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.SIDE_SET,
-            set_id=set_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.SIDE_SET, set_id=set_id, time=legacy_time_index(time_step)
         )
 
     def get_edge_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.EDGE_SET,
-            set_id=set_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.EDGE_SET, set_id=set_id, time=legacy_time_index(time_step)
         )
 
     def get_face_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.FACE_SET,
-            set_id=set_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.FACE_SET, set_id=set_id, time=legacy_time_index(time_step)
         )
 
     def get_element_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name,
-            on=Entity.ELEMENT_SET,
-            set_id=set_id,
-            time=None if time_step is None else time_step - 1,
+            var_name, on=Entity.ELEMENT_SET, set_id=set_id, time=legacy_time_index(time_step)
         )
 
     def get_node_variable_history(self, var_name: str, node_id: int) -> npt.NDArray[np.float64]:
