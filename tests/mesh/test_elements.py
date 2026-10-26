@@ -84,6 +84,23 @@ def test_quad4_center_and_volume() -> None:
     assert element.volume == pytest.approx(1.0)
 
 
+def test_quad4_volume_diagonal_formula_bitwise() -> None:
+    # exodusii < 2 used half the diagonal cross product; keep its exact
+    # floating-point evaluation (shoelace differs in the last bits).
+    rng = np.random.default_rng(11)
+    for _ in range(100):
+        c = _unit_square_quad() + 0.2 * rng.standard_normal((4, 2)) + 1.0e3
+        x, y = c[:, 0], c[:, 1]
+        expected = abs(0.5 * ((x[0] - x[2]) * (y[1] - y[3]) + (x[1] - x[3]) * (y[2] - y[0])))
+        assert Quad4(c).volume == expected
+
+
+def test_quad4_volume_orientation_independent() -> None:
+    coord = _unit_square_quad() * 2.0
+
+    assert Quad4(coord).volume == Quad4(coord[::-1]).volume == pytest.approx(4.0)
+
+
 def test_quad4_volume_is_translation_invariant() -> None:
     coord = _unit_square_quad() + np.asarray([10.0, -3.0])
     element = Quad4(coord)

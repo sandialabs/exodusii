@@ -219,26 +219,24 @@ class Quad4:
 
     @property
     def volume(self) -> float:
-        """Element area computed with the shoelace formula.
+        """Element area of the quadrilateral in the XY-plane.
 
         Returns
         -------
         float
             Area of the quadrilateral in the XY-plane.  Always
             non-negative.
+
+        Notes
+        -----
+        Half the cross product of the diagonals, evaluated in the same
+        order as exodusii < 2 so results are bit-identical (verification
+        baselines compare volume-weighted norms at ~1e-11).
         """
 
         x = self.coord[:, 0]
         y = self.coord[:, 1]
-        return float(
-            0.5
-            * abs(
-                (x[0] * y[1] - x[1] * y[0])
-                + (x[1] * y[2] - x[2] * y[1])
-                + (x[2] * y[3] - x[3] * y[2])
-                + (x[3] * y[0] - x[0] * y[3])
-            )
-        )
+        return float(abs(0.5 * ((x[0] - x[2]) * (y[1] - y[3]) + (x[1] - x[3]) * (y[2] - y[0]))))
 
     def subdiv(self, intervals: int) -> FloatArray:
         """Return the centroid of each sub-quadrilateral.
