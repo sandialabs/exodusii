@@ -109,6 +109,53 @@ def test_exoread_rejects_bad_args(tmp_path: Path) -> None:
         main(["-g", "TM_STEP", "-n", "TEMP", str(path)])
 
 
+def _write_cycle_file(path: Path) -> None:
+    with ExodusWriter.create(path) as writer:
+        writer.initialize("cyc", 2, 4, 1, element_blocks=1)
+        writer.write_coordinates(_unit_square_quad())
+        writer.define_element_block(10, "quad", [[1, 2, 3, 4]])
+        writer.define_global_variables(["NSTEPS"])
+        writer.define_node_variables(["TEMP"])
+        for step, cycle in enumerate((0, 50, 100)):
+            writer.write_time(0.5 * step)
+            writer.write_global_values([float(cycle)])
+            writer.write_node_values("TEMP", np.full(4, float(step)))
+
+
+def test_exoread_cycle_option(tmp_path: Path) -> None:
+    # nevada's exoread wrapper forwards cycle= as -c (exodusii < 2 option).
+    path = tmp_path / "cyc.exo"
+    _write_cycle_file(path)
+    stream = StringIO()
+
+    status = main(["-n", "TEMP", "-c", "50", "--nolabels", str(path)], file=stream)
+
+    assert status == 0
+    assert np.allclose(np.loadtxt(StringIO(stream.getvalue())), 1.0)
+
+
+def test_exoread_cycle_not_found(tmp_path: Path) -> None:
+    path = tmp_path / "cyc.exo"
+    _write_cycle_file(path)
+
+    with pytest.raises(ValueError, match="Cycle 7 not found"):
+        main(["-g", "NSTEPS", "-c", "7", str(path)], file=StringIO())
+
+
+def test_legacy_get_cycle(tmp_path: Path) -> None:
+    import exodusii
+
+    path = tmp_path / "cyc.exo"
+    _write_cycle_file(path)
+    exo = exodusii.File(path)
+
+    data = exo.get("n/TEMP", cycle=100)
+
+    assert np.allclose(data["n/TEMP"], 2.0)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        exo.get("n/TEMP", cycle=100, index=1)
+
+
 def _write_cli_file(path: Path) -> None:
     with ExodusWriter.create(path) as writer:
         writer.initialize("cli", 2, 4, 1, element_blocks=1)

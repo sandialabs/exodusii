@@ -84,6 +84,12 @@ class Read(Command):
             type=int,
             help="Output the variable at this zero-based time index. -1 means last.",
         )
+        time.add_argument(
+            "-c",
+            "--cycle",
+            type=int,
+            help="Output the variable at this cycle number (global CYCLE/NSTEPS variable).",
+        )
 
         parser.add_argument(
             "--object-index",
@@ -133,7 +139,7 @@ class Read(Command):
                 print_query(
                     exo,
                     *variables,
-                    time=_selected_time(args),
+                    time=_selected_time(args, exo),
                     lineout=args.lineout,
                     object_index=args.object_index,
                     labels=not args.nolabels,
@@ -159,7 +165,11 @@ def _open_database(pattern: str) -> Any:
     return ParallelExodusFile.open(*files)
 
 
-def _selected_time(args: argparse.Namespace) -> Any:
+def _selected_time(args: argparse.Namespace, exo: Any = None) -> Any:
+    if getattr(args, "cycle", None) is not None:
+        from exodusii.compat._time import cycle_time_index
+
+        return cycle_time_index(exo, args.cycle)
     if args.time is not None:
         return args.time
     if args.index is not None:

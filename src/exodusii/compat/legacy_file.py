@@ -17,6 +17,7 @@ from exodusii.api.file import ExodusFile
 from exodusii.api.query import print_query
 from exodusii.api.query import query
 from exodusii.api.writer import ExodusWriter
+from exodusii.compat._time import cycle_time_index
 from exodusii.compat._time import legacy_time_index
 from exodusii.core.entities import Entity
 from exodusii.core.errors import ExodusInvalidModeError
@@ -944,10 +945,7 @@ class ExodusIIFile:
     ):
         """Legacy API: return structured query table."""
 
-        if cycle is not None:
-            raise NotImplementedError("cycle selection is not implemented in the refreshed adapter")
-
-        selector_time = index if index is not None else time
+        selector_time = _legacy_selector(self.reader, time=time, index=index, cycle=cycle)
         data = query(self.reader, *variables, time=selector_time, lineout=lineout).data
         return self._add_legacy_query_aliases(data, variables)
 
@@ -1556,10 +1554,7 @@ class ExodusIIFile:
     ) -> None:
         """Legacy API: print structured query table."""
 
-        if cycle is not None:
-            raise NotImplementedError("cycle selection is not implemented in the refreshed adapter")
-
-        selector_time = index if index is not None else time
+        selector_time = _legacy_selector(self.reader, time=time, index=index, cycle=cycle)
         print_query(
             self.reader, *variables, time=selector_time, lineout=lineout, labels=labels, file=file
         )
@@ -1600,6 +1595,17 @@ class ExodusIIFile:
             return self.reader.values(name, on=on, set_id=id_value, time=time)
 
         return self.reader.values(name, on=on, time=time)
+
+
+def _legacy_selector(reader: Any, *, time: Any, index: Any, cycle: Any) -> Any:
+    """Combine legacy ``time``/``index``/``cycle`` into a query time selector."""
+
+    given = [value for value in (time, index, cycle) if value is not None]
+    if len(given) > 1:
+        raise ValueError("time, cycle, and index are mutually exclusive")
+    if cycle is not None:
+        return cycle_time_index(reader, int(cycle))
+    return index if index is not None else time
 
 
 def File(filename: str | Path, *files: str | Path, mode: str = "r"):
