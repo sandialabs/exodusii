@@ -38,6 +38,7 @@ from exodusii.core.selectors import VariableSelector
 from exodusii.core.selectors import is_special_selector
 from exodusii.core.selectors import parse_variable_selector
 from exodusii.core.selectors import parse_variable_selectors
+from exodusii.core.streams import output_stream
 from exodusii.core.time import TimeSelector
 from exodusii.core.time import resolve_time
 from exodusii.mesh.geometry import connected_average
@@ -246,13 +247,13 @@ def print_query(
     labels : bool, optional
         If ``True`` (default), print a header row of right-aligned column
         names before the data rows.
-    file : TextIO or None, optional
-        Output stream.  Defaults to ``sys.stdout``.
+    file : TextIO, str, path-like, or None, optional
+        Output stream, or a path to write to.  Defaults to ``sys.stdout``.
 
     Notes
     -----
-    Each numeric value is formatted as a 20-character field using the
-    ``%20.16e`` format (16 significant digits, scientific notation).
+    Each numeric value is formatted with ``% 20.16e`` (sign-aligned, 16
+    significant digits, scientific notation), matching exodusii < 2.
     Column headers are right-aligned in 23-character fields to accommodate
     the wider data columns.
 
@@ -263,17 +264,16 @@ def print_query(
      0.0000000000000000e+00  1.0000000000000000e+00  ...
     """
 
-    import sys
-
     result = query(exo, *variables, time=time, lineout=lineout, object_index=object_index)
-    stream = file or sys.stdout
 
     names = result.names
-    if labels:
-        stream.write(" " + " ".join(f"{name:>23s}" for name in names) + "\n")
+    with output_stream(file) as stream:
+        if labels:
+            stream.write(" " + " ".join(f"{name:>23s}" for name in names) + "\n")
 
-    for row in result.data:
-        stream.write(" " + " ".join(f"{float(row[name]):20.16e}" for name in names) + "\n")
+        for row in result.data:
+            # Sign-aligned (" 20.16e") like exodusii < 2.
+            stream.write(" " + " ".join(f"{float(row[name]): 20.16e}" for name in names) + "\n")
 
 
 def _query_global(

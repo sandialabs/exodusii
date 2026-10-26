@@ -18,6 +18,7 @@ from exodusii.api.file import ExodusFile
 from exodusii.api.lineout import Lineout
 from exodusii.api.query import print_query
 from exodusii.cli._command import Command
+from exodusii.core.streams import output_stream
 
 __all__ = ["Read"]
 
@@ -148,9 +149,14 @@ def _selected_time(args: argparse.Namespace) -> Any:
     return None
 
 
-def describe(exo: ExodusFile, file: TextIO | None = None) -> None:
-    """Write a compact database description (public alias for backward compatibility)."""
-    _describe(exo, file=file)
+def describe(exo: ExodusFile, file: Any = None) -> None:
+    """Write a compact database description (public alias for backward compatibility).
+
+    ``file`` may be a stream, a path (opened for writing), or ``None`` for
+    ``sys.stdout``.
+    """
+    with output_stream(file) as stream:
+        _describe(exo, file=stream)
 
 
 def _describe(exo: ExodusFile, file: TextIO | None = None) -> None:

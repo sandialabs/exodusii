@@ -295,6 +295,58 @@ def test_print_query(tmp_path: Path) -> None:
     assert "1.0000000000000000e+00" in text
 
 
+def test_print_query_legacy_number_format(tmp_path: Path) -> None:
+    # exodusii < 2 used f"{value: 20.16e}" (space for sign).
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    stream = StringIO()
+
+    with ExodusFile.open(path) as exo:
+        print_query(exo, "g/TM_STEP", time="last", labels=False, file=stream)
+
+    assert stream.getvalue() == f" {1.0: 20.16e} {1.0: 20.16e}\n"
+    assert stream.getvalue() == "  1.0000000000000000e+00  1.0000000000000000e+00\n"
+
+
+def test_print_query_accepts_path(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    out = tmp_path / "table.txt"
+
+    with ExodusFile.open(path) as exo:
+        print_query(exo, "n/coordinates", "n/TEMP", time="last", labels=False, file=str(out))
+        print_query(exo, "n/TEMP", time="last", file=out.with_suffix(".lab"))
+
+    table = np.loadtxt(out)
+    assert table.shape == (4, 3)
+    assert np.allclose(table[:, 2], [11.0, 21.0, 31.0, 41.0])
+    assert out.with_suffix(".lab").read_text().splitlines()[0].split() == ["TEMP"]
+
+
+def test_legacy_print_and_describe_accept_filename(tmp_path: Path) -> None:
+    # alegra training tests call exodusii_file(...).print(..., file="name.txt").
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    exo = exodusii.exodusii_file(path, "r")
+
+    exo.print("e/coordinates", "e/ENERGY", labels=False, index=-1, file=str(tmp_path / "e.txt"))
+    exo.describe(file=str(tmp_path / "d.txt"))
+
+    assert np.allclose(np.loadtxt(tmp_path / "e.txt"), [0.5, 0.5, 1.5])
+    assert "Title: query" in (tmp_path / "d.txt").read_text()
+
+
+def test_legacy_print_leaves_stream_open(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    stream = StringIO()
+
+    exodusii.exodusii_file(path, "r").print("g/TM_STEP", file=stream)
+    stream.write("still open")
+
+    assert stream.getvalue().endswith("still open")
+
+
 def test_top_level_query_exports() -> None:
     assert exodusii.query is query
     assert exodusii.print_query is print_query

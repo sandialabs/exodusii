@@ -4,7 +4,6 @@
 
 """Legacy ExodusIIFile-compatible facade."""
 
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -1561,9 +1560,8 @@ class ExodusIIFile:
             raise NotImplementedError("cycle selection is not implemented in the refreshed adapter")
 
         selector_time = index if index is not None else time
-        stream = file or sys.stdout
         print_query(
-            self.reader, *variables, time=selector_time, lineout=lineout, labels=labels, file=stream
+            self.reader, *variables, time=selector_time, lineout=lineout, labels=labels, file=file
         )
 
     def describe(self, file: Any = None) -> None:
@@ -1571,8 +1569,7 @@ class ExodusIIFile:
 
         from exodusii.cli.exoread import describe
 
-        stream = file or sys.stdout
-        describe(self.reader, file=stream)
+        describe(self.reader, file=file)
 
     def _legacy_variable_names(self, on: Entity) -> npt.NDArray[np.str_]:
         return np.asarray(self.reader.variable_names(on))
