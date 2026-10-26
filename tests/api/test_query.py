@@ -162,6 +162,44 @@ def test_legacy_get_lineout_adds_coordinates(tmp_path: Path) -> None:
     assert np.allclose(data["n/TEMP"], [11.0, 21.0])
 
 
+@pytest.mark.parametrize(
+    ("selector", "stored"),
+    [("g/tm_step", "TM_STEP"), ("n/temp", "TEMP"), ("n/Temp", "TEMP"), ("e/energy", "ENERGY")],
+)
+def test_query_labels_use_stored_name(tmp_path: Path, selector: str, stored: str) -> None:
+    # exodusii < 2 labelled columns with the name stored in the file, not the
+    # requested spelling; downstream callers key dictionaries on the labels.
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, selector, time="last")
+
+    assert result.names[-1] == stored
+    assert np.isfinite(result.data[stored]).all()
+
+
+def test_print_query_labels_use_stored_name(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    stream = StringIO()
+
+    with ExodusFile.open(path) as exo:
+        print_query(exo, "n/coordinates", "n/temp", time="last", file=stream)
+
+    assert stream.getvalue().splitlines()[0].split() == ["COORDX", "COORDY", "TEMP"]
+
+
+def test_legacy_get_lowercase_request_keeps_alias(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    data = exodusii.File(path).get("n/temp", index=-1)
+
+    assert data.dtype.names == ("TEMP",)
+    assert np.allclose(data["n/temp"], data["TEMP"])
+
+
 def test_query_element_single_time(tmp_path: Path) -> None:
     path = tmp_path / "query.exo"
     _write_query_file(path)

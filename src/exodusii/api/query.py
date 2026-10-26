@@ -287,7 +287,7 @@ def _query_global(
         columns: list[npt.NDArray[np.float64]] = [times]
         for selector in selectors:
             columns.append(exo.values(selector.name, on=Entity.GLOBAL))
-            names.append(selector.name)
+            names.append(_stored_name(exo, Entity.GLOBAL, selector.name))
         dense = np.column_stack(columns)
     else:
         # Single time step: read only that step from each variable instead
@@ -297,7 +297,7 @@ def _query_global(
         for selector in selectors:
             value = exo.values(selector.name, on=Entity.GLOBAL, time=time)
             row.append(float(np.asarray(value)))
-            names.append(selector.name)
+            names.append(_stored_name(exo, Entity.GLOBAL, selector.name))
         dense = np.asarray([row], dtype=np.float64)
 
     return _structured(names, dense, metadata={"entity": Entity.GLOBAL.value})
@@ -332,7 +332,7 @@ def _query_node(
                     dtype=np.float64,
                 )
             )
-            names.append(selector.name)
+            names.append(_stored_name(exo, Entity.NODE, selector.name))
 
     dense = np.column_stack(columns) if columns else np.empty((exo.node_count, 0), dtype=np.float64)
     return _structured(
@@ -390,12 +390,31 @@ def _query_element(
                     dtype=np.float64,
                 )
             )
-            names.append(selector.name)
+            names.append(_stored_name(exo, Entity.ELEMENT, selector.name))
 
     dense = np.column_stack(columns) if columns else np.empty((element_count, 0), dtype=np.float64)
     return _structured(
         names, dense, metadata={"entity": Entity.ELEMENT.value, "time": selection.value}
     )
+
+
+def _stored_name(exo: ExodusFile, on: Entity, requested: str) -> str:
+    """Return the variable name as stored in the file for ``requested``.
+
+    Variable lookup is case-insensitive (exact match preferred), and
+    exodusii < 2 labelled output columns with the stored spelling, so
+    ``n/vvol`` yields a ``VVOL`` column.  Downstream callers key result
+    dictionaries on those labels.
+    """
+
+    names = exo.variable_names(on)
+    if requested in names:
+        return requested
+    lowered = requested.lower()
+    for name in names:
+        if name.lower() == lowered:
+            return name
+    return requested
 
 
 def _with_lineout_spatial_selectors(
