@@ -65,7 +65,24 @@ def connected_average(conn: npt.ArrayLike, values: npt.ArrayLike) -> FloatArray:
     if connectivity.size and connectivity.min() < 0:
         raise IndexError("connectivity contains negative indices")
 
-    return np.asarray(nodal_values[connectivity].mean(axis=1), dtype=np.float64)
+    return _sum_over_nodes(nodal_values[connectivity]) / connectivity.shape[1]
+
+
+def _sum_over_nodes(gathered: FloatArray) -> FloatArray:
+    """Sum ``gathered[e, node, ...]`` over ``node`` like exodusii < 2.
+
+    exodusii < 2 computed ``values[ix, dim].sum() / n`` per entity and
+    component, i.e. numpy's contiguous (pairwise) reduction over the node
+    axis.  ``mean(axis=1)`` reduces a strided axis in a different order and
+    can differ in the last bit, which breaks callers that use element
+    centers as exact dictionary keys.  Moving the node axis last and
+    making it contiguous reproduces the legacy results bit for bit.
+    """
+
+    if gathered.ndim == 2:
+        return np.asarray(np.ascontiguousarray(gathered).sum(axis=-1), dtype=np.float64)
+    moved = np.ascontiguousarray(np.moveaxis(gathered, 1, -1))
+    return np.asarray(moved.sum(axis=-1), dtype=np.float64)
 
 
 def entity_centers(conn: npt.ArrayLike, coords: npt.ArrayLike) -> FloatArray:

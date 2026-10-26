@@ -33,6 +33,38 @@ def test_connected_average_vector_values() -> None:
     assert np.allclose(result, [[1.0, 2.0], [3.0, 6.0]])
 
 
+def _legacy_connected_average(conn: np.ndarray, values: np.ndarray) -> np.ndarray:
+    # exodusii < 2 util.compute_connected_average, verbatim algorithm.
+    out = np.zeros((len(conn), values.shape[1]))
+    for e, ix in enumerate(conn):
+        for dim in range(values.shape[1]):
+            out[e, dim] = values[ix, dim].sum() / conn.shape[1]
+    return out
+
+
+@pytest.mark.parametrize("nodes_per_entity", [2, 3, 4, 8, 27])
+def test_connected_average_bitwise_matches_legacy(nodes_per_entity: int) -> None:
+    # Element centers are used as exact dictionary keys downstream (alegra
+    # xmhd_vrod); mean(axis=1) differs from the legacy sum()/n in the last bit.
+    rng = np.random.default_rng(nodes_per_entity)
+    coords = rng.uniform(-1.0e-4, 1.0e-4, size=(500, 3))
+    conn = rng.integers(0, 500, size=(300, nodes_per_entity))
+
+    assert np.array_equal(connected_average(conn, coords), _legacy_connected_average(conn, coords))
+    assert np.array_equal(
+        connected_average(conn, coords[:, 0]),
+        np.asarray([coords[ix, 0].sum() / nodes_per_entity for ix in conn]),
+    )
+
+
+def test_connected_average_legacy_known_value() -> None:
+    # Values where mean(axis=1) and the legacy contiguous sum disagree.
+    values = np.asarray([[0.1], [0.2], [0.3], [0.4], [0.5], [0.6], [0.7], [1.0e-17]], dtype=float)
+    conn = np.arange(8).reshape(1, 8)
+
+    assert connected_average(conn, values)[0, 0] == values[:, 0].sum() / 8
+
+
 def test_connected_average_rejects_bad_connectivity_rank() -> None:
     with pytest.raises(ValueError, match="connectivity must be a two-dimensional array"):
         connected_average([0, 1, 2], [1.0, 2.0, 3.0])
