@@ -53,6 +53,15 @@ def test_lookup_error_hierarchy() -> None:
     assert issubclass(ExodusVariableError, ExodusLookupError)
 
 
+@pytest.mark.parametrize("cls", [ExodusLookupError, ExodusDimensionError, ExodusVariableError])
+def test_lookup_errors_are_value_errors(cls: type[Exception]) -> None:
+    # exodusii < 2 raised ValueError for missing variables; legacy callers
+    # (vvtk grind_graphs) rely on `except ValueError`.
+    assert issubclass(cls, ValueError)
+    with pytest.raises(ValueError):
+        raise cls("missing")
+
+
 def test_value_error_hierarchy() -> None:
     assert issubclass(ExodusInvalidEntityError, ValueError)
     assert issubclass(ExodusInvalidModeError, ValueError)

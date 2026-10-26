@@ -65,3 +65,14 @@ def test_positive_time_step_unchanged(tmp_path: Path) -> None:
     assert np.array_equal(exo.get_node_variable_values("T", 2), np.ones(4))
     assert exo.get_time(3) == 2.0
     assert exo.get_node_variable_values("T").shape == (3, 4)
+
+
+def test_legacy_get_missing_variable_is_value_error(tmp_path: Path) -> None:
+    # vvtk grind_graphs skips absent variables via `except ValueError`.
+    from exodusii.api.lineout import Lineout
+
+    path = tmp_path / "ts.exo"
+    _write_three_steps(path)
+
+    with pytest.raises(ValueError, match="not found"):
+        exodusii.File(path).get("e/MISSING", time=1.0, lineout=Lineout(x="X", y=0.5, tol=1.0))

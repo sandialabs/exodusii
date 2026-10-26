@@ -26,8 +26,13 @@ class ExodusWriteError(ExodusIOError):
     """Raised when an Exodus database cannot be written."""
 
 
-class ExodusLookupError(ExodusError, LookupError):
-    """Raised when an Exodus entity, variable, dimension, or ID is not found."""
+class ExodusLookupError(ExodusError, LookupError, ValueError):
+    """Raised when an Exodus entity, variable, dimension, or ID is not found.
+
+    Also a :class:`ValueError`: exodusii < 2 raised ``ValueError`` for
+    missing variables/IDs, and downstream code (e.g. vvtk ``grind_graphs``)
+    still catches ``ValueError`` to skip absent variables.
+    """
 
 
 class ExodusDimensionError(ExodusLookupError):
