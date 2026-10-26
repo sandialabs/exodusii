@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "exodusii"
-version = "26.10.25"
+version = "26.10.26"
 description = "A modern pure-Python interface for Sandia Exodus II finite element databases."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -52,6 +52,8 @@ dev = [
 
 [project.scripts]
 exoread = "exodusii.cli.exoread:main"
+# Legacy name installed by exodusii < 2; still invoked by downstream test scripts.
+"exoread.py" = "exodusii.cli.exoread:main"
 
 
 [project.urls]

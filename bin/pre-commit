@@ -49,7 +49,7 @@ ruff format src tests
 ruff check --fix src tests
 mypy src
 pytest tests
-bandit -c pytproject.toml src
+bandit -q -c pyproject.toml -r src
 
 # Include the version bump in the commit automatically.
 git add pyproject.toml
