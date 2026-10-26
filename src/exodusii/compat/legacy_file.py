@@ -1603,15 +1603,27 @@ class ExodusIIFile:
 
 
 def File(filename: str | Path, *files: str | Path, mode: str = "r"):
-    """Open an Exodus database using the legacy factory name."""
+    """Open an Exodus database using the legacy factory name.
 
-    if files:
-        if mode != "r":
-            raise ExodusInvalidModeError("parallel Exodus files can only be opened in read mode")
+    In read mode each argument may be a glob pattern (as in exodusii < 2);
+    more than one resulting file opens a decomposed parallel database.
+    """
+
+    if mode == "r":
+        from exodusii.core.files import expand_files
+
+        if not files and Path(filename).exists():
+            return ExodusIIFile(filename, mode="r")
+
+        names = expand_files(filename, *files)
+        if len(names) == 1:
+            return ExodusIIFile(names[0], mode="r")
         from exodusii.compat.legacy_parallel import ParallelExodusIIFile
 
-        return ParallelExodusIIFile(filename, *files)
+        return ParallelExodusIIFile(*names)
 
+    if files:
+        raise ExodusInvalidModeError("parallel Exodus files can only be opened in read mode")
     return ExodusIIFile(filename, mode=mode)
 
 

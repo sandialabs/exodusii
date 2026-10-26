@@ -18,6 +18,7 @@ from exodusii.api.file import ExodusFile
 from exodusii.api.lineout import Lineout
 from exodusii.api.query import print_query
 from exodusii.cli._command import Command
+from exodusii.core.files import expand_files
 from exodusii.core.streams import output_stream
 
 __all__ = ["Read"]
@@ -99,7 +100,9 @@ class Read(Command):
         parser.add_argument(
             "-L", "--lineout", type=Lineout.from_cli, help="Restrict spatial output to a lineout."
         )
-        parser.add_argument("file", help="The ExodusII database file.")
+        parser.add_argument(
+            "file", help="The ExodusII database file (glob patterns open a parallel set)."
+        )
 
     def execute(
         self,
@@ -125,7 +128,7 @@ class Read(Command):
                 if val:
                     variables.extend(f"{prefix}/{v}" for v in val)
 
-        with ExodusFile.open(args.file) as exo:
+        with _open_database(args.file) as exo:
             if variables:
                 print_query(
                     exo,
@@ -139,6 +142,21 @@ class Read(Command):
             else:
                 _describe(exo, file=file)
         return 0
+
+
+def _open_database(pattern: str) -> Any:
+    """Open ``pattern`` as one file or, if it expands to several, a parallel set.
+
+    exodusii < 2 globbed the file argument (``exoread 'run.exo.*'``) and
+    opened multiple matches as a decomposed parallel database.
+    """
+
+    files = expand_files(pattern)
+    if len(files) == 1:
+        return ExodusFile.open(files[0])
+    from exodusii.api.parallel import ParallelExodusFile
+
+    return ParallelExodusFile.open(*files)
 
 
 def _selected_time(args: argparse.Namespace) -> Any:

@@ -933,12 +933,17 @@ class ParallelExodusFile:
         array([1, 2, 3], dtype=int64)
         """
 
+        ids = [file.element_block_ids() for file in self._files if file.element_block_count]
+        local = _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
+
         global_ids = self._global_variable(VariableName.ELEMENT_BLOCK_IDS_GLOBAL.value)
-        if global_ids is not None:
+        if global_ids is not None and _plausible_global_ids(global_ids, local):
             return global_ids
 
-        ids = [file.element_block_ids() for file in self._files if file.element_block_count]
-        return _unique_sorted(np.concatenate(ids)) if ids else np.asarray([], dtype=np.int64)
+        # Some writers (e.g. alegra per-rank files) allocate el_blk_ids_global
+        # without filling it (all zeros).  exodusii < 2 used each file's
+        # eb_prop1, so fall back to the component-file block IDs.
+        return local
 
     def node_set_ids(self) -> npt.NDArray[np.int64]:
         """Return unique node set IDs across all component files.
@@ -2570,6 +2575,19 @@ def _contains(values: npt.ArrayLike, value: int) -> bool:
 
 def _unique_sorted(values: npt.ArrayLike) -> npt.NDArray[np.int64]:
     return np.asarray(sorted(set(np.asarray(values, dtype=np.int64).tolist())), dtype=np.int64)
+
+
+def _plausible_global_ids(global_ids: npt.ArrayLike, local_ids: npt.ArrayLike) -> bool:
+    """Return true if Nemesis global block IDs look written (not fill values).
+
+    Valid Exodus block IDs are positive and unique, and every block present
+    in a component file must appear among the global IDs.
+    """
+
+    ids = np.asarray(global_ids, dtype=np.int64)
+    if ids.size == 0 or np.any(ids <= 0) or len(set(ids.tolist())) != ids.size:
+        return False
+    return set(np.asarray(local_ids, dtype=np.int64).tolist()) <= set(ids.tolist())
 
 
 def _contiguous_gid_map(values: npt.ArrayLike) -> dict[int, int]:
