@@ -101,6 +101,9 @@ class ExodusWriter:
     def __init__(self, backend: NetCDF4Backend) -> None:
         self._backend = backend
         self._initialized = False
+        # NetCDF type for floating-point data; follows floating_point_word_size
+        # (SEACAS nc_flt_code: 4 -> NC_FLOAT, 8 -> NC_DOUBLE).
+        self._float_dtype = "f8"
         self._time_step = 0
 
         self._element_block_counter = 0
@@ -254,6 +257,9 @@ class ExodusWriter:
         floating_point_word_size : int, optional
             Word size in bytes for floating-point data stored in the file.
             Must be ``4`` (single) or ``8`` (double).  Default is ``8``.
+            Floating-point variables (times, coordinates, results,
+            attributes, distribution factors) are stored at this
+            precision.
 
         Raises
         ------
@@ -289,6 +295,9 @@ class ExodusWriter:
             raise ExodusWriteError("database is already initialized")
         if dimension not in {1, 2, 3}:
             raise ValueError("dimension must be 1, 2, or 3")
+        if floating_point_word_size not in {4, 8}:
+            raise ValueError("floating_point_word_size must be 4 or 8")
+        self._float_dtype = "f4" if floating_point_word_size == 4 else "f8"
 
         self._backend.set_attribute(AttributeName.TITLE.value, title)
         self._backend.set_attribute(AttributeName.API_VERSION.value, 5.03)
@@ -601,7 +610,9 @@ class ExodusWriter:
 
         if on is Entity.GLOBAL:
             self._backend.create_variable(
-                variable_value_name(on, 1), float, (DimensionName.TIME.value, spec.count_dimension)
+                variable_value_name(on, 1),
+                self._float_dtype,
+                (DimensionName.TIME.value, spec.count_dimension),
             )
             return
 
@@ -609,7 +620,7 @@ class ExodusWriter:
             for variable_index in range(1, len(names) + 1):
                 self._backend.create_variable(
                     variable_value_name(on, variable_index),
-                    float,
+                    self._float_dtype,
                     (DimensionName.TIME.value, DimensionName.NUM_NODES.value),
                 )
             return
@@ -643,7 +654,7 @@ class ExodusWriter:
                 if table[location_position, variable_index - 1]:
                     self._backend.create_variable(
                         variable_value_name(on, variable_index, location_index),
-                        float,
+                        self._float_dtype,
                         (DimensionName.TIME.value, count_dim),
                     )
 
@@ -716,7 +727,7 @@ class ExodusWriter:
             self._backend.create_dimension(attr_dim, attr_count)
         if not self._backend.has_variable(attr_var):
             self._backend.create_variable(
-                attr_var, float, (spec.object_count_dimension(block_index), attr_dim)
+                attr_var, self._float_dtype, (spec.object_count_dimension(block_index), attr_dim)
             )
 
         self._backend.write_variable(attr_var, array)
@@ -1329,7 +1340,7 @@ class ExodusWriter:
                 dist_dim = spec.dist_factor_count_dimension(set_index)
                 self._backend.create_dimension(dist_dim, len(factors))
                 self._backend.create_variable(
-                    spec.dist_factors_variable(set_index), float, (dist_dim,)
+                    spec.dist_factors_variable(set_index), self._float_dtype, (dist_dim,)
                 )
                 self._backend.write_variable(spec.dist_factors_variable(set_index), factors)
 
@@ -2207,7 +2218,9 @@ class ExodusWriter:
         self._backend.create_dimension(DimensionName.FOUR.value, 4)
 
     def _create_time_variable(self) -> None:
-        self._backend.create_variable(VariableName.TIME.value, float, (DimensionName.TIME.value,))
+        self._backend.create_variable(
+            VariableName.TIME.value, self._float_dtype, (DimensionName.TIME.value,)
+        )
 
     def _create_coordinate_variables(self, dimension: int) -> None:
         self._backend.create_variable(
@@ -2217,7 +2230,7 @@ class ExodusWriter:
         )
         for axis in range(dimension):
             self._backend.create_variable(
-                ExodusNames.coordinate(axis), float, (DimensionName.NUM_NODES.value,)
+                ExodusNames.coordinate(axis), self._float_dtype, (DimensionName.NUM_NODES.value,)
             )
 
     def _allocate_blocks(

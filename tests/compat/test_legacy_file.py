@@ -32,7 +32,8 @@ def test_legacy_file_write_and_read_mesh(tmp_path: Path) -> None:
         assert isinstance(exo, ExodusIIFile)
         assert exo.filename == path
         assert exo.title() == "legacy"
-        assert exo.storage_type() == "d"
+        # exodusii < 2 legacy writers always produced single precision.
+        assert exo.storage_type() == "f"
         assert exo.num_dimensions() == 2
         assert exo.num_nodes() == 4
         assert exo.num_elems() == 1

@@ -26,6 +26,10 @@ from exodusii.core.names import ExodusNames
 from exodusii.core.names import VariableName
 from exodusii.core.schema import variable_spec
 
+#: Floating-point word size used by the legacy ``put_init`` when the caller
+#: does not pass one (exodusii < 2 always wrote single precision).
+LEGACY_FLOAT_WORD_SIZE = 4
+
 
 class LegacyQueryArray(np.ndarray):
     """Structured array with legacy field-name aliases."""
@@ -957,6 +961,10 @@ class ExodusIIFile:
         num_side_sets: int,
         **kwargs: Any,
     ) -> None:
+        # exodusii < 2 always created single-precision files
+        # (floating_point_word_size=4).  Downstream baselines written through
+        # this API (e.g. vvtk vdiff norm files) depend on that rounding.
+        word_size = int(kwargs.get("floating_point_word_size") or LEGACY_FLOAT_WORD_SIZE)
         self.writer.initialize(
             title,
             num_dim,
@@ -972,6 +980,7 @@ class ExodusIIFile:
             face_blocks=int(kwargs.get("num_face_blk") or 0),
             face_sets=int(kwargs.get("num_face_sets") or kwargs.get("num_face_set") or 0),
             element_sets=int(kwargs.get("num_elem_sets") or kwargs.get("num_element_sets") or 0),
+            floating_point_word_size=word_size,
         )
 
     def put_coord(self, *coords: npt.ArrayLike) -> None:
