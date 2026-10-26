@@ -69,8 +69,12 @@ class ExodusIIFile:
 
     @property
     def reader(self) -> ExodusFile:
-        if self._reader is None:
+        if self.mode != "r":
             raise ExodusWriteError(f"{self.filename}: not readable")
+
+        if self._reader is None:
+            self._reader = ExodusFile.open(self.filename, mode="r")
+
         return self._reader
 
     @property
@@ -83,8 +87,8 @@ class ExodusIIFile:
     def fh(self) -> Any:
         """Raw netCDF4 dataset for legacy callers."""
 
-        if self._reader is not None:
-            backend = cast(Any, self._reader.backend)
+        if self.mode == "r":
+            backend = cast(Any, self.reader.backend)
             return backend.dataset
 
         return self.writer.backend.dataset
@@ -96,8 +100,9 @@ class ExodusIIFile:
         return [self.fh]
 
     def __contains__(self, name: str) -> bool:
-        if self._reader is not None:
-            return name in self._reader.variables()
+        if self.mode == "r":
+            return name in self.reader.variables()
+
         return name in self.writer.backend.variables()
 
     def __enter__(self) -> "ExodusIIFile":
@@ -109,8 +114,11 @@ class ExodusIIFile:
     def close(self) -> None:
         if self._reader is not None:
             self._reader.close()
+            self._reader = None
+
         if self._writer is not None:
             self._writer.close()
+            self._writer = None
 
     def title(self) -> str:
         return self.reader.title

@@ -81,6 +81,20 @@ def test_legacy_get_preserves_global_prefixed_field(tmp_path: Path) -> None:
     np.testing.assert_allclose(table["g/TM_STEP"], table["TM_STEP"])
 
 
+def test_legacy_read_file_reopens_after_close(tmp_path: Path) -> None:
+    path = tmp_path / "serial.exo"
+    _write_serial(path)
+
+    exo = exodusii.File(path)
+    exo.close()
+
+    # Legacy read-mode close was effectively a no-op. The compatibility
+    # layer should still allow later reads.
+    assert len(exo.get_element_block_ids()) > 0
+
+    exo.close()
+
+
 def _write_serial(path: Path) -> None:
     with exodusii.File(path, mode="w") as exo:
         exo.put_init("serial", 2, 4, 1, 1, 0, 0)
