@@ -73,3 +73,23 @@ def test_parallel_block_ids_ignore_unwritten_global_ids(tmp_path: Path, datadir:
 
     assert exo.get_element_block_ids().tolist() == [1, 2]
     assert np.asarray(exodusii.compute_element_centers(exo)).shape[0] == exo.num_elems()
+
+
+def test_parallel_legacy_get_print_describe(tmp_path: Path, datadir: Path) -> None:
+    # exodusii < 2 parallel_exodusii_file inherited get/print/describe.
+    root = _copy_noh(tmp_path, datadir)
+    par = exodusii.File(str(root / "noh.exo.3.*"))
+    ser = exodusii.File(str(root / "noh.exo"))
+    name = ser.get_element_variable_names()[0]
+
+    pdata = par.get(f"e/{name}", index=-1)
+    sdata = ser.get(f"e/{name}", index=-1)
+    assert np.allclose(np.sort(pdata[f"e/{name}"]), np.sort(sdata[f"e/{name}"]))
+
+    out = tmp_path / "par.txt"
+    par.print("g/" + ser.get_global_variable_names()[0], file=str(out))
+    assert out.read_text().splitlines()[0].split()[0] == "TIME"
+
+    stream = StringIO()
+    par.describe(file=stream)
+    assert f"Num elements: {ser.num_elems()}" in stream.getvalue()

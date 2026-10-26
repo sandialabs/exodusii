@@ -73,6 +73,94 @@ class ParallelExodusIIFile:
         return self._parallel.write(filename)
 
     # ------------------------------------------------------------------
+    # Legacy query/print/describe (exodusii < 2 parallel_exodusii_file
+    # inherited these from exodusii_file).
+
+    @property
+    def reader(self) -> ParallelExodusFile:
+        """Modern reader used by the shared legacy query helpers."""
+
+        return self._parallel
+
+    def get(
+        self,
+        *variables: str,
+        time: float | None = None,
+        index: int | None = None,
+        cycle: int | None = None,
+        lineout: Any = None,
+    ) -> Any:
+        """Legacy API: return structured query table."""
+
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile.get(
+            cast(Any, self), *variables, time=time, index=index, cycle=cycle, lineout=lineout
+        )
+
+    def print(
+        self,
+        *variables: str,
+        time: float | None = None,
+        index: int | None = None,
+        cycle: int | None = None,
+        file: Any = None,
+        labels: bool = True,
+        lineout: Any = None,
+    ) -> None:
+        """Legacy API: print structured query table."""
+
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        ExodusIIFile.print(
+            cast(Any, self),
+            *variables,
+            time=time,
+            index=index,
+            cycle=cycle,
+            file=file,
+            labels=labels,
+            lineout=lineout,
+        )
+
+    def describe(self, file: Any = None) -> None:
+        """Legacy API: write database description."""
+
+        from exodusii.cli.exoread import describe
+
+        describe(self._parallel, file=file)
+
+    def _add_legacy_query_aliases(self, data: Any, variables: tuple[str, ...]) -> Any:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._add_legacy_query_aliases(cast(Any, self), data, variables)
+
+    def _legacy_query_aliases(self, variables: tuple[str, ...]) -> dict[str, str]:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._legacy_query_aliases(cast(Any, self), variables)
+
+    def _legacy_query_target_name(self, prefix: str, requested_name: str) -> str:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._legacy_query_target_name(cast(Any, self), prefix, requested_name)
+
+    def _add_mapping_aliases(self, data: Any, aliases: dict[str, str]) -> Any:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._add_mapping_aliases(data, aliases)
+
+    def _add_column_aliases(self, data: Any, aliases: dict[str, str]) -> Any:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._add_column_aliases(data, aliases)
+
+    def _add_structured_array_aliases(self, data: Any, aliases: dict[str, str]) -> Any:
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile._add_structured_array_aliases(data, aliases)
+
+    # ------------------------------------------------------------------
     # Legacy method-style wrappers for property-style modern API
     # ------------------------------------------------------------------
 
