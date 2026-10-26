@@ -28,6 +28,62 @@ def test_exoread_describe(tmp_path: Path) -> None:
     assert "TEMP" in text
 
 
+def test_exoread_describe_legacy_layout(tmp_path: Path) -> None:
+    # Byte-for-byte the exodusii < 2 describe() layout; scripts parse it.
+    path = tmp_path / "cli.exo"
+    _write_cli_file(path)
+    stream = StringIO()
+
+    main([str(path)], file=stream)
+
+    lines = stream.getvalue().splitlines()
+    expected_prefix = [
+        "Title: cli",
+        "Storage type: d",
+        "Num info strings: 0",
+        "Dimension: 2",
+        "Num nodes   : 4",
+        "Num edges   : 0",
+        "Num faces   : 0",
+        "Num elements: 1",
+        "Elem blocks: 1 Ids = 10",
+        "Face blocks: 0",
+        "Edge blocks: 0",
+        "Node sets: 0",
+        "Side sets: 0",
+        "Edge sets: 0",
+        "Face sets: 0",
+        "Elem sets: 0",
+        "Global vars: 1",
+        "  0 TM_STEP",
+        "Elem vars: 0",
+        "Face vars: 0",
+        "Edge vars: 0",
+        "Node vars: 1",
+        "  0 TEMP",
+        "Node Set vars: 0",
+        "Side Set vars: 0",
+        "Edge Set vars: 0",
+        "Face Set vars: 0",
+        "Elem Set vars: 0",
+        "Time steps: 2",
+    ]
+    assert lines[: len(expected_prefix)] == expected_prefix
+    assert lines[len(expected_prefix) :] == ["  1 0.0", "  2 1.0"]
+
+
+def test_legacy_describe_to_filename(tmp_path: Path) -> None:
+    import exodusii
+
+    path = tmp_path / "cli.exo"
+    _write_cli_file(path)
+    out = tmp_path / "describe.txt"
+
+    exodusii.File(path).describe(file=str(out))
+
+    assert out.read_text().splitlines()[2] == "Num info strings: 0"
+
+
 def test_exoread_global_variable(tmp_path: Path) -> None:
     path = tmp_path / "cli.exo"
     _write_cli_file(path)

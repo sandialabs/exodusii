@@ -177,7 +177,7 @@ def _selected_time(args: argparse.Namespace, exo: Any = None) -> Any:
     return None
 
 
-def describe(exo: ExodusFile, file: Any = None) -> None:
+def describe(exo: Any, file: Any = None) -> None:
     """Write a compact database description (public alias for backward compatibility).
 
     ``file`` may be a stream, a path (opened for writing), or ``None`` for
@@ -187,38 +187,73 @@ def describe(exo: ExodusFile, file: Any = None) -> None:
         _describe(exo, file=stream)
 
 
-def _describe(exo: ExodusFile, file: TextIO | None = None) -> None:
-    """Write a compact database description."""
+def _describe(exo: Any, file: TextIO | None = None) -> None:
+    """Write a compact database description.
+
+    The layout matches exodusii < 2 ``describe()`` line for line, since
+    downstream scripts parse it (e.g. ``Num elements:``).
+    """
     stream = file or sys.stdout
     stream.write(f"Title: {exo.title}\n")
     stream.write(f"Storage type: {exo.storage_type}\n")
+    stream.write("Num info strings: 0\n")
     stream.write(f"Dimension: {exo.dimension}\n")
     stream.write(f"Num nodes   : {exo.node_count}\n")
     stream.write(f"Num edges   : {exo.edge_count}\n")
     stream.write(f"Num faces   : {exo.face_count}\n")
     stream.write(f"Num elements: {exo.element_count}\n")
-    stream.write(f"Element blocks: {exo.element_block_count}")
-    if exo.element_block_count:
-        stream.write(" Ids = " + " ".join(str(v) for v in exo.element_block_ids()))
-    stream.write("\n")
-    stream.write(f"Node sets: {exo.node_set_count}")
-    if exo.node_set_count:
-        stream.write(" Ids = " + " ".join(str(v) for v in exo.node_set_ids()))
-    stream.write("\n")
-    stream.write(f"Side sets: {exo.side_set_count}")
-    if exo.side_set_count:
-        stream.write(" Ids = " + " ".join(str(v) for v in exo.side_set_ids()))
-    stream.write("\n")
+
+    _write_ids(stream, "Elem blocks", _ids(exo, "element_block_ids"))
+    _write_ids(stream, "Face blocks", _ids(exo, "face_block_ids"))
+    _write_ids(stream, "Edge blocks", _ids(exo, "edge_block_ids"))
+    _write_ids(stream, "Node sets", _ids(exo, "node_set_ids"))
+    _write_ids(stream, "Side sets", _ids(exo, "side_set_ids"))
+    _write_ids(stream, "Edge sets", _ids(exo, "edge_set_ids"))
+    _write_ids(stream, "Face sets", _ids(exo, "face_set_ids"))
+    _write_ids(stream, "Elem sets", _ids(exo, "element_set_ids"))
+
     _write_variables(stream, "Global", exo.variable_names("global"))
+    _write_variables(stream, "Elem", exo.variable_names("element"))
+    _write_variables(stream, "Face", exo.variable_names("face"))
+    _write_variables(stream, "Edge", exo.variable_names("edge"))
     _write_variables(stream, "Node", exo.variable_names("node"))
-    _write_variables(stream, "Element", exo.variable_names("element"))
+    # exodusii < 2 listed the *set names* under the "<set> vars" headings.
+    _write_variables(stream, "Node Set", _set_names(exo, "node_set"))
+    _write_variables(stream, "Side Set", _set_names(exo, "side_set"))
+    _write_variables(stream, "Edge Set", _set_names(exo, "edge_set"))
+    _write_variables(stream, "Face Set", _set_names(exo, "face_set"))
+    _write_variables(stream, "Elem Set", _set_names(exo, "element_set"))
+
     times = exo.times()
     stream.write(f"Time steps: {len(times)}\n")
     for index, value in enumerate(times, start=1):
         stream.write(f"  {index} {value}\n")
 
 
-def _write_variables(stream: TextIO, label: str, names: tuple[str, ...]) -> None:
+def _ids(exo: Any, method: str) -> list[int]:
+    getter = getattr(exo, method, None)
+    if getter is None:
+        return []
+    return [int(value) for value in getter()]
+
+
+def _set_names(exo: Any, family: str) -> list[str]:
+    names = []
+    for set_id in _ids(exo, f"{family}_ids"):
+        info = getattr(exo, family)(set_id)
+        names.append(str(getattr(info, "name", "") or ""))
+    return names
+
+
+def _write_ids(stream: TextIO, label: str, ids: list[int]) -> None:
+    stream.write(f"{label}: {len(ids)}")
+    if ids:
+        stream.write(" Ids = " + " ".join(str(value) for value in ids))
+    stream.write("\n")
+
+
+def _write_variables(stream: TextIO, label: str, names: Any) -> None:
+    names = list(names)
     stream.write(f"{label} vars: {len(names)}\n")
     for index, name in enumerate(names):
         stream.write(f"  {index} {name}\n")
