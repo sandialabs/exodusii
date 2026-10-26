@@ -718,6 +718,10 @@ def _compare_coordinates(
         return
     if exo1.node_count != exo2.node_count:
         return
+    if exo1.node_count == 0:
+        # Globals-only databases (e.g. vvtk vdiff norm files) have no
+        # coordinate variables; SEACAS exodiff compares them without error.
+        return
     coords1 = exo1.coordinates()
     coords2 = exo2.coordinates()
     if coords1.shape != coords2.shape:

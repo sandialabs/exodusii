@@ -744,3 +744,29 @@ def test_legacy_time_step_offset_still_works(tmp_path: Path) -> None:
 
     opts = DiffOptions(time_step_offset=1)
     assert diff(a, b, opts).same
+
+
+def _write_globals_only(path: Path, value: float) -> None:
+    # Layout of vvtk vdiff norm files: num_dim=1, no nodes/elements.
+    with exodusii.exo_file(path, mode="w") as exo:
+        exo.put_init("norms", 1, 0, 0, 0, 0, 0)
+        exo.put_global_variable_params(2)
+        exo.put_global_variable_names(["h", "L1_X"])
+        exo.put_time(1, 1.0)
+        exo.put_global_variable_values(1, [0.1, value])
+
+
+def test_globals_only_files_compare_without_coordinates(tmp_path: Path) -> None:
+    one = tmp_path / "one.exo"
+    two = tmp_path / "two.exo"
+    three = tmp_path / "three.exo"
+    _write_globals_only(one, 1.0)
+    _write_globals_only(two, 1.0)
+    _write_globals_only(three, 2.0)
+
+    same = diff(one, two)
+    different = diff(one, three)
+
+    assert same.same and not same.errors
+    assert not different.same and not different.errors
+    assert {d.name for d in different.variable_diffs if d.exceeded} == {"L1_X"}
