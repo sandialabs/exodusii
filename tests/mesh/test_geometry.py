@@ -106,6 +106,19 @@ def test_element_volumes_hex() -> None:
     assert result[0] == pytest.approx(1.0)
 
 
+def test_element_volumes_hex_vectorised_path_matches_element() -> None:
+    from exodusii.mesh.elements import Hex8
+
+    rng = np.random.default_rng(3)
+    base = _unit_cube_hex()
+    coords = np.concatenate([base + 0.15 * rng.standard_normal(base.shape) for _ in range(5)])
+    conn = np.arange(40).reshape(5, 8)
+
+    for name in ("hex8", "HEX", b"hex8"):
+        result = element_volumes(name, conn, coords)
+        assert np.array_equal(result, [Hex8(coords[ix]).volume for ix in conn])
+
+
 def test_nodal_volumes_quad() -> None:
     conn = np.asarray([[0, 1, 2, 3]], dtype=int)
     coords = _unit_square_quad()

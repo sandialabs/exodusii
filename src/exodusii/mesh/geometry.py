@@ -31,6 +31,7 @@ import numpy as np
 import numpy.typing as npt
 
 from exodusii.mesh.elements import element_factory
+from exodusii.mesh.elements import hex8_volumes
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
@@ -149,11 +150,21 @@ def element_volumes(
     connectivity = _connectivity_array(conn)
     coordinate_array = _coordinate_array(coords)
 
+    if _is_hex8(element_type) and connectivity.size and coordinate_array.shape[1] >= 3:
+        # Vectorised fast path; bit-identical to Hex8(...).volume per element.
+        return np.abs(hex8_volumes(coordinate_array[connectivity]))
+
     volumes = np.empty(connectivity.shape[0], dtype=np.float64)
     for index, node_indices in enumerate(connectivity):
         volumes[index] = element_factory(element_type, coordinate_array[node_indices]).volume
 
     return volumes
+
+
+def _is_hex8(element_type: str | bytes) -> bool:
+    if isinstance(element_type, bytes):
+        element_type = element_type.decode("ascii")
+    return element_type.strip().lower() in {"hex", "hex8"}
 
 
 def nodal_volumes(

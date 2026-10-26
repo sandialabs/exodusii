@@ -402,9 +402,8 @@ class Hex8:
 
     Notes
     -----
-    Volume is computed by decomposing the hexahedron into five tetrahedra.
-    This is exact for affine hexahedra and robust for the sub-elements
-    produced by :meth:`subcoord`.
+    Volume is the exact closed-form volume of the trilinear map (see
+    :func:`hex8_volumes`), valid for non-planar faces.
 
     Subdivision via :meth:`subdiv` uses a trilinear map from the reference
     cube ``[0, 1]^3`` to physical space.
@@ -458,18 +457,22 @@ class Hex8:
 
     @property
     def volume(self) -> float:
-        """Element volume computed via five-tetrahedron decomposition.
+        """Element volume of the trilinear hexahedron.
 
         Returns
         -------
         float
             Volume of the hexahedron.  Always non-negative.
+
+        Notes
+        -----
+        Uses the closed-form (divergence theorem) volume of the trilinear
+        map, which is exact for non-planar ("twisted") faces.  The
+        expression and evaluation order match exodusii < 2 so results are
+        bit-identical.
         """
 
-        # Decompose the hex into five tetrahedra. This is exact for affine hexes
-        # and robust for the simple generated subelements used by this package.
-        tets = ((0, 1, 3, 4), (1, 2, 3, 6), (1, 3, 4, 6), (1, 4, 5, 6), (3, 4, 6, 7))
-        return float(sum(_tetrahedron_volume(self.coord[list(tet)]) for tet in tets))
+        return float(abs(hex8_volumes(self.coord[np.newaxis, :, :])[0]))
 
     def subdiv(self, intervals: int) -> FloatArray:
         """Return the centroid of each sub-hexahedron.
@@ -618,7 +621,7 @@ class Hex8:
 
         subcoord = self.subcoord(intervals)
         subconn = self.subconn(intervals)
-        return np.asarray([Hex8(subcoord[ix]).volume for ix in subconn], dtype=np.float64)
+        return np.abs(hex8_volumes(subcoord[subconn]))
 
 
 @dataclass(slots=True)
@@ -1278,6 +1281,104 @@ def _hex_trilinear(coord: FloatArray, xi: float, eta: float, zeta: float) -> Flo
     )
 
 
+def hex8_volumes(coords: npt.ArrayLike) -> FloatArray:
+    """Signed volumes of trilinear hexahedra.
+
+    Parameters
+    ----------
+    coords : array_like, shape (n, 8, dim>=3)
+        Nodal coordinates of ``n`` hexahedra in Exodus node order.
+
+    Returns
+    -------
+    ndarray of float64, shape (n,)
+        Signed volumes (positive for outward-oriented elements).
+
+    Notes
+    -----
+    Exact closed-form volume of the trilinear map (divergence theorem),
+    evaluated in the same order as exodusii < 2.  Vectorised over
+    elements; each element's result is bit-identical to the scalar
+    evaluation.
+    """
+
+    c = np.asarray(coords, dtype=np.float64)
+    x1, x2, x3, x4, x5, x6, x7, x8 = (c[:, i, 0] for i in range(8))
+    y1, y2, y3, y4, y5, y6, y7, y8 = (c[:, i, 1] for i in range(8))
+    z1, z2, z3, z4, z5, z6, z7, z8 = (c[:, i, 2] for i in range(8))
+
+    rx0 = (
+        y2 * ((z6 - z3) - (z4 - z5))
+        + y3 * (z2 - z4)
+        + y4 * ((z3 - z8) - (z5 - z2))
+        + y5 * ((z8 - z6) - (z2 - z4))
+        + y6 * (z5 - z2)
+        + y8 * (z4 - z5)
+    )
+    rx1 = (
+        y3 * ((z7 - z4) - (z1 - z6))
+        + y4 * (z3 - z1)
+        + y1 * ((z4 - z5) - (z6 - z3))
+        + y6 * ((z5 - z7) - (z3 - z1))
+        + y7 * (z6 - z3)
+        + y5 * (z1 - z6)
+    )
+    rx2 = (
+        y4 * ((z8 - z1) - (z2 - z7))
+        + y1 * (z4 - z2)
+        + y2 * ((z1 - z6) - (z7 - z4))
+        + y7 * ((z6 - z8) - (z4 - z2))
+        + y8 * (z7 - z4)
+        + y6 * (z2 - z7)
+    )
+    rx3 = (
+        y1 * ((z5 - z2) - (z3 - z8))
+        + y2 * (z1 - z3)
+        + y3 * ((z2 - z7) - (z8 - z1))
+        + y8 * ((z7 - z5) - (z1 - z3))
+        + y5 * (z8 - z1)
+        + y7 * (z3 - z8)
+    )
+    rx4 = (
+        y8 * ((z4 - z7) - (z6 - z1))
+        + y7 * (z8 - z6)
+        + y6 * ((z7 - z2) - (z1 - z8))
+        + y1 * ((z2 - z4) - (z8 - z6))
+        + y4 * (z1 - z8)
+        + y2 * (z6 - z1)
+    )
+    rx5 = (
+        y5 * ((z1 - z8) - (z7 - z2))
+        + y8 * (z5 - z7)
+        + y7 * ((z8 - z3) - (z2 - z5))
+        + y2 * ((z3 - z1) - (z5 - z7))
+        + y1 * (z2 - z5)
+        + y3 * (z7 - z2)
+    )
+    rx6 = (
+        y6 * ((z2 - z5) - (z8 - z3))
+        + y5 * (z6 - z8)
+        + y8 * ((z5 - z4) - (z3 - z6))
+        + y3 * ((z4 - z2) - (z6 - z8))
+        + y2 * (z3 - z6)
+        + y4 * (z8 - z3)
+    )
+    rx7 = (
+        y7 * ((z3 - z6) - (z5 - z4))
+        + y6 * (z7 - z5)
+        + y5 * ((z6 - z1) - (z4 - z7))
+        + y4 * ((z1 - z3) - (z7 - z5))
+        + y3 * (z4 - z7)
+        + y1 * (z5 - z4)
+    )
+
+    return np.asarray(
+        (x1 * rx0 + x2 * rx1 + x3 * rx2 + x4 * rx3 + x5 * rx4 + x6 * rx5 + x7 * rx6 + x8 * rx7)
+        / 12.0,
+        dtype=np.float64,
+    )
+
+
 def _tetrahedron_volume(coord: FloatArray) -> float:
     a = coord[0]
     b = coord[1]
@@ -1419,4 +1520,5 @@ __all__ = [
     "Tri3",
     "Wedge6",
     "element_factory",
+    "hex8_volumes",
 ]

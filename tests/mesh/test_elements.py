@@ -131,6 +131,79 @@ def test_hex8_subdivision() -> None:
     assert np.allclose(subvols, np.full(8, 0.125))
 
 
+def _twisted_hex() -> np.ndarray:
+    # Unit cube with the top face rotated about z: the side faces are
+    # non-planar, so a tetrahedral split is not exact.
+    coord = _unit_cube_hex()
+    theta = 0.6
+    c, s = np.cos(theta), np.sin(theta)
+    top = coord[4:, :2] - 0.5
+    coord[4:, :2] = top @ np.asarray([[c, s], [-s, c]]) + 0.5
+    return coord
+
+
+def _gauss_hex_volume(coord: np.ndarray) -> float:
+    # 2x2x2 Gauss quadrature of det(J) integrates the trilinear map exactly.
+    ref = np.asarray(
+        [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+         [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+        dtype=float,
+    )  # fmt: skip
+    g = 1.0 / np.sqrt(3.0)
+    total = 0.0
+    for a in (-g, g):
+        for b in (-g, g):
+            for c in (-g, g):
+                dn = (
+                    np.stack(
+                        [
+                            ref[:, 0] * (1 + ref[:, 1] * b) * (1 + ref[:, 2] * c),
+                            (1 + ref[:, 0] * a) * ref[:, 1] * (1 + ref[:, 2] * c),
+                            (1 + ref[:, 0] * a) * (1 + ref[:, 1] * b) * ref[:, 2],
+                        ],
+                        axis=1,
+                    )
+                    / 8.0
+                )
+                total += float(np.linalg.det(coord.T @ dn))
+    return total
+
+
+def test_hex8_volume_exact_for_nonplanar_faces() -> None:
+    coord = _twisted_hex()
+
+    assert Hex8(coord).volume == pytest.approx(_gauss_hex_volume(coord), rel=1e-14)
+
+
+def test_hex8_volume_random_distortions_match_quadrature() -> None:
+    rng = np.random.default_rng(1234)
+    for _ in range(50):
+        coord = _unit_cube_hex() + 0.2 * rng.standard_normal((8, 3))
+        assert Hex8(coord).volume == pytest.approx(abs(_gauss_hex_volume(coord)), rel=1e-12)
+
+
+def test_hex8_volume_matches_legacy_closed_form_bitwise() -> None:
+    # exodusii < 2 value for _twisted_hex(), computed with the original
+    # closed-form expression; downstream verification baselines depend on it.
+    from exodusii.mesh.elements import hex8_volumes
+
+    coord = _twisted_hex()
+    signed = hex8_volumes(coord[np.newaxis])[0]
+
+    assert Hex8(coord).volume == abs(signed)
+    assert Hex8(coord).subvols(3).sum() == pytest.approx(Hex8(coord).volume, rel=1e-14)
+
+
+def test_hex8_vectorised_volumes_match_scalar() -> None:
+    from exodusii.mesh.elements import hex8_volumes
+
+    rng = np.random.default_rng(7)
+    coords = _unit_cube_hex()[np.newaxis] + 0.2 * rng.standard_normal((20, 8, 3))
+    scalar = np.asarray([Hex8(c).volume for c in coords])
+
+    assert np.array_equal(np.abs(hex8_volumes(coords)), scalar)
+
+
 def test_tri3_center_and_volume() -> None:
     element = Tri3(_unit_right_triangle())
 
