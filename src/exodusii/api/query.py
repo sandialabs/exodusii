@@ -36,6 +36,7 @@ from exodusii.core.entities import entity
 from exodusii.core.errors import ExodusInvalidEntityError
 from exodusii.core.selectors import VariableSelector
 from exodusii.core.selectors import is_special_selector
+from exodusii.core.selectors import parse_variable_selector
 from exodusii.core.selectors import parse_variable_selectors
 from exodusii.core.time import TimeSelector
 from exodusii.core.time import resolve_time
@@ -142,7 +143,9 @@ def query(
     lineout : Lineout or None, optional
         When provided, the result array is filtered and sorted by
         :meth:`Lineout.apply` before being returned.  Useful for
-        extracting a 1-D profile along a coordinate axis.
+        extracting a 1-D profile along a coordinate axis.  For nodal and
+        element queries the required ``coordinates`` columns (preceded by
+        ``displacements`` for displaced lineouts) are added automatically.
     object_index : bool, optional
         If ``True``, prepend a 1-based integer ``index`` column to the
         result array.  Applies to nodal and element queries only.
@@ -193,6 +196,9 @@ def query(
     # is treated as nodal.
     real_selectors = [s for s in selectors if not is_special_selector(s)]
     location = entity(real_selectors[0].entity) if real_selectors else Entity.NODE
+
+    if lineout is not None and location is not Entity.GLOBAL:
+        selectors = _with_lineout_spatial_selectors(selectors, lineout)
 
     if location is Entity.GLOBAL:
         data = _query_global(exo, selectors, time=time)
@@ -390,6 +396,32 @@ def _query_element(
     return _structured(
         names, dense, metadata={"entity": Entity.ELEMENT.value, "time": selection.value}
     )
+
+
+def _with_lineout_spatial_selectors(
+    selectors: tuple[VariableSelector, ...], lineout: Lineout
+) -> tuple[VariableSelector, ...]:
+    """Ensure the spatial columns a lineout needs lead the selector list.
+
+    :meth:`Lineout.apply` locates the line by coordinate columns (and, for
+    displaced lineouts, displacement columns immediately before them).
+    exodusii < 2 inserted these automatically whenever a lineout was given
+    for a non-global query, so callers only had to name the variables they
+    wanted.  Explicitly requested ``coordinates``/``displacements`` are moved
+    to the front rather than duplicated.
+    """
+
+    names = ["coordinates"]
+    if lineout.needs_displacements:
+        names.insert(0, "displacements")
+
+    leading: list[VariableSelector] = []
+    for name in names:
+        explicit = [s for s in selectors if s.name.strip().lower() == name]
+        leading.append(explicit[0] if explicit else parse_variable_selector(name))
+
+    rest = [s for s in selectors if s.name.strip().lower() not in names]
+    return (*leading, *rest)
 
 
 def _append_components(

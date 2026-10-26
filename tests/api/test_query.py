@@ -95,6 +95,73 @@ def test_query_node_lineout(tmp_path: Path) -> None:
     assert np.allclose(result.data["TEMP"], [11.0, 21.0])
 
 
+def test_query_node_lineout_adds_coordinates(tmp_path: Path) -> None:
+    # exodusii < 2 added coordinate columns automatically for lineouts.
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "n/TEMP", time="last", lineout=Lineout(x="x", y=0.0, tol=1.0e-12))
+
+    assert result.names == ("COORDX", "TEMP")
+    assert np.allclose(result.data["COORDX"], [0.0, 1.0])
+    assert np.allclose(result.data["TEMP"], [11.0, 21.0])
+
+
+def test_query_node_displaced_lineout_adds_displacements(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "n/TEMP", time="last", lineout=Lineout(x="X", y=0.0, tol=1.0e-12))
+
+    assert result.names == ("LOCATIONX", "TEMP")
+    assert np.allclose(result.data["LOCATIONX"], [0.1, 1.1])
+    assert np.allclose(result.data["TEMP"], [11.0, 21.0])
+
+
+def test_query_lineout_explicit_coordinates_not_duplicated(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(
+            exo, "n/TEMP", "n/coordinates", time="last", lineout=Lineout(x="x", y=0.0, tol=1.0e-12)
+        )
+
+    assert result.names == ("COORDX", "TEMP")
+
+
+def test_query_element_lineout_adds_centers(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "e/ENERGY", time="last", lineout=Lineout(x="x", y=0.5, tol=1.0e-12))
+
+    assert result.names == ("COORDX", "ENERGY")
+    assert np.allclose(result.data["COORDX"], [0.5])
+    assert np.allclose(result.data["ENERGY"], [1.5])
+
+
+def test_query_global_lineout_does_not_add_coordinates(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo, pytest.raises(ValueError, match="coordinate columns"):
+        query(exo, "g/TM_STEP", lineout=Lineout(x="x", y=0.0))
+
+
+def test_legacy_get_lineout_adds_coordinates(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    data = exodusii.File(path).get("n/TEMP", index=-1, lineout=Lineout(x="x", y=0.0, tol=1e-12))
+
+    assert data.dtype.names == ("COORDX", "TEMP")
+    assert np.allclose(data["n/TEMP"], [11.0, 21.0])
+
+
 def test_query_element_single_time(tmp_path: Path) -> None:
     path = tmp_path / "query.exo"
     _write_query_file(path)

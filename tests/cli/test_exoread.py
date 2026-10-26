@@ -86,6 +86,21 @@ def test_exoread_lineout(tmp_path: Path) -> None:
     assert "COORDY" not in text
 
 
+def test_exoread_lineout_adds_coordinates(tmp_path: Path) -> None:
+    # Legacy callers (nevada exoread wrapper) pass only the variable.
+    path = tmp_path / "cli.exo"
+    _write_cli_file(path)
+    stream = StringIO()
+
+    status = main(
+        ["-n", "TEMP", "--index", "-1", "--lineout", "x/0.0/T1e-12", str(path)], file=stream
+    )
+
+    assert status == 0
+    header = stream.getvalue().splitlines()[0].split()
+    assert header == ["COORDX", "TEMP"]
+
+
 def test_exoread_rejects_bad_args(tmp_path: Path) -> None:
     path = tmp_path / "cli.exo"
     _write_cli_file(path)
