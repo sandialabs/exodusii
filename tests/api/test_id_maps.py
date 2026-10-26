@@ -67,7 +67,19 @@ def test_similar_detects_id_map_difference(tmp_path: Path) -> None:
     _write_mapped(two, node_ids=[10, 20, 30, 99])
 
     with pytest.raises(ValueError, match="node ID map"):
-        similar(one, two)
+        similar(one, two, strict=True)
+
+
+def test_similar_default_ignores_id_maps(tmp_path: Path) -> None:
+    # exodusii < 2 similar() ignored ID maps; serial vs epu-merged parallel
+    # runs of the same problem number edges/faces differently.
+    one = tmp_path / "one.exo"
+    two = tmp_path / "two.exo"
+
+    _write_mapped(one)
+    _write_mapped(two, node_ids=[10, 20, 30, 99])
+
+    assert similar(one, two)
 
 
 def test_copy_does_not_materialize_default_id_maps(tmp_path: Path) -> None:

@@ -203,14 +203,18 @@ def allclose(
 
 
 def similar(
-    file1: ExodusFileLike, file2: ExodusFileLike, times: Iterable[float] | None = None
+    file1: ExodusFileLike,
+    file2: ExodusFileLike,
+    times: Iterable[float] | None = None,
+    *,
+    strict: bool = False,
 ) -> bool:
     """Return true if two Exodus files have the same mesh and variable layout.
 
-    Checks that the two files are structurally compatible: identical spatial
-    dimension, entity counts, variable name sets, block and set definitions,
-    element connectivity, truth tables, and block/set status arrays.
-    Result values (nodal and element variable data) are *not* compared.
+    By default the checks match exodusii < 2 (see Notes).  With
+    ``strict=True`` the files must also agree on ID maps, edge/face blocks,
+    sets, truth tables, block/set status and attributes.  Result values
+    (nodal and element variable data) are *not* compared.
 
     Parameters
     ----------
@@ -221,6 +225,8 @@ def similar(
         When provided, each requested time value must be present (within
         absolute tolerance ``1e-12``) in *both* files.  If any value is
         absent from either file a :exc:`ValueError` is raised.
+    strict : bool, optional
+        Enable the full structural comparison.  Default ``False``.
 
     Returns
     -------
@@ -235,7 +241,19 @@ def similar(
 
     Notes
     -----
-    The checks performed are:
+    Default (legacy) checks, as in exodusii < 2:
+
+    * Spatial dimension, element-block, node and element counts.
+    * Node, edge, face and element variable names of *file1* are present
+      (case-insensitively) in *file2*.
+    * Element connectivity of every element block of *file1*.
+    * Nodal coordinates (:func:`numpy.allclose`).
+
+    These deliberately ignore ID maps and edge/face/set ordering, which
+    differ between a serial run and an ``epu``-merged parallel run of the
+    same problem.
+
+    With ``strict=True`` the checks performed are:
 
     * Spatial dimension and entity counts (nodes, edges, faces, elements,
       element blocks).
@@ -269,15 +287,18 @@ def similar(
     exo2, close2 = opened2
 
     try:
-        _compare_basic_counts(exo1, exo2)
-        _compare_id_maps(exo1, exo2)
-        _compare_variable_layout(exo1, exo2)
-        _compare_coordinates(exo1, exo2)
-        _compare_blocks(exo1, exo2)
-        _compare_sets(exo1, exo2)
-        _compare_truth_tables(exo1, exo2)
-        _compare_status(exo1, exo2)
-        _compare_attributes(exo1, exo2)
+        if strict:
+            _compare_basic_counts(exo1, exo2)
+            _compare_id_maps(exo1, exo2)
+            _compare_variable_layout(exo1, exo2)
+            _compare_coordinates(exo1, exo2)
+            _compare_blocks(exo1, exo2)
+            _compare_sets(exo1, exo2)
+            _compare_truth_tables(exo1, exo2)
+            _compare_status(exo1, exo2)
+            _compare_attributes(exo1, exo2)
+        else:
+            _compare_legacy(exo1, exo2)
 
         if times is not None:
             _compare_times(exo1.times(), exo2.times(), times)
@@ -289,6 +310,32 @@ def similar(
             exo2.close()
 
     return True
+
+
+def _compare_legacy(exo1: ExodusFile, exo2: ExodusFile) -> None:
+    """Structural checks performed by exodusii < 2 ``similar``."""
+
+    if exo1.dimension != exo2.dimension:
+        raise ValueError("files do not have the same dimension")
+    if exo1.element_block_count != exo2.element_block_count:
+        raise ValueError("files do not have the same number of element blocks")
+    if exo1.node_count != exo2.node_count:
+        raise ValueError("files do not have the same number of nodes")
+    if exo1.element_count != exo2.element_count:
+        raise ValueError("files do not have the same number of elements")
+
+    for label in ("node", "edge", "face", "element"):
+        names2 = {name.lower() for name in exo2.variable_names(label)}
+        if any(name.lower() not in names2 for name in exo1.variable_names(label)):
+            raise ValueError(f"files do not define the same {label} variables")
+
+    for block_id in exo1.element_block_ids():
+        conn1 = exo1.element_connectivity(int(block_id))
+        conn2 = exo2.element_connectivity(int(block_id))
+        if conn1.shape != conn2.shape or not np.allclose(conn1, conn2):
+            raise ValueError("files do not have the same element_block connectivity")
+
+    _compare_coordinates(exo1, exo2)
 
 
 def _compare_id_maps(exo1: ExodusFile, exo2: ExodusFile) -> None:

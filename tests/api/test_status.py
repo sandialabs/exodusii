@@ -50,7 +50,7 @@ def test_similar_detects_status_difference(tmp_path: Path) -> None:
     _write_status_file(inactive, active=False)
 
     with pytest.raises(ValueError, match="element_block status"):
-        similar(active, inactive)
+        similar(active, inactive, strict=True)
 
 
 def _write_status_file(path: Path, *, active: bool = False) -> None:

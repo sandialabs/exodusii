@@ -18,7 +18,7 @@ def test_similar_extended_copy(tmp_path: Path) -> None:
     _write_extended(source)
     copy_file(source, target)
 
-    assert similar(source, target)
+    assert similar(source, target, strict=True)
 
 
 def test_similar_detects_edge_connectivity_difference(tmp_path: Path) -> None:
@@ -29,7 +29,7 @@ def test_similar_detects_edge_connectivity_difference(tmp_path: Path) -> None:
     _write_extended(file2, edge_connectivity=[[1, 2], [2, 3], [3, 4], [1, 4]])
 
     with pytest.raises(ValueError, match="edge_block connectivity"):
-        similar(file1, file2)
+        similar(file1, file2, strict=True)
 
 
 def test_similar_detects_set_difference(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_similar_detects_set_difference(tmp_path: Path) -> None:
     _write_extended(file2, edge_set_entries=[1, 3])
 
     with pytest.raises(ValueError, match=r"edge_set .* entries"):
-        similar(file1, file2)
+        similar(file1, file2, strict=True)
 
 
 def test_similar_detects_truth_table_difference(tmp_path: Path) -> None:
@@ -51,7 +51,7 @@ def test_similar_detects_truth_table_difference(tmp_path: Path) -> None:
     _write_extended(file2, edge_truth=[[0]])
 
     with pytest.raises(ValueError, match="edge variable truth table"):
-        similar(file1, file2)
+        similar(file1, file2, strict=True)
 
 
 def _write_extended(

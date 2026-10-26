@@ -183,6 +183,7 @@ def _write_file(
     coord_offset: float = 0.0,
     connectivity: list[list[int]] | None = None,
     node_count: int = 4,
+    extra_node_variable: bool = False,
 ) -> None:
     coords = _coords(node_count) + coord_offset
     conn = connectivity if connectivity is not None else [[1, 2, 3, 4]]
@@ -191,7 +192,7 @@ def _write_file(
         writer.initialize("compare", 2, node_count, 1, element_blocks=1)
         writer.write_coordinates(coords)
         writer.define_element_block(10, "quad", conn)
-        writer.define_node_variables(["TEMP"])
+        writer.define_node_variables(["TEMP", "PRES"] if extra_node_variable else ["TEMP"])
         writer.define_element_variables(["ENERGY"])
 
         writer.write_time(0.0)
@@ -211,3 +212,27 @@ def _coords(node_count: int) -> np.ndarray:
 
     extra = np.zeros((node_count - 4, 2), dtype=float)
     return np.vstack([base, extra])
+
+
+def test_similar_legacy_default_variable_subset(tmp_path: Path) -> None:
+    # exodusii < 2: file1's variables must exist in file2 (one-way subset).
+    small = tmp_path / "small.exo"
+    big = tmp_path / "big.exo"
+    _write_file(small)
+    _write_file(big, extra_node_variable=True)
+
+    assert similar(small, big)
+    with pytest.raises(ValueError, match="node variables"):
+        similar(big, small)
+    with pytest.raises(ValueError, match="node variables"):
+        similar(small, big, strict=True)
+
+
+def test_similar_legacy_default_detects_node_count(tmp_path: Path) -> None:
+    one = tmp_path / "one.exo"
+    two = tmp_path / "two.exo"
+    _write_file(one)
+    _write_file(two, node_count=5)
+
+    with pytest.raises(ValueError, match="number of nodes"):
+        similar(one, two)

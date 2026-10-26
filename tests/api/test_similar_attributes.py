@@ -19,7 +19,7 @@ def test_similar_attributes_copy(tmp_path: Path) -> None:
     _write_attr_file(source)
     copy_file(source, target)
 
-    assert similar(source, target)
+    assert similar(source, target, strict=True)
 
 
 def test_similar_detects_attribute_name_difference(tmp_path: Path) -> None:
@@ -30,7 +30,7 @@ def test_similar_detects_attribute_name_difference(tmp_path: Path) -> None:
     _write_attr_file(two, attr_names=["A", "C"])
 
     with pytest.raises(ValueError, match="attribute names"):
-        similar(one, two)
+        similar(one, two, strict=True)
 
 
 def test_similar_detects_attribute_value_difference(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_similar_detects_attribute_value_difference(tmp_path: Path) -> None:
     _write_attr_file(two, attr_values=[[1.0, 3.0]])
 
     with pytest.raises(ValueError, match="different attributes"):
-        similar(one, two)
+        similar(one, two, strict=True)
 
 
 def _write_attr_file(
