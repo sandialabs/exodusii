@@ -114,6 +114,7 @@ from exodusii.compat import MFExodusIIFile
 from exodusii.compat import ParallelExodusIIFile
 from exodusii.compat import exodusii_file
 from exodusii.compat import find_element_data_in_region
+from exodusii.compat import find_node_data_in_region
 from exodusii.compat import parallel_exodusii_file
 from exodusii.compat import write_globals
 from exodusii.core.tolerance import Tolerance
@@ -179,6 +180,7 @@ __all__ = [
     "exodusii_file",
     "exoread",
     "find_element_data_in_region",
+    "find_node_data_in_region",
     "get_element_centers",
     "lineout",
     "parallel_exodusii_file",

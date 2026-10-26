@@ -1618,49 +1618,6 @@ def File(filename: str | Path, *files: str | Path, mode: str = "r"):
 exodusii_file = ExodusIIFile
 
 
-def find_element_data_in_region(
-    file: ExodusIIFile, var_names: list[str], *, region: Any, time_step: int | None = None
-) -> dict[str, npt.NDArray[np.float64]]:
-    """Return element variable values for elements whose centers lie inside *region*.
-
-    Parameters
-    ----------
-    file:
-        Open :class:`ExodusIIFile` (or compatible legacy file object).
-    var_names:
-        List of element variable names to extract.
-    region:
-        A region object with a ``contains(points)`` method (e.g. from
-        ``exodusii.region``).
-    time_step:
-        One-based time-step index.  ``None`` selects the last available step.
-
-    Returns
-    -------
-    dict[str, ndarray]
-        Mapping from variable name to a 1-D float64 array of values for the
-        elements inside *region*, concatenated across all blocks.
-    """
-
-    from exodusii.extension import compute_element_centers
-
-    centers = compute_element_centers(file, time_step=time_step)
-    mask = np.asarray(region.contains(centers), dtype=np.bool_)
-
-    result: dict[str, npt.NDArray[np.float64]] = {}
-    for name in var_names:
-        values = np.concatenate(
-            [
-                file.get_element_variable_values(int(bid), name, time_step=time_step)
-                for bid in file.get_element_block_ids()
-            ],
-            axis=0,
-        )
-        result[name] = values[mask]
-
-    return result
-
-
 def write_globals(
     data: Mapping[str, npt.ArrayLike],
     times: npt.ArrayLike,
@@ -1732,4 +1689,4 @@ def _current_coordinates(writer: ExodusWriter) -> npt.NDArray[np.float64]:
     return coords
 
 
-__all__ = ["ExodusIIFile", "File", "exodusii_file", "find_element_data_in_region", "write_globals"]
+__all__ = ["ExodusIIFile", "File", "exodusii_file", "write_globals"]
