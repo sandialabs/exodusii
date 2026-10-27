@@ -85,8 +85,6 @@ from exodusii.api.command_file import write_command_file
 from exodusii.api.compare import ComparisonResult
 from exodusii.api.compare import allclose
 from exodusii.api.compare import similar
-from exodusii.api.copy import copy
-from exodusii.api.copy import copy_file
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
 from exodusii.api.diff import TimeSelection
@@ -107,7 +105,6 @@ from exodusii.api.region_reduce import RegionStatsResult
 from exodusii.api.region_reduce import region_mass
 from exodusii.api.region_reduce import region_stats
 from exodusii.api.writer import ExodusWriter
-from exodusii.cli.exoread import main as exoread
 from exodusii.compat import ExodusIIFile
 from exodusii.compat import File
 from exodusii.compat import MFExodusIIFile
@@ -127,6 +124,16 @@ from exodusii.extension import compute_node_volumes
 from exodusii.extension import compute_volume_averaged_elem_variable
 
 region = importlib.import_module("exodusii.region")
+
+# Legacy shim submodules that share a name with a public callable.  Import
+# them through the submodule so it is registered in sys.modules *before* the
+# package attribute is bound to the callable; otherwise a later
+# ``import exodusii.exoread`` (or pytest collecting src/) rebinds
+# ``exodusii.exoread`` to the module and ``exodusii.exoread(argv)`` fails
+# with "'module' object is not callable".  exodusii < 2 did the same.
+from exodusii.copy import copy  # noqa: E402
+from exodusii.copy import copy_file  # noqa: E402
+from exodusii.exoread import main as exoread  # noqa: E402
 
 exo_file = File
 get_element_centers = compute_element_centers

@@ -2,7 +2,11 @@
 #
 # SPDX-License-Identifier: MIT
 
+import subprocess
+import sys
+
 import numpy as np
+import pytest
 
 import exodusii
 import exodusii.region
@@ -58,3 +62,31 @@ def test_legacy_copy_imports() -> None:
     assert callable(copy)
     assert callable(copy_file)
     assert callable(exodusii.copy_file)
+
+
+SHIM_CALLABLES = ["exoread", "copy", "lineout", "similar", "allclose"]
+
+
+@pytest.mark.parametrize("name", SHIM_CALLABLES)
+def test_shim_submodule_import_keeps_package_callable(name: str) -> None:
+    # Importing a legacy shim submodule (``import exodusii.exoread``, or pytest
+    # collecting src/exodusii/exoread.py) must not rebind the package-level
+    # callable of the same name to the module.  Run in a fresh interpreter so
+    # the result does not depend on what earlier tests imported.
+    code = (
+        "import exodusii, importlib, sys\n"
+        f"importlib.import_module('exodusii.{name}')\n"
+        f"obj = exodusii.{name}\n"
+        "sys.exit(0 if callable(obj) else f'{type(obj).__name__} is not callable')\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_exoread_callable_after_submodule_import() -> None:
+    import exodusii.exoread
+    from exodusii.exoread import main
+
+    assert callable(exodusii.exoread)
+    assert exodusii.exoread is main
+    assert sys.modules["exodusii.exoread"].main is main
