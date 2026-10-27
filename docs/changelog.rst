@@ -23,8 +23,9 @@ Changelog
     ``coord`` variable for normal-model (``EX_NORMAL_MODEL``) files.
   - :meth:`~exodusii.ExodusFile.variable_truth_table` derives the table
     dynamically when not stored, matching ``ex_get_truth_table.c``.
-  - :class:`~exodusii.ParallelExodusFile` emits ``UserWarning`` when
-    ``node_num_map`` / ``elem_num_map`` are absent.
+  - :class:`~exodusii.ParallelExodusFile` emits one ``UserWarning`` per
+    parallel set when ``node_num_map`` / ``elem_num_map`` are absent;
+    missing ``edge_num_map`` / ``face_num_map`` are logged at ``DEBUG``.
   - :meth:`~exodusii.ParallelExodusFile.side_set` deduplicates shared
     ``(element, side)`` pairs.
   - :meth:`~exodusii.mesh.elements.Tri3.volume` fixed for NumPy ≥ 2.5

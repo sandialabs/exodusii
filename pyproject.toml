@@ -76,6 +76,9 @@ python_files = ["*.py"]
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]
+markers = [
+  "id_map_warnings: do not suppress the parallel missing node/element map warning",
+]
 
 [tool.ruff]
 line-length = 100

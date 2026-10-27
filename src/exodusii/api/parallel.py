@@ -4,6 +4,7 @@
 
 """Parallel/multi-file Exodus reader using Exodus global ID maps."""
 
+import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,10 @@ from exodusii.core.schema import variable_spec
 from exodusii.core.schema import variable_value_name
 from exodusii.core.time import TimeSelector
 
+logger = logging.getLogger(__name__)
+
+_PACKAGE_DIR = str(Path(__file__).resolve().parents[1])
+
 
 @dataclass(frozen=True, slots=True)
 class _FileMaps:
@@ -44,9 +49,11 @@ class ParallelExodusFile:
     Global identity of nodes and elements is recovered from the per-file
     ``node_num_map`` (``node_id_map``) and ``elem_num_map``
     (``element_id_map``) variables written by Nemesis decomposers such as
-    ``nem_slice``.  When a map is absent a `UserWarning` is emitted and a
-    sequential fallback is used, which is only correct for non-overlapping
-    partitions without shared border nodes.
+    ``nem_slice``.  When either map is absent a sequential fallback is used,
+    which is only correct for non-overlapping partitions without shared border
+    nodes; one `UserWarning` per parallel set lists the affected files.
+    Missing ``edge_num_map``/``face_num_map`` are common and only logged at
+    ``DEBUG`` level (SEACAS ``ex_get_id_map`` silently uses ``1..n``).
 
     The logical output ordering of nodes and elements is determined by
     sorting their unique global IDs and re-labelling them contiguously
@@ -260,8 +267,8 @@ class ParallelExodusFile:
         Notes
         -----
         When ``edge_num_map`` is absent from a component file that has edges a
-        `UserWarning` is emitted and a sequential fallback is used.  The
-        fallback count is only correct for non-overlapping partitions.
+        sequential fallback is used (logged at ``DEBUG`` level).  The fallback
+        count is only correct for non-overlapping partitions.
         """
         return len(self._edge_gid_to_index)
 
@@ -279,8 +286,8 @@ class ParallelExodusFile:
         Notes
         -----
         When ``face_num_map`` is absent from a component file that has faces a
-        `UserWarning` is emitted and a sequential fallback is used.  The
-        fallback count is only correct for non-overlapping partitions.
+        sequential fallback is used (logged at ``DEBUG`` level).  The fallback
+        count is only correct for non-overlapping partitions.
         """
         return len(self._face_gid_to_index)
 
@@ -2262,36 +2269,28 @@ class ParallelExodusFile:
         element_offset = 0
         edge_offset = 0
         face_offset = 0
+        missing: dict[str, list[str]] = {"node_num_map": [], "elem_num_map": []}
 
         for file in self._files:
             node_map = file.variable(VariableName.NODE_ID_MAP.value, default=None)
             if node_map is None:
-                warnings.warn(
-                    f"{file.path}: 'node_num_map' not found; using sequential fallback. "
-                    "This is only correct for non-overlapping partitions with no shared nodes. "
-                    "Real Nemesis files with shared border/external nodes must include "
-                    "node_num_map.",
-                    stacklevel=2,
-                )
+                missing["node_num_map"].append(str(file.path))
                 node_map = np.arange(node_offset + 1, node_offset + file.node_count + 1)
             node_map = np.asarray(node_map, dtype=np.int64)
 
             element_map = file.variable(VariableName.ELEMENT_ID_MAP.value, default=None)
             if element_map is None:
-                warnings.warn(
-                    f"{file.path}: 'elem_num_map' not found; using sequential fallback. "
-                    "This is only correct for non-overlapping partitions.",
-                    stacklevel=2,
-                )
+                missing["elem_num_map"].append(str(file.path))
                 element_map = np.arange(element_offset + 1, element_offset + file.element_count + 1)
             element_map = np.asarray(element_map, dtype=np.int64)
 
+            # Edge/face maps are routinely omitted (SEACAS ex_get_id_map then
+            # generates 1..n without complaint); nothing a caller can act on.
             edge_map = file.variable(VariableName.EDGE_ID_MAP.value, default=None)
             if edge_map is None:
                 if file.edge_count > 0:
-                    warnings.warn(
-                        f"{file.path}: 'edge_num_map' not found; using sequential fallback.",
-                        stacklevel=2,
+                    logger.debug(
+                        "%s: 'edge_num_map' not found; using sequential fallback", file.path
                     )
                 edge_map = np.arange(edge_offset + 1, edge_offset + file.edge_count + 1)
             edge_map = np.asarray(edge_map, dtype=np.int64)
@@ -2299,9 +2298,8 @@ class ParallelExodusFile:
             face_map = file.variable(VariableName.FACE_ID_MAP.value, default=None)
             if face_map is None:
                 if file.face_count > 0:
-                    warnings.warn(
-                        f"{file.path}: 'face_num_map' not found; using sequential fallback.",
-                        stacklevel=2,
+                    logger.debug(
+                        "%s: 'face_num_map' not found; using sequential fallback", file.path
                     )
                 face_map = np.arange(face_offset + 1, face_offset + file.face_count + 1)
             face_map = np.asarray(face_map, dtype=np.int64)
@@ -2328,6 +2326,8 @@ class ParallelExodusFile:
             element_offset += file.element_count
             edge_offset += file.edge_count
             face_offset += file.face_count
+
+        _warn_missing_id_maps(missing, total=len(self._files))
 
         return maps
 
@@ -2567,6 +2567,34 @@ class ParallelExodusFile:
                 logging.warning("Solution time differs significantly from desired solution time.")
 
         return index + 1
+
+
+def _warn_missing_id_maps(missing: dict[str, list[str]], *, total: int) -> None:
+    """Emit one warning for the whole parallel set about missing node/element maps.
+
+    Without these maps shared border nodes cannot be identified, so the joined
+    mesh is only correct for non-overlapping partitions.
+    """
+
+    parts = [
+        f"'{name}' missing in {len(paths)} of {total} file(s) ({_summarize_paths(paths)})"
+        for name, paths in missing.items()
+        if paths
+    ]
+    if not parts:
+        return
+    warnings.warn(
+        "; ".join(parts) + ". Using sequential fallback numbering, which is only "
+        "correct for non-overlapping partitions with no shared nodes.",
+        UserWarning,
+        # Attribute the warning to the caller's code, not to exodusii internals.
+        skip_file_prefixes=(_PACKAGE_DIR,),
+    )
+
+
+def _summarize_paths(paths: list[str], limit: int = 3) -> str:
+    shown = ", ".join(paths[:limit])
+    return shown if len(paths) <= limit else f"{shown}, ... +{len(paths) - limit} more"
 
 
 def _contains(values: npt.ArrayLike, value: int) -> bool:

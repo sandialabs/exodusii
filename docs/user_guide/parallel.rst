@@ -23,8 +23,9 @@ files with the same global ID) are deduplicated automatically.
 
 .. warning::
 
-   If a component file does not contain ``node_num_map``, a sequential
-   fallback is used and a ``UserWarning`` is emitted.  The fallback is
+   If a component file does not contain ``node_num_map`` (or
+   ``elem_num_map``), a sequential fallback is used and a single
+   ``UserWarning`` listing the affected files is emitted per parallel set.  The fallback is
    correct **only** for non-overlapping partitions where no nodes are
    shared between ranks.  Real Nemesis files produced by standard
    decomposers (``nem_slice``) must include the map; files without it
@@ -103,7 +104,9 @@ Edge and face blocks
 Edge and face entities follow the same pattern as element blocks.  If
 ``edge_num_map`` or ``face_num_map`` is absent from a component file, a
 sequential fallback is used only when the local edge/face count is
-non-zero::
+non-zero.  Missing edge/face maps are common (SEACAS ``ex_get_id_map``
+silently returns ``1..n``) and are reported only through the
+``exodusii.api.parallel`` logger at ``DEBUG`` level::
 
     with exodusii.ParallelExodusFile.open(*paths) as exo:
         edge_count = exo.edge_count
