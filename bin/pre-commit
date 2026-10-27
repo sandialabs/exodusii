@@ -47,9 +47,10 @@ PY
 
 ruff format src tests
 ruff check --fix src tests
-mypy src
-pytest tests
+p=$(python3 -m site --user-site)
+ty check --extra-search-path=$p
 bandit -q -c pyproject.toml -r src
+pytest tests
 
 # Include the version bump in the commit automatically.
 git add pyproject.toml
