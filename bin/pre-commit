@@ -47,8 +47,14 @@ PY
 
 ruff format src tests
 ruff check --fix src tests
-p=$(python3 -m site --user-site)
-ty check --extra-search-path=$p
+# Search the user site-packages too, but only if it exists: ty rejects a
+# missing --extra-search-path (e.g. no ~/.local, or HOME unset).
+ty_args=()
+p=$(python3 -m site --user-site 2>/dev/null || true)
+if [ -n "$p" ] && [ -d "$p" ]; then
+    ty_args+=("--extra-search-path=$p")
+fi
+ty check "${ty_args[@]}"
 bandit -q -c pyproject.toml -r src
 pytest tests
 

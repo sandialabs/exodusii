@@ -8,12 +8,14 @@ import os
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
 from typing import TextIO
+
+OutputTarget = TextIO | str | os.PathLike[str] | None
+"""A writable text stream, a path to open for writing, or ``None`` for stdout."""
 
 
 @contextmanager
-def output_stream(file: Any = None) -> Generator[TextIO]:
+def output_stream(file: OutputTarget = None) -> Generator[TextIO]:
     """Yield a writable text stream for ``file``.
 
     ``None`` selects ``sys.stdout``; a ``str`` or path-like value is opened
@@ -31,4 +33,4 @@ def output_stream(file: Any = None) -> Generator[TextIO]:
         yield file
 
 
-__all__ = ["output_stream"]
+__all__ = ["OutputTarget", "output_stream"]

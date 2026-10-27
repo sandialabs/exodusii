@@ -23,7 +23,6 @@ queries and, optionally, an ``index`` column for spatial queries).
 
 from dataclasses import dataclass
 from typing import Any
-from typing import TextIO
 from typing import cast
 
 import numpy as np
@@ -38,6 +37,7 @@ from exodusii.core.selectors import VariableSelector
 from exodusii.core.selectors import is_special_selector
 from exodusii.core.selectors import parse_variable_selector
 from exodusii.core.selectors import parse_variable_selectors
+from exodusii.core.streams import OutputTarget
 from exodusii.core.streams import output_stream
 from exodusii.core.time import TimeSelector
 from exodusii.core.time import resolve_time
@@ -227,7 +227,7 @@ def print_query(
     lineout: Lineout | None = None,
     object_index: bool = False,
     labels: bool = True,
-    file: TextIO | None = None,
+    file: OutputTarget = None,
 ) -> None:
     """Print query results in a simple whitespace-delimited table.
 
