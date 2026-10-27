@@ -15,7 +15,9 @@ from exodusii.api.query import QueryResult
 from exodusii.api.query import print_query
 from exodusii.api.query import query
 from exodusii.api.writer import ExodusWriter
+from exodusii.core.entities import Entity
 from exodusii.core.errors import ExodusInvalidEntityError
+from exodusii.core.selectors import VariableSelector
 
 
 def test_query_global_all_times(tmp_path: Path) -> None:
@@ -252,6 +254,75 @@ def test_query_special_only_defaults_to_node(tmp_path: Path) -> None:
     assert result.names == ("COORDX", "COORDY")
     assert result.metadata["entity"] == "node"
     assert np.allclose(result.data["COORDX"], [0.0, 1.0, 1.0, 0.0])
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        ("e/coordinates",),
+        ("element/coordinates",),
+        ("e/displacements", "e/coordinates"),
+        (VariableSelector("coordinates", Entity.ELEMENT),),
+    ],
+)
+def test_query_qualified_special_only_uses_its_entity(
+    tmp_path: Path, selectors: tuple[str | VariableSelector, ...]
+) -> None:
+    # exodusii < 2: "e/coordinates" alone gave element centers (xmhd_vrod keys
+    # its exact-solution table on them); v2 used to fall back to the nodes.
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, *selectors, time="last")
+
+    assert result.metadata["entity"] == "element"
+    assert np.allclose(result.data["COORDX"], [0.5])
+    assert np.allclose(result.data["COORDY"], [0.5])
+
+
+def test_query_qualified_special_only_node(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        result = query(exo, "coordinates", "n/displacements", time="last")
+
+    assert result.metadata["entity"] == "node"
+    assert np.allclose(result.data["COORDX"], [0.0, 1.0, 1.0, 0.0])
+
+
+def test_query_element_coordinates_alone_match_with_variable(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    with ExodusFile.open(path) as exo:
+        alone = query(exo, "e/coordinates", time="last").data
+        mixed = query(exo, "e/coordinates", "e/ENERGY", time="last").data
+
+    assert np.array_equal(alone["COORDX"], mixed["COORDX"])
+    assert np.array_equal(alone["COORDY"], mixed["COORDY"])
+
+
+def test_legacy_get_element_coordinates_alone(tmp_path: Path) -> None:
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+
+    data = exodusii.File(path).get("e/coordinates", index=-1)
+
+    assert data.dtype.names == ("COORDX", "COORDY")
+    assert np.allclose(data["COORDX"], [0.5])
+
+
+def test_exoread_element_coordinates_alone(tmp_path: Path) -> None:
+    # nevada exoread(f, type="element", name=["coordinates"]) -> exoread -e coordinates
+    path = tmp_path / "query.exo"
+    _write_query_file(path)
+    stream = StringIO()
+
+    exodusii.exoread(["-e", "coordinates", "-i", "-1", "--nolabels", str(path)], file=stream)
+
+    assert np.allclose(np.loadtxt(StringIO(stream.getvalue())), [0.5, 0.5])
 
 
 def test_query_rejects_empty_variables(tmp_path: Path) -> None:

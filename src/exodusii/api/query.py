@@ -193,10 +193,14 @@ def query(
 
     # Special spatial pseudo-variables (coordinates/displacements) are
     # entity-agnostic; the primary query entity is determined by the first
-    # real variable selector.  When only special selectors are given, the query
-    # is treated as nodal.
+    # real variable selector.  When only special selectors are given, the
+    # entity of the first explicitly qualified one is used (``"e/coordinates"``
+    # yields element centers, as in exodusii < 2); bare names are nodal.
     real_selectors = [s for s in selectors if not is_special_selector(s)]
-    location = entity(real_selectors[0].entity) if real_selectors else Entity.NODE
+    if real_selectors:
+        location = entity(real_selectors[0].entity)
+    else:
+        location = next((entity(s.entity) for s in selectors if _is_qualified(s)), Entity.NODE)
 
     if lineout is not None and location is not Entity.GLOBAL:
         selectors = _with_lineout_spatial_selectors(selectors, lineout)
@@ -396,6 +400,17 @@ def _query_element(
     return _structured(
         names, dense, metadata={"entity": Entity.ELEMENT.value, "time": selection.value}
     )
+
+
+def _is_qualified(selector: VariableSelector) -> bool:
+    """Return true if *selector* carries an explicit entity.
+
+    Bare special names (``"coordinates"``) parse with a placeholder NODE
+    entity; selectors given as ``"ENTITY/NAME"`` strings or constructed
+    directly as :class:`VariableSelector` objects state their entity.
+    """
+
+    return selector.original is None or "/" in selector.original
 
 
 def _stored_name(exo: ExodusFile, on: Entity, requested: str) -> str:
