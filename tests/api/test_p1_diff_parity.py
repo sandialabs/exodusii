@@ -365,3 +365,10 @@ def test_nodeset_sideset_match_do_not_enable_coordinate_matching(tmp_path: Path)
     for directive in ("NODESET MATCH", "SIDESET MATCH"):
         cmd.write_text(directive + "\n")
         assert read_command_file(cmd).options.coordinate_matching is False
+
+
+def test_global_variables_use_scalar_floor(tmp_path: Path) -> None:
+    a = _write(tmp_path / "a.exo", times=(0.0,), gvals=(1.0,), nodal=())
+    b = _write(tmp_path / "b.exo", times=(0.0,), gvals=(-1.0,), nodal=())
+    floor = DiffOptions(default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 0.1, 1.0))
+    assert diff(a, b, floor).same

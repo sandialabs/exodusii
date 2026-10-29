@@ -171,3 +171,17 @@ def test_diff_array_broadcasts_scalar() -> None:
     mask = tol.diff_array(a, 1.0)
     assert mask.shape == (3,)
     assert not mask.any()
+
+
+def test_combined_array_test_is_strict_at_the_boundary() -> None:
+    # Field variables: exodiff Delta(a, b) > value; values at the tolerance
+    # compare equal.  Scalars (times, globals) use Diff(), which is >=.
+    tol = Tolerance.make("combined", 0.5)
+    assert not tol.diff_array([0.0], [0.5])[0]
+    assert tol.diff(0.0, 0.5)
+
+
+def test_scalar_floor_includes_the_boundary() -> None:
+    tol = Tolerance.make("absolute", 0.1, floor=1.0)
+    assert not tol.diff(1.0, -1.0)  # both |v| <= floor: skipped
+    assert tol.diff_array([1.0], [-1.0])[0]  # field test: |v| >= floor is active

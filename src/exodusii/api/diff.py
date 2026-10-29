@@ -610,8 +610,13 @@ def _compare_variable_series(
     block_id: int | None,
     set_id: int | None,
     ignore_nans: bool = False,
+    scalar_test: bool = False,
 ) -> VariableDiff | None:
     """Compare two arrays (possibly multi-step) for one variable.
+
+    *scalar_test* uses :meth:`Tolerance.diff` (exodiff ``Diff``, used for
+    global variables) instead of :meth:`Tolerance.diff_array` (exodiff
+    ``Delta > value``, used for field variables).
 
     NaN handling follows SEACAS exodiff: unless *ignore_nans*, a NaN in
     either file is a difference (even at the same location in both files).
@@ -635,7 +640,13 @@ def _compare_variable_series(
     any_nan = np.isnan(a) | np.isnan(b)
     with np.errstate(invalid="ignore"):
         delta = tol.delta_array(a, b)
-        finite_diff = tol.diff_array(a, b) & ~any_nan
+        if scalar_test:
+            exceeded_mask = (
+                np.vectorize(tol.diff, otypes=[bool])(a, b) if a.size else a.astype(bool)
+            )
+        else:
+            exceeded_mask = tol.diff_array(a, b)
+        finite_diff = exceeded_mask & ~any_nan
     if ignore_nans:
         nan_mask = np.zeros_like(any_nan)
         delta = np.where(any_nan, np.nan, delta)
@@ -1484,6 +1495,7 @@ def _compare_global_variables(
             block_id=None,
             set_id=None,
             ignore_nans=opts.ignore_nans,
+            scalar_test=True,
         )
         _record(result, opts, vd)
 

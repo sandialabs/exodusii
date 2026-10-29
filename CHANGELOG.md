@@ -344,6 +344,10 @@ and uses semantic versioning once versioned releases are established.
 - `exodiff` CLI: time values are compared with the default tolerance
   (`-t`, mode flags, `--floor`), as SEACAS exodiff does; it was always
   relative 1e-6.
+- `diff` tolerance boundaries follow exodiff: field variables use
+  `Delta > value` (COMBINED values exactly at the tolerance compare equal),
+  and global variables use the scalar test (skipped when both magnitudes
+  are at or below the floor).
 
 ### Compatibility
 

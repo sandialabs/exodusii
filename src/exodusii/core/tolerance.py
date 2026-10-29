@@ -457,10 +457,12 @@ class Tolerance:
     def diff_array(self, a: npt.ArrayLike, b: npt.ArrayLike) -> npt.NDArray[np.bool_]:
         """Return an element-wise boolean "differs" mask for two arrays.
 
-        Vectorized equivalent of :meth:`diff`: ``True`` where the two values
-        differ by more than the tolerance.  This shares its definition with
-        the scalar :meth:`diff` so that array and scalar comparison paths never
-        diverge.
+        ``True`` where :meth:`delta_array` exceeds :attr:`value`, i.e.
+        SEACAS exodiff's ``Delta(a, b) > value`` test used for field
+        variables.  It differs from the scalar :meth:`diff` (exodiff's
+        ``Diff``, used for times and global values) only at the boundaries:
+        COMBINED values exactly at the tolerance are equal here, and the
+        floor skips entries only when both magnitudes are below it.
 
         Parameters
         ----------
@@ -530,9 +532,11 @@ class Tolerance:
             elif mode is ToleranceMode.EIGEN_ABSOLUTE:
                 mask = active & (np.abs(ax - ay) > self.value)
             elif mode in (ToleranceMode.COMBINED, ToleranceMode.EIGEN_COMBINED):
+                # exodiff compares field values with Delta(a, b) > value, so
+                # values exactly at the tolerance are equal (Diff() uses >=).
                 num = np.abs(ax - ay) if mode is ToleranceMode.EIGEN_COMBINED else np.abs(x - y)
                 denom = np.where(maxab > 1.0, maxab, 1.0)
-                mask = active & (num >= denom * self.value)
+                mask = active & (num > denom * self.value)
             elif mode in (ToleranceMode.ULPS_FLOAT, ToleranceMode.ULPS_DOUBLE):
                 mask = active & (self.delta_array(x, y) > self.value)
             else:  # pragma: no cover - all modes handled above
