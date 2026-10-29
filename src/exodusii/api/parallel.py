@@ -1064,7 +1064,8 @@ class ParallelExodusFile:
         Node IDs from each component file are translated to global IDs via the
         per-file ``node_num_map``.  Global IDs that appear in more than one
         component file (shared border nodes) are deduplicated; the distribution
-        factor for the first occurrence of each global node ID is retained.
+        factor from the last component file containing the node is kept (as
+        SEACAS epu does), and files without factors contribute 1.0.
 
         Parameters
         ----------
