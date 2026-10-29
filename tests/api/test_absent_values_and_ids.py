@@ -95,3 +95,50 @@ def test_nfaced_block_reports_element_type(tmp_path: Path) -> None:
 
     with ExodusFile.open(path) as exo:
         assert exo.element_block(3).element_type == "NFACED"
+
+
+def test_property_lookup_ignores_padding(tmp_path: Path) -> None:
+    path = tmp_path / "prop.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=2, element_count=1, element_blocks=1)
+        w.write_coordinates([[0.0], [1.0]])
+        w.define_element_block(1, "bar2", [[1, 2]])
+        w.define_property("element_block", "MATL  ", [7])
+    with ExodusFile.open(path) as exo:
+        assert exo.property_values("element_block", "MATL").tolist() == [7]
+
+
+def test_global_variables_without_stored_values(tmp_path: Path) -> None:
+    import netCDF4
+
+    from exodusii.core.errors import ExodusVariableError
+
+    path = tmp_path / "g.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=1, element_count=0)
+        w.write_coordinates([[0.0]])
+        w.define_global_variables(["G"])
+    with netCDF4.Dataset(path, "a") as ds:
+        ds.renameVariable("vals_glo_var", "unused")
+    with ExodusFile.open(path) as exo, pytest.raises(ExodusVariableError, match="no values"):
+        exo.values("G", on="global")
+
+
+def test_coordinates_of_a_file_without_nodes(tmp_path: Path) -> None:
+    path = tmp_path / "empty.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 2, node_count=0, element_count=0)
+    with ExodusFile.open(path) as exo:
+        assert exo.coordinates().shape == (0, 2)
+
+
+def test_cache_sees_writes_in_r_plus_mode(tmp_path: Path) -> None:
+    path = tmp_path / "rplus.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=1, element_count=0)
+        w.write_coordinates([[0.0]])
+        w.write_time(1.0)
+    with ExodusFile.open(path, "r+") as exo:
+        assert exo.times().tolist() == [1.0]
+        exo.backend.write_variable("time_whole", 2.0, 0)
+        assert exo.times().tolist() == [2.0]

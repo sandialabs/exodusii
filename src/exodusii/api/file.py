@@ -21,6 +21,7 @@ from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
 from exodusii.core.errors import ExodusInvalidEntityError
 from exodusii.core.errors import ExodusLookupError
+from exodusii.core.errors import ExodusVariableError
 from exodusii.core.models import Block
 from exodusii.core.models import InitParams
 from exodusii.core.models import SetInfo
@@ -86,12 +87,8 @@ class ExodusFile:
 
     def __init__(self, backend: NetCDFBackend) -> None:
         self._backend = backend
-        # Cache for immutable metadata reads (times, variable-name tables,
-        # set/block id arrays, and index lookups).  ExodusFile is a pure
-        # reader (all writes go through ExodusWriter with its own backend),
-        # so these are stable for the lifetime of the instance.  The cache
-        # is cleared on close()/sync() as a safety measure.
-        self._cache: dict[str, Any] = {}
+        # Metadata cache (times, name tables, ids); emptied by backend writes.
+        self._cache: dict[str, Any] = _WriteAwareCache(backend)
 
     @classmethod
     def open(cls, path: str | Path, mode: str = "r") -> "ExodusFile":
@@ -735,6 +732,9 @@ class ExodusFile:
         >>> with ExodusFile.open("results.exo") as f:
         ...     xyz = f.coordinates(displaced=True)
         """
+
+        if self.node_count == 0:
+            return np.zeros((0, self.dimension), dtype=np.float64)
 
         # Try large-model format first (coordx / coordy / coordz).
         coord_names = [ExodusNames.coordinate(i) for i in range(self.dimension)]
@@ -1598,9 +1598,9 @@ class ExodusFile:
         return int(values[index - 1])
 
     def _property_index(self, ent: Entity, name: str) -> int:
-        requested = name.lower()
+        requested = name.strip().lower()
         for index, property_name in enumerate(self.property_names(ent), start=1):
-            if property_name.lower() == requested:
+            if property_name.strip().lower() == requested:
                 return index
 
         raise ExodusLookupError(f"property {name!r} not found for {ent.value}")
@@ -2480,9 +2480,14 @@ class ExodusFile:
 
     def _global_values(self, name: str, *, time: TimeSelector = None) -> npt.NDArray[np.float64]:
         variable_index = self._variable_index(Entity.GLOBAL, name)
-        values = np.asarray(
-            self._backend.variable(VariableName.GLOBAL_VARIABLE_VALUES.value), dtype=np.float64
-        )[:, variable_index - 1]
+        stored = self._backend.variable(VariableName.GLOBAL_VARIABLE_VALUES.value, default=None)
+        if stored is None:
+            raise ExodusVariableError(
+                f"global variable {name!r} is defined but no values are stored"
+            )
+        values = np.asarray(stored, dtype=np.float64).reshape(len(self.times()), -1)[
+            :, variable_index - 1
+        ]
 
         if time is None:
             return values
@@ -2604,6 +2609,33 @@ def _decode_name_table(values: Any, *, expected_count: int | None = None) -> tup
 
     decoded = string_array(values)
     return tuple(_strip_exodus_padding(str(item)) for item in decoded)
+
+
+class _WriteAwareCache(dict):
+    """Cache that empties itself after any write through the backend (``r+``)."""
+
+    def __init__(self, backend: Any) -> None:
+        super().__init__()
+        self._backend = backend
+        self._seen = getattr(backend, "write_count", 0)
+
+    def _check(self) -> None:
+        count = getattr(self._backend, "write_count", 0)
+        if count != self._seen:
+            super().clear()
+            self._seen = count
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._check()
+        return super().get(key, default)
+
+    def __getitem__(self, key: Any) -> Any:
+        self._check()
+        return super().__getitem__(key)
+
+    def __contains__(self, key: object) -> bool:
+        self._check()
+        return super().__contains__(key)
 
 
 def _strip_exodus_padding(value: str) -> str:

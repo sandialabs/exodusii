@@ -51,6 +51,7 @@ class NetCDF4Backend:
         self._dataset.set_auto_chartostring(False)
         self._dataset.set_auto_mask(False)
         self._dataset.set_auto_maskandscale(False)
+        self.write_count = 0  # lets readers invalidate their caches
 
     @property
     def path(self) -> Path:
@@ -166,6 +167,7 @@ class NetCDF4Backend:
         """Create a dimension."""
 
         self._require_open()
+        self.write_count += 1
         self._dataset.createDimension(name, size)
 
     def create_variable(
@@ -174,6 +176,7 @@ class NetCDF4Backend:
         """Create a variable."""
 
         self._require_open()
+        self.write_count += 1
 
         missing = [
             dimension for dimension in dimensions if dimension not in self._dataset.dimensions
@@ -203,6 +206,7 @@ class NetCDF4Backend:
         """
 
         self._require_open()
+        self.write_count += 1
 
         if name not in self._dataset.variables:
             raise ExodusVariableError(f"variable {name!r} not found")
@@ -241,6 +245,7 @@ class NetCDF4Backend:
         """Set a global attribute."""
 
         self._require_open()
+        self.write_count += 1
         self._dataset.setncattr(name, value)
 
     def variable_attribute(self, variable: str, name: str, default: Any = None) -> Any:
@@ -261,6 +266,7 @@ class NetCDF4Backend:
         """Set a variable attribute."""
 
         self._require_open()
+        self.write_count += 1
 
         if variable not in self._dataset.variables:
             raise ExodusVariableError(f"variable {variable!r} not found")

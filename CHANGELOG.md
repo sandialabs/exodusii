@@ -367,6 +367,11 @@ and uses semantic versioning once versioned releases are established.
   component files whose truth table lists variables in NULL blocks.
 - Coordinate matching warns when a point has several candidates within the
   tolerance (the closest is used), as its documentation stated.
+- Reader edge cases: property lookup ignores trailing padding in property
+  names; a global variable without stored values raises
+  `ExodusVariableError` instead of an `IndexError`; `coordinates()` of a
+  file without nodes is an empty `(0, dim)` array; the metadata cache is
+  invalidated by writes made through an `r+` handle.
 
 ### Compatibility
 
