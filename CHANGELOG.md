@@ -333,6 +333,9 @@ and uses semantic versioning once versioned releases are established.
   absent.  Variables are created by `put_*_variable_truth_table`, or on
   first write when no truth table is given (the table then records what was
   written).
+- The writer rejects duplicate block/set IDs and the reserved ID -1, and
+  writes `EX_INVALID_ID` (-1) for slots that are allocated but never
+  defined (was 0, which could collide with a real ID).
 
 ### Compatibility
 

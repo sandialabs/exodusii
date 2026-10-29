@@ -194,3 +194,29 @@ def test_block_attributes_always_get_a_name_variable(tmp_path: Path) -> None:
         assert ds["attrib_name1"].shape[0] == 2
     with ExodusFile.open(path) as exo:
         assert np.asarray(exo.attributes("element_block", 1)).tolist() == [[1.0, 2.0]]
+
+
+def test_duplicate_and_reserved_ids_are_rejected(tmp_path: Path) -> None:
+    with ExodusWriter.create(tmp_path / "dup.exo") as w:
+        w.initialize("t", 1, node_count=2, element_count=2, element_blocks=3, node_sets=2)
+        w.write_coordinates([[0.0], [1.0]])
+        w.define_element_block(1, "bar2", [[1, 2]])
+        with pytest.raises(ExodusWriteError, match="already defined"):
+            w.define_element_block(1, "bar2", [[1, 2]])
+        with pytest.raises(ValueError, match="EX_INVALID_ID"):
+            w.define_element_block(-1, "bar2", [[1, 2]])
+        w.define_element_block(2, "bar2", [[1, 2]])  # the rejected calls used no slot
+        w.define_node_set(5, [1])
+        with pytest.raises(ExodusWriteError, match="already defined"):
+            w.define_node_set(5, [2])
+
+
+def test_unused_id_slots_are_invalid_id(tmp_path: Path) -> None:
+    path = tmp_path / "slots.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=2, element_count=1, element_blocks=3)
+        w.write_coordinates([[0.0], [1.0]])
+        w.define_element_block(7, "bar2", [[1, 2]])
+    with netCDF4.Dataset(path) as ds:
+        assert ds["eb_prop1"][:].tolist() == [7, -1, -1]
+        assert ds["eb_status"][:].tolist() == [1, 0, 0]

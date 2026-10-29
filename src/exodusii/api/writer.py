@@ -2389,7 +2389,8 @@ class ExodusWriter:
         self._backend.create_variable(
             names_name, str, (dimension_name, DimensionName.NAME_LENGTH.value)
         )
-        self._backend.write_variable(ids_name, np.zeros(count, dtype=np.int32))
+        # EX_INVALID_ID marks slots that are allocated but never defined.
+        self._backend.write_variable(ids_name, np.full(count, -1, dtype=np.int32))
         self._backend.write_variable(status_name, np.zeros(count, dtype=np.int32))
         self._backend.write_variable(
             names_name, encode_fixed_width([""] * count, width=NAME_LENGTH)
@@ -2408,6 +2409,10 @@ class ExodusWriter:
         )
 
     def _next_block_index(self, entity: Entity, block_id: int) -> int:
+        if block_id == -1:
+            raise ValueError("ID -1 is reserved (EX_INVALID_ID)")
+        if block_id in self._defined_ids(entity):
+            raise ExodusWriteError(f"{entity.value} ID {block_id} is already defined")
         if entity is Entity.ELEMENT_BLOCK:
             self._element_block_counter += 1
             counter = self._element_block_counter
@@ -2435,7 +2440,23 @@ class ExodusWriter:
         indices[block_id] = counter
         return counter
 
+    def _defined_ids(self, entity: Entity) -> dict[int, int]:
+        return {
+            Entity.ELEMENT_BLOCK: self._element_block_indices,
+            Entity.EDGE_BLOCK: self._edge_block_indices,
+            Entity.FACE_BLOCK: self._face_block_indices,
+            Entity.NODE_SET: self._node_set_indices,
+            Entity.SIDE_SET: self._side_set_indices,
+            Entity.EDGE_SET: self._edge_set_indices,
+            Entity.FACE_SET: self._face_set_indices,
+            Entity.ELEMENT_SET: self._element_set_indices,
+        }.get(entity, {})
+
     def _next_set_index(self, entity: Entity, set_id: int) -> int:
+        if set_id == -1:
+            raise ValueError("ID -1 is reserved (EX_INVALID_ID)")
+        if set_id in self._defined_ids(entity):
+            raise ExodusWriteError(f"{entity.value} ID {set_id} is already defined")
         if entity is Entity.NODE_SET:
             self._node_set_counter += 1
             counter = self._node_set_counter
