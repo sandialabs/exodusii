@@ -280,6 +280,13 @@ and uses semantic versioning once versioned releases are established.
 - Fixed `ParallelExodusFile.write()` dropping side-set distribution factors
   when Nemesis `ss_df_cnt_global` is 0 (it routinely is); factors stored by
   the component files are written, as SEACAS epu does.
+- Fixed 3-D surface elements: SHELL4 and TRI3/TRISHELL areas used only x
+  and y (a shell in the xz-plane had area 0).  Elements in an XY plane are
+  unchanged.
+- Element geometry supports more Exodus types: SHELL/TRISHELL, PYRAMID
+  (`Pyramid5`), BAR/BEAM/TRUSS/ROD (`Line2`, length), and higher-order
+  variants (TETRA10, HEX20/27, TRI6, QUAD8/9, WEDGE15, …) via their corner
+  nodes.  New `element_class()` lookup.
 
 ### Compatibility
 

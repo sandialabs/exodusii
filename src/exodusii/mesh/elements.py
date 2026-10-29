@@ -5,7 +5,8 @@
 """Finite-element geometry primitives.
 
 Provides concrete element classes (:class:`Quad4`, :class:`Hex8`,
-:class:`Tri3`, :class:`Tet4`, :class:`Wedge6`) and the
+:class:`Tri3`, :class:`Tet4`, :class:`Wedge6`, :class:`Pyramid5`,
+:class:`Line2`) and the
 :func:`element_factory` constructor, all of which implement the
 :class:`Element` protocol.  Each class supports subdivision into
 sub-elements via a common interface of ``subdiv``, ``subcoord``,
@@ -141,9 +142,9 @@ class Quad4:
     """Four-node quadrilateral using Exodus node ordering.
 
     The four nodes are ordered counter-clockwise:
-    ``0 → 1 → 2 → 3``, where node 0 is the lower-left corner.
-    The element lives in the XY-plane; a third coordinate column is
-    accepted and carried through but ignored in area calculations.
+    ``0 → 1 → 2 → 3``, where node 0 is the lower-left corner.  Elements in
+    an XY plane (2-D, or 3-D with constant z) use the XY formula; 3-D
+    surface elements (shells) use the true surface area.
 
     Parameters
     ----------
@@ -224,8 +225,8 @@ class Quad4:
         Returns
         -------
         float
-            Area of the quadrilateral in the XY-plane.  Always
-            non-negative.
+            Area of the quadrilateral (true surface area for elements not in
+            an XY plane).  Always non-negative.
 
         Notes
         -----
@@ -234,9 +235,16 @@ class Quad4:
         baselines compare volume-weighted norms at ~1e-11).
         """
 
-        x = self.coord[:, 0]
-        y = self.coord[:, 1]
-        return float(abs(0.5 * ((x[0] - x[2]) * (y[1] - y[3]) + (x[1] - x[3]) * (y[2] - y[0]))))
+        if _is_planar_xy(self.coord):
+            x = self.coord[:, 0]
+            y = self.coord[:, 1]
+            return float(abs(0.5 * ((x[0] - x[2]) * (y[1] - y[3]) + (x[1] - x[3]) * (y[2] - y[0]))))
+        # 3-D surface element (e.g. SHELL4): half the norm of the cross
+        # product of the diagonals -- exact for planar quads, and the area of
+        # the mean plane projection for warped ones.
+        d1 = self.coord[2, :3] - self.coord[0, :3]
+        d2 = self.coord[3, :3] - self.coord[1, :3]
+        return float(0.5 * np.linalg.norm(np.cross(d1, d2)))
 
     def subdiv(self, intervals: int) -> FloatArray:
         """Return the centroid of each sub-quadrilateral.
@@ -626,9 +634,9 @@ class Hex8:
 class Tri3:
     """Three-node triangle using Exodus node ordering.
 
-    Nodes are ordered counter-clockwise: ``0 → 1 → 2``.  The triangle
-    lives in the XY-plane; an optional third coordinate column is accepted
-    and carried through but ignored in area calculations.
+    Nodes are ordered counter-clockwise: ``0 → 1 → 2``.  Triangles in an
+    XY plane use the XY formula; 3-D surface triangles (trishells) use the
+    true surface area.
 
     Parameters
     ----------
@@ -707,15 +715,20 @@ class Tri3:
         Returns
         -------
         float
-            Area of the triangle in the XY-plane.  Always non-negative.
+            Area of the triangle (true surface area for triangles not in an
+            XY plane).  Always non-negative.
         """
 
-        a = self.coord[0, :2]
-        b = self.coord[1, :2]
-        c = self.coord[2, :2]
-        u = b - a
-        v = c - a
-        return float(0.5 * abs(u[0] * v[1] - u[1] * v[0]))
+        if _is_planar_xy(self.coord):
+            a = self.coord[0, :2]
+            b = self.coord[1, :2]
+            c = self.coord[2, :2]
+            u = b - a
+            v = c - a
+            return float(0.5 * abs(u[0] * v[1] - u[1] * v[0]))
+        u = self.coord[1, :3] - self.coord[0, :3]
+        v = self.coord[2, :3] - self.coord[0, :3]
+        return float(0.5 * np.linalg.norm(np.cross(u, v)))
 
     def subdiv(self, intervals: int) -> FloatArray:
         """Return the centroid of each sub-triangle.
@@ -1170,6 +1183,227 @@ class Wedge6:
         return np.asarray([Wedge6(coords[ix]).volume for ix in conn], dtype=np.float64)
 
 
+@dataclass(slots=True)
+class Pyramid5:
+    """Five-node pyramid using Exodus node ordering.
+
+    Nodes 0-3 form the quadrilateral base and node 4 is the apex.  The
+    volume is the sum of two tetrahedra over a diagonal split of the base
+    plus a correction for a non-planar base (exact for planar bases).
+    """
+
+    coord: FloatArray
+
+    dim = 3
+    name = "PYRAMID5"
+    nnode = 5
+
+    def __init__(self, coord: npt.ArrayLike) -> None:
+        self.coord = _coordinate_array(coord, expected_nodes=5, min_dimension=3)
+
+    @property
+    def dimension(self) -> int:
+        """Spatial dimension inferred from coordinates."""
+
+        return int(self.coord.shape[1])
+
+    @property
+    def center(self) -> FloatArray:
+        """Element centroid computed as the average of the node positions."""
+
+        return np.average(self.coord, axis=0)
+
+    @property
+    def volume(self) -> float:
+        """Element volume (average of both diagonal splits of the base)."""
+
+        c = self.coord
+        split1 = _tetrahedron_volume(c[[0, 1, 2, 4]]) + _tetrahedron_volume(c[[0, 2, 3, 4]])
+        split2 = _tetrahedron_volume(c[[0, 1, 3, 4]]) + _tetrahedron_volume(c[[1, 2, 3, 4]])
+        return float(0.5 * (split1 + split2))
+
+    def subdiv(self, intervals: int) -> FloatArray:
+        """Sub-element centroids are not implemented for pyramids."""
+
+        raise NotImplementedError("subdivision is not implemented for PYRAMID5")
+
+    def subcoord(self, intervals: int) -> FloatArray:
+        raise NotImplementedError("subdivision is not implemented for PYRAMID5")
+
+    def subconn(self, intervals: int) -> IntArray:
+        raise NotImplementedError("subdivision is not implemented for PYRAMID5")
+
+    def subvols(self, intervals: int) -> FloatArray:
+        raise NotImplementedError("subdivision is not implemented for PYRAMID5")
+
+
+@dataclass(slots=True)
+class Line2:
+    """Two-node line (BAR/BEAM/TRUSS/ROD); ``volume`` is the length."""
+
+    coord: FloatArray
+
+    dim = 1
+    name = "LINE2"
+    nnode = 2
+
+    def __init__(self, coord: npt.ArrayLike) -> None:
+        self.coord = _coordinate_array(coord, expected_nodes=2, min_dimension=1)
+
+    @property
+    def dimension(self) -> int:
+        """Spatial dimension inferred from coordinates."""
+
+        return int(self.coord.shape[1])
+
+    @property
+    def center(self) -> FloatArray:
+        """Midpoint of the line."""
+
+        return np.average(self.coord, axis=0)
+
+    @property
+    def volume(self) -> float:
+        """Length of the line."""
+
+        return float(np.linalg.norm(self.coord[1] - self.coord[0]))
+
+    def subdiv(self, intervals: int) -> FloatArray:
+        """Return the midpoint of each of ``intervals`` equal segments."""
+
+        n = _positive_intervals(intervals)
+        t = (np.arange(n, dtype=np.float64) + 0.5) / n
+        return self.coord[0] + t[:, np.newaxis] * (self.coord[1] - self.coord[0])
+
+    def subcoord(self, intervals: int) -> FloatArray:
+        n = _positive_intervals(intervals)
+        t = np.arange(n + 1, dtype=np.float64) / n
+        return self.coord[0] + t[:, np.newaxis] * (self.coord[1] - self.coord[0])
+
+    def subconn(self, intervals: int) -> IntArray:
+        n = _positive_intervals(intervals)
+        return np.column_stack([np.arange(n), np.arange(1, n + 1)]).astype(np.int64)
+
+    def subvols(self, intervals: int) -> FloatArray:
+        n = _positive_intervals(intervals)
+        return np.full(n, self.volume / n, dtype=np.float64)
+
+
+#: Element type → (geometry class, number of corner nodes).  Higher-order
+#: and structural variants use their corner nodes (as SEACAS exomerge's
+#: ``VOLUME_FORMULA`` does): exact for straight-sided elements.
+_ELEMENT_TYPES: dict[str, tuple[type, int]] = {}
+
+
+def _register(cls: type, corners: int, *names: str) -> None:
+    for name in names:
+        _ELEMENT_TYPES[name] = (cls, corners)
+
+
+_register(
+    Quad4,
+    4,
+    "quad",
+    "quad4",
+    "quad5",
+    "quad8",
+    "quad9",
+    "quadrilateral",
+    "quadrilateral4",
+    "quadrilateral8",
+    "quadrilateral9",
+    "shell",
+    "shell4",
+    "shell8",
+    "shell9",
+)
+_register(
+    Tri3,
+    3,
+    "tri",
+    "tri3",
+    "tri4",
+    "tri6",
+    "tri7",
+    "triangle",
+    "triangle3",
+    "triangle4",
+    "triangle6",
+    "triangle7",
+    "trishell",
+    "trishell3",
+    "trishell4",
+    "trishell6",
+    "trishell7",
+    "shell3",
+)
+_register(Hex8, 8, "hex", "hex8", "hex9", "hex16", "hex20", "hex27", "hexahedron")
+_register(
+    Tet4,
+    4,
+    "tet",
+    "tet4",
+    "tet5",
+    "tet8",
+    "tet10",
+    "tet11",
+    "tet14",
+    "tet15",
+    "tetra",
+    "tetra4",
+    "tetra5",
+    "tetra8",
+    "tetra10",
+    "tetra11",
+    "tetra14",
+    "tetra15",
+)
+_register(
+    Wedge6, 6, "wedge", "wedge6", "wedge12", "wedge15", "wedge16", "wedge18", "wedge20", "wedge21"
+)
+_register(Pyramid5, 5, "pyramid", "pyramid5", "pyramid13", "pyramid14", "pyramid18", "pyramid19")
+_register(
+    Line2,
+    2,
+    "bar",
+    "bar2",
+    "bar3",
+    "beam",
+    "beam2",
+    "beam3",
+    "truss",
+    "truss2",
+    "truss3",
+    "rod",
+    "rod2",
+    "rod3",
+    "line",
+    "line2",
+    "line3",
+    "edge",
+    "edge2",
+    "edge3",
+)
+
+
+def element_class(element_type: str | bytes) -> tuple[type, int]:
+    """Return ``(geometry class, corner node count)`` for an element type.
+
+    Raises
+    ------
+    ValueError
+        If ``element_type`` is not a recognised Exodus element type.
+    """
+
+    if isinstance(element_type, bytes):
+        element_type = element_type.decode("ascii")
+    key = element_type.strip().lower()
+    try:
+        return _ELEMENT_TYPES[key]
+    except KeyError:
+        raise ValueError(f"unknown element type {element_type!r}") from None
+
+
 def element_factory(element_type: str | bytes, coord: npt.ArrayLike) -> Element:
     """Create an element geometry object from an Exodus element type string.
 
@@ -1179,11 +1413,17 @@ def element_factory(element_type: str | bytes, coord: npt.ArrayLike) -> Element:
         Exodus element type identifier.  Case-insensitive; leading/trailing
         whitespace is ignored.  Accepted aliases:
 
-        * ``"quad"``, ``"quad4"``, ``"shell4"`` → :class:`Quad4`
-        * ``"hex"``, ``"hex8"`` → :class:`Hex8`
-        * ``"tri"``, ``"tri3"``, ``"triangle"``, ``"triangle3"`` → :class:`Tri3`
-        * ``"tet"``, ``"tet4"``, ``"tetra"``, ``"tetra4"`` → :class:`Tet4`
-        * ``"wedge"``, ``"wedge6"`` → :class:`Wedge6`
+        * ``QUAD*``, ``SHELL*`` → :class:`Quad4`
+        * ``HEX*`` → :class:`Hex8`
+        * ``TRI*``, ``TRIANGLE*``, ``TRISHELL*`` → :class:`Tri3`
+        * ``TET*``, ``TETRA*`` → :class:`Tet4`
+        * ``WEDGE*`` → :class:`Wedge6`
+        * ``PYRAMID*`` → :class:`Pyramid5`
+        * ``BAR*``, ``BEAM*``, ``TRUSS*``, ``ROD*``, ``LINE*``, ``EDGE*`` →
+          :class:`Line2`
+
+        Higher-order variants (e.g. ``TETRA10``, ``HEX20``, ``TRI6``) use
+        their corner nodes, which is exact for straight-sided elements.
 
         If ``bytes`` are passed they are decoded as ASCII before lookup.
     coord : array_like
@@ -1215,23 +1455,22 @@ def element_factory(element_type: str | bytes, coord: npt.ArrayLike) -> Element:
     Hex8(coord=...)
     """
 
-    if isinstance(element_type, bytes):
-        element_type = element_type.decode("ascii")
+    cls, corners = element_class(element_type)
+    array = np.asarray(coord, dtype=np.float64)
+    if array.ndim == 2 and array.shape[0] > corners:
+        # Higher-order element: geometry from the corner nodes, which come
+        # first in Exodus node ordering.
+        array = array[:corners]
+    return cls(array)
 
-    key = element_type.strip().lower()
 
-    if key in {"quad", "quad4", "shell4"}:
-        return Quad4(coord)
-    if key in {"hex", "hex8"}:
-        return Hex8(coord)
-    if key in {"tri", "tri3", "triangle", "triangle3"}:
-        return Tri3(coord)
-    if key in {"tet", "tet4", "tetra", "tetra4"}:
-        return Tet4(coord)
-    if key in {"wedge", "wedge6"}:
-        return Wedge6(coord)
+def _is_planar_xy(coord: FloatArray) -> bool:
+    """True for 2-D coordinates, or 3-D coordinates with a constant z."""
 
-    raise ValueError(f"unknown element type {element_type!r}")
+    if coord.shape[1] < 3:
+        return True
+    z = coord[:, 2]
+    return bool(np.all(z == z[0]))
 
 
 def _coordinate_array(
@@ -1513,10 +1752,13 @@ __all__ = [
     "FloatArray",
     "Hex8",
     "IntArray",
+    "Line2",
+    "Pyramid5",
     "Quad4",
     "Tet4",
     "Tri3",
     "Wedge6",
+    "element_class",
     "element_factory",
     "hex8_volumes",
 ]

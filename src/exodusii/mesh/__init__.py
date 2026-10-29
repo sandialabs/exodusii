@@ -6,6 +6,8 @@
 
 from exodusii.mesh.elements import Element
 from exodusii.mesh.elements import Hex8
+from exodusii.mesh.elements import Line2
+from exodusii.mesh.elements import Pyramid5
 from exodusii.mesh.elements import Quad4
 from exodusii.mesh.elements import Tet4
 from exodusii.mesh.elements import Tri3
@@ -58,8 +60,10 @@ __all__ = [
     "Halfspace",
     "Hex8",
     "Intersection",
+    "Line2",
     "MeshMap",
     "MeshMatchError",
+    "Pyramid5",
     "Quad",
     "Quad4",
     "Rectangle",

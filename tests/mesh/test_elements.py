@@ -73,7 +73,7 @@ def test_element_factory_accepts_bytes() -> None:
 
 def test_element_factory_rejects_unknown_type() -> None:
     with pytest.raises(ValueError, match="unknown element type"):
-        element_factory("pyramid", np.zeros((5, 3)))
+        element_factory("sphere", np.zeros((1, 3)))
 
 
 def test_quad4_center_and_volume() -> None:
