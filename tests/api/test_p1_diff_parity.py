@@ -397,3 +397,37 @@ def test_reported_step_is_the_file_step(tmp_path: Path) -> None:
     status, text = _cli("--start", 2, a, b)
     assert status == DIFFERENT
     assert "step 3, entry 4" in text
+
+
+def _write_attrs(path: Path, values) -> Path:
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 2, node_count=6, element_count=2, element_blocks=1)
+        w.write_coordinates(COORDS)
+        w.define_element_block(10, "quad4", CONN)
+        w.write_block_attributes(Entity.ELEMENT_BLOCK, 10, values, names=["A", "B"])
+        w.write_time(0.0)
+    return path
+
+
+def test_command_file_element_attributes(tmp_path: Path) -> None:
+    a = _write_attrs(tmp_path / "a.exo", [[1.0, 1.0], [1.0, 1.0]])
+    b = _write_attrs(tmp_path / "b.exo", [[1.0, 2.0], [1.0, 2.0]])  # B differs
+    cmd = tmp_path / "cmd"
+
+    assert _cli(a, b)[0] == DIFFERENT  # no command file: all attributes
+    cmd.write_text("ELEMENT ATTRIBUTES\n\tA\n")
+    assert _cli("-f", cmd, a, b)[0] == SAME  # only A is compared
+    cmd.write_text("ELEMENT ATTRIBUTES\n\tB absolute 2.0\n")
+    assert _cli("-f", cmd, a, b)[0] == SAME  # per-attribute tolerance
+    cmd.write_text("ELEMENT ATTRIBUTES (all)\n\t!B\n")
+    assert _cli("-f", cmd, a, b)[0] == SAME
+    cmd.write_text("NODAL VARIABLES (all)\n")
+    assert _cli("-f", cmd, a, b)[0] == SAME  # attributes not listed: skipped
+
+
+def test_command_file_ignore_maps(tmp_path: Path) -> None:
+    cmd = tmp_path / "cmd"
+    cmd.write_text("IGNORE MAPS\n")
+    result = read_command_file(cmd)
+    assert result.options.match_ids is False
+    assert not result.warnings

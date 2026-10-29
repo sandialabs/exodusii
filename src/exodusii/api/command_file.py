@@ -32,7 +32,7 @@ NODESET|SIDESET|EDGEBLOCK|FACEBLOCK> VARIABLES`` blocks (with ``(all)``,
 per-variable tolerances and ``!NAME`` exclusions), ``ELEMENT ATTRIBUTES``,
 ``STEP OFFSET``, ``EXCLUDE TIMES``, ``INTERPOLATE``, ``APPLY MATCHING`` /
 ``NODESET MATCH`` / ``SIDESET MATCH``, ``IGNORE CASE`` / ``CASE
-SENSITIVE``, ``IGNORE ATTRIBUTES``, ``IGNORE NANS``, ``IGNORE SIDESET
+SENSITIVE``, ``IGNORE ATTRIBUTES``, ``IGNORE MAPS``, ``IGNORE NANS``, ``IGNORE SIDESET
 DISTRIBUTION FACTORS`` and ``SIDESET DISTRIBUTION`` (tolerance).  ``STEP
 OFFSET AUTOMATIC`` / ``MATCH`` select exodiff's automatic offsets;
 ``NODESET MATCH`` / ``SIDESET MATCH`` (set-entry sorting) are the default.
@@ -43,7 +43,7 @@ categories it does not mention are not compared.
 
 Accepted-but-inert exodiff directives (parsed, then reported as a warning on
 the returned :class:`CommandFileResult`): ``CALCULATE NORMS/L1NORMS/L2NORMS``,
-``IGNORE MAPS/DUPS``, ``SHORT BLOCKS`` / ``NO SHORT``, ``PEDANTIC``,
+``IGNORE DUPS``, ``SHORT BLOCKS`` / ``NO SHORT``, ``PEDANTIC``,
 ``RETURN STATUS`` / ``IGNORE STATUS``, ``MAX NAMES``.
 """
 
@@ -387,6 +387,7 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
     category_defaults: dict[Entity, Tolerance] = {}
     attr_tol: Tolerance | None = None
     ignore_nans = False
+    match_ids = True
     final_time_tol = Tolerance(ToleranceMode.RELATIVE, 0.0, 0.0)
     sideset_df_tol = Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 0.0)
     compare_sideset_df = True
@@ -500,6 +501,9 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
         if _abbrev(t1, "ignore", 3) and _abbrev(t2, "nans", 3):
             ignore_nans = True
             continue
+        if _abbrev(t1, "ignore", 3) and _abbrev(t2, "maps", 3):
+            match_ids = False  # exodiff -ignore_maps: match by file position
+            continue
         if _abbrev(t1, "ignore", 3) and _abbrev(t2, "sideset", 3):
             t3 = toks[2].lower() if len(toks) > 2 else ""
             if _abbrev(t3, "distribution", 3):
@@ -509,16 +513,22 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
 
         # ── ELEMENT ATTRIBUTES (a variable block over attributes) ────────
         if _abbrev(t1, "element", 4) and _abbrev(t2, "attributes", 3):
-            # Consume the block; map default onto attribute tolerance, per-name
-            # tolerances into variable_tolerances (best-effort).
-            attr_default, names, tols, _all, i = _consume_variable_block(
+            # Same rules as a VARIABLES block; attributes use the
+            # ELEMENT_BLOCK category key.
+            attr_default, names, tols, block_all, i = _consume_variable_block(
                 toks, 2, lines, i, default_tol, raw
             )
-            for name, tol in zip(names, tols):
-                if name.startswith("!"):
-                    category_exclude.setdefault(Entity.ELEMENT_BLOCK, set()).add(name[1:])
-                else:
-                    category_tolerances.setdefault(Entity.ELEMENT_BLOCK, {})[name] = tol
+            _add_category(
+                Entity.ELEMENT_BLOCK,
+                names,
+                tols,
+                block_all,
+                categories_specified,
+                category_tolerances,
+                category_exclude,
+                include_variables,
+                all_categories,
+            )
             attr_tol = attr_default
             continue
 
@@ -540,26 +550,17 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
             cat_default, names, tols, block_all, i = _consume_variable_block(
                 toks, 2, lines, i, default_tol, raw
             )
-            categories_specified.add(category)
-            includes: set[str] = set()
-            excludes: set[str] = set()
-            for name, tol in zip(names, tols):
-                if name.startswith("!"):
-                    excludes.add(name[1:])
-                    continue
-                includes.add(name)
-                category_tolerances.setdefault(category, {})[name] = tol
-            if excludes:
-                category_exclude.setdefault(category, set()).update(excludes)
-            # exodiff Check_Parsed_Names: "(all)", or only "!" names, means
-            # compare every variable of this type except the excluded ones.
-            # A header with no names at all compares none of them.
-            if block_all or (excludes and not includes):
-                all_categories.add(category)
-            elif includes:
-                include_variables.setdefault(category, set()).update(includes)
-            else:
-                include_variables.setdefault(category, set())
+            _add_category(
+                category,
+                names,
+                tols,
+                block_all,
+                categories_specified,
+                category_tolerances,
+                category_exclude,
+                include_variables,
+                all_categories,
+            )
             category_defaults[category] = cat_default
             continue
 
@@ -597,6 +598,7 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
         all_categories=frozenset(all_categories),
         categories_specified=frozenset(categories_specified),
         ignore_nans=ignore_nans,
+        match_ids=match_ids,
         final_time_tolerance=final_time_tol,
         sideset_df_tolerance=sideset_df_tol,
         compare_sideset_df=compare_sideset_df,
@@ -607,6 +609,40 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
     )
 
     return CommandFileResult(options=options, warnings=warnings)
+
+
+def _add_category(
+    category: Entity,
+    names: list[str],
+    tols: list[Tolerance],
+    block_all: bool,
+    categories_specified: set[Entity],
+    category_tolerances: dict[Entity, dict[str, Tolerance]],
+    category_exclude: dict[Entity, set[str]],
+    include_variables: dict[Entity, set[str]],
+    all_categories: set[Entity],
+) -> None:
+    """Record one ``... VARIABLES`` / ``ELEMENT ATTRIBUTES`` block."""
+
+    categories_specified.add(category)
+    includes: set[str] = set()
+    excludes: set[str] = set()
+    for name, tol in zip(names, tols, strict=True):
+        if name.startswith("!"):
+            excludes.add(name[1:])
+            continue
+        includes.add(name)
+        category_tolerances.setdefault(category, {})[name] = tol
+    if excludes:
+        category_exclude.setdefault(category, set()).update(excludes)
+    # exodiff Check_Parsed_Names: "(all)", or only "!" names, selects every
+    # name except the excluded ones; a header without names selects none.
+    if block_all or (excludes and not includes):
+        all_categories.add(category)
+    elif includes:
+        include_variables.setdefault(category, set()).update(includes)
+    else:
+        include_variables.setdefault(category, set())
 
 
 def _match_category(token: str) -> Entity | None:
@@ -704,7 +740,6 @@ _INERT_DIRECTIVES: tuple[tuple[str, int, str, int], ...] = (
     ("calculate", 3, "norms", 3),
     ("calculate", 3, "l1norms", 3),
     ("calculate", 3, "l2norms", 3),
-    ("ignore", 3, "maps", 3),
     ("ignore", 3, "dups", 3),
     ("short", 3, "blocks", 3),
     ("pedantic", 8, "", 0),

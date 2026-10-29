@@ -352,6 +352,10 @@ and uses semantic versioning once versioned releases are established.
   (`VariableDiff.time_index`, 0-based) instead of its position in the
   selected steps, including for global variables; the CLI prints it
   1-based.
+- exodiff command files: `ELEMENT ATTRIBUTES` lists select which
+  attributes are compared (with per-attribute tolerances and `!` /
+  `(all)`), and attributes are not compared when a command file omits the
+  section, as in exodiff.  `IGNORE MAPS` matches entities by file position.
 
 ### Compatibility
 

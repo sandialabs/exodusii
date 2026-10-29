@@ -1340,7 +1340,9 @@ def _compare_attributes(
                 continue
             common, _only1, _only2 = _match_names(names1, names2, ignore_case=opts.ignore_case)
             for attr_name in common:
-                if opts.is_excluded(attr_name, Entity.ELEMENT_BLOCK):
+                if not opts.is_included(attr_name, Entity.ELEMENT_BLOCK) or opts.is_excluded(
+                    attr_name, Entity.ELEMENT_BLOCK
+                ):
                     continue
                 try:
                     col1 = exo1.attribute_values(block_entity, block_id, attr_name)
