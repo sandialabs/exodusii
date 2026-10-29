@@ -623,7 +623,9 @@ def _point_on_segment(point: FloatArray, a: FloatArray, b: FloatArray) -> bool:
     relative = point - a
     cross = segment[0] * relative[1] - segment[1] * relative[0]
 
-    if not np.isclose(cross, 0.0):
+    # Relative to the segment and offset sizes, so the test is scale-free.
+    scale = float(np.linalg.norm(segment) * np.linalg.norm(relative))
+    if abs(cross) > 1.0e-12 * scale:
         return False
 
     dot = float(np.dot(relative, segment))

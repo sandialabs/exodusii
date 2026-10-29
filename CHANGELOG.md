@@ -303,6 +303,11 @@ and uses semantic versioning once versioned releases are established.
 - Fixed `Lineout(y=0)` (an integer coordinate) being treated as a free
   axis, and the automatic tolerance being cached on the lineout and reused
   for differently scaled data.
+- Fixed WEDGE6 volumes for wedges whose quadrilateral faces are not planar
+  (a fixed three-tetrahedron split was off by up to ~18%); the volume is
+  now the exact isoparametric integral.  The point-on-boundary test for
+  quadrilateral regions is now relative to the element size instead of a
+  fixed 1e-8.
 
 ### Compatibility
 

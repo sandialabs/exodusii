@@ -152,8 +152,8 @@ def element_volumes(
     Returns
     -------
     ndarray
-        Per-element measures, shape ``(n_elems,)``.  Values are signed
-        (positive for counter-clockwise / outward-normal elements).
+        Per-element measures, shape ``(n_elems,)``.  Always non-negative:
+        inverted elements report the magnitude of their volume.
 
     Examples
     --------

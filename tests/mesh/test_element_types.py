@@ -79,3 +79,43 @@ def test_element_volumes_for_shell_block() -> None:
 def test_unknown_type_still_raises() -> None:
     with pytest.raises(ValueError, match="unknown element type"):
         element_factory("SPHERE", [[0, 0, 0]])
+
+
+def _wedge_isoparametric_volume(coord: np.ndarray, order: int = 10) -> float:
+    gauss, weights = np.polynomial.legendre.leggauss(order)
+    points, weights = (gauss + 1) / 2, weights / 2
+    volume = 0.0
+    for a, wa in zip(points, weights, strict=True):
+        for b, wb in zip(points, weights, strict=True):
+            for z, wz in zip(points, weights, strict=True):
+                s, t = a, b * (1 - a)
+                ds = np.array([-(1 - z), 1 - z, 0, -z, z, 0])
+                dt = np.array([-(1 - z), 0, 1 - z, -z, 0, z])
+                dz = np.array([-(1 - s - t), -s, -t, 1 - s - t, s, t])
+                volume += (
+                    wa * wb * wz * (1 - a) * np.linalg.det([ds @ coord, dt @ coord, dz @ coord])
+                )
+    return float(volume)
+
+
+def test_wedge_volume_exact_for_warped_faces() -> None:
+    rng = np.random.default_rng(0)
+    wedge = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1]], dtype=float
+    )
+    for _ in range(5):
+        warped = wedge + rng.uniform(-0.2, 0.2, wedge.shape)
+        expected = _wedge_isoparametric_volume(warped)
+        assert element_factory("WEDGE6", warped).volume == pytest.approx(expected, rel=1e-12)
+    assert element_factory("WEDGE6", wedge).volume == pytest.approx(0.5)
+
+
+def test_point_on_quad_boundary_is_scale_free() -> None:
+    from exodusii.mesh.regions import quad
+
+    small = quad([0, 0], [1e-6, 0], [1e-6, 1e-6], [0, 1e-6])
+    assert not small.contains(np.array([[3e-9, 5e-6]]))[0]
+    assert small.contains(np.array([[5e-7, 0.0]]))[0]
+    big = quad([0, 0], [1e6, 0], [1e6, 1e6], [0, 1e6])
+    assert big.contains(np.array([[5e5, 0.0]]))[0]
+    assert not big.contains(np.array([[5e5, -1.0]]))[0]

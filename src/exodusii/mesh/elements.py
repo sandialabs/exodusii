@@ -1021,9 +1021,10 @@ class Wedge6:
 
     Notes
     -----
-    Volume is computed by decomposing the wedge into three tetrahedra:
-    ``(0,2,1,4)``, ``(0,3,5,4)``, and ``(0,5,2,4)``.  This decomposition
-    is exact for affine wedges.
+    Volume is the integral of the Jacobian of the isoparametric (linear
+    triangle x linear) map, evaluated exactly with a 3-point triangle rule
+    times 2-point Gauss rule; it is exact for wedges with non-planar
+    quadrilateral faces.
 
     Subdivision uses a dedicated longest-edge algorithm that bisects the
     longest edge of the triangular cross-section while respecting the
@@ -1086,9 +1087,7 @@ class Wedge6:
             Volume of the wedge.  Always non-negative.
         """
 
-        # Decompose into three tetrahedra.
-        tets = ((0, 2, 1, 4), (0, 3, 5, 4), (0, 5, 2, 4))
-        return float(sum(_tetrahedron_volume(self.coord[list(tet)]) for tet in tets))
+        return float(abs(_wedge6_signed_volume(self.coord[:, :3])))
 
     def subdiv(self, intervals: int) -> FloatArray:
         """Return the centroid of each sub-wedge.
@@ -1614,6 +1613,26 @@ def hex8_volumes(coords: npt.ArrayLike) -> FloatArray:
         / 12.0,
         dtype=np.float64,
     )
+
+
+# The wedge Jacobian determinant is quadratic in the triangle coordinates
+# and quadratic in z, so these rules integrate it exactly.
+_WEDGE_TRI_POINTS = np.array([[1 / 6, 1 / 6], [2 / 3, 1 / 6], [1 / 6, 2 / 3]])
+_WEDGE_TRI_WEIGHT = 1.0 / 6.0
+_WEDGE_Z_POINTS = (0.5 - 0.5 / np.sqrt(3.0), 0.5 + 0.5 / np.sqrt(3.0))
+
+
+def _wedge6_signed_volume(coord: FloatArray) -> float:
+    volume = 0.0
+    for s, t in _WEDGE_TRI_POINTS:
+        r = 1.0 - s - t
+        for z in _WEDGE_Z_POINTS:
+            dn_ds = np.array([-(1 - z), 1 - z, 0.0, -z, z, 0.0])
+            dn_dt = np.array([-(1 - z), 0.0, 1 - z, -z, 0.0, z])
+            dn_dz = np.array([-r, -s, -t, r, s, t])
+            jacobian = np.array([dn_ds @ coord, dn_dt @ coord, dn_dz @ coord])
+            volume += _WEDGE_TRI_WEIGHT * 0.5 * float(np.linalg.det(jacobian))
+    return volume
 
 
 def _tetrahedron_volume(coord: FloatArray) -> float:
