@@ -145,3 +145,15 @@ def test_epu_no_files() -> None:
 
 def test_epu_one_file() -> None:
     assert util.epu("mesh.exo") == "mesh.exo"
+
+
+def test_epu_accepts_dotted_base_names(tmp_path, monkeypatch) -> None:
+    # epu itself is not available here: fake it and the joined output.
+    for rank in range(2):
+        (tmp_path / f"my.mesh.exo.2.{rank}").write_text("x")
+    monkeypatch.setattr(util, "which", lambda *_: "/bin/true")
+    (tmp_path / "my.mesh.exo").write_text("joined")
+    monkeypatch.chdir(tmp_path)
+    assert util.epu(str(tmp_path / "my.mesh.exo.2.0"), str(tmp_path / "my.mesh.exo.2.1")) == (
+        "my.mesh.exo"
+    )

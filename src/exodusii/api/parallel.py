@@ -101,12 +101,11 @@ class ParallelExodusFile:
         self._owned: list[ExodusFile] = []
         self._files: list[ExodusFile] = []
 
-        # Legacy parallel_exodusii_file sorted filenames before opening.  This
-        # matters because old callers may inspect exof.files[0] and expect a
-        # deterministic component file.
+        # Sort paths by processor rank (callers may rely on files[0]); the
+        # rank is compared numerically so unpadded names order correctly.
         ordered_files: tuple[str | Path | ExodusFile, ...]
         if all(not isinstance(file, ExodusFile) for file in files):
-            ordered_files = tuple(sorted(files, key=lambda value: str(value)))
+            ordered_files = tuple(sorted(files, key=_rank_sort_key))
         else:
             ordered_files = files
 
@@ -2800,10 +2799,24 @@ class ParallelExodusFile:
         times = self._files[0].times()
         coord_names = self._files[0].coordinate_names().tolist()
 
+        processors = self._files[0].backend.dimension(DimensionName.NUM_PROCESSORS.value, None)
+        if processors is not None and int(processors) != len(self._files):
+            warnings.warn(
+                f"{len(self._files)} component files given but the files were written "
+                f"for {int(processors)} processors",
+                stacklevel=3,
+            )
+
         for file in self._files[1:]:
             if file.dimension != dimension:
                 raise ExodusConsistencyError("spatial dimension not consistent across files")
-            if not np.allclose(file.times(), times):
+            file_times = file.times()
+            if file_times.shape != times.shape:
+                raise ExodusConsistencyError(
+                    f"number of time steps not consistent across files "
+                    f"({len(times)} in {self._files[0].path}, {len(file_times)} in {file.path})"
+                )
+            if not np.allclose(file_times, times, equal_nan=True):
                 raise ExodusConsistencyError("time values not consistent across files")
             if file.coordinate_names().tolist() != coord_names:
                 raise ExodusConsistencyError("coordinate names not consistent across files")
@@ -2938,6 +2951,16 @@ def _plausible_global_ids(global_ids: npt.ArrayLike, local_ids: npt.ArrayLike) -
     if ids.size == 0 or np.any(ids <= 0) or len(set(ids.tolist())) != ids.size:
         return False
     return set(np.asarray(local_ids, dtype=np.int64).tolist()) <= set(ids.tolist())
+
+
+def _rank_sort_key(path: object) -> tuple[str, int, str]:
+    """Sort ``base.exo.<nproc>.<rank>`` paths by numeric rank."""
+
+    text = str(path)
+    stem, dot, rank = text.rpartition(".")
+    if dot and rank.isdigit():
+        return (stem, int(rank), text)
+    return (text, -1, text)
 
 
 def _contiguous_gid_map(values: npt.ArrayLike) -> dict[int, int]:

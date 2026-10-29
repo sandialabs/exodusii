@@ -87,6 +87,7 @@ class DimensionName(StrEnum):
     NUM_FACE_MAPS = "num_face_maps"
 
     NUM_NODES_GLOBAL = "num_nodes_global"
+    NUM_PROCESSORS = "num_processors"
     NUM_ELEMENTS_GLOBAL = "num_elems_global"
     NUM_NODE_SETS_GLOBAL = "num_ns_global"
     NUM_SIDE_SETS_GLOBAL = "num_ss_global"

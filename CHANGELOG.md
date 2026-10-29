@@ -323,6 +323,11 @@ and uses semantic versioning once versioned releases are established.
   back as NaN instead of 9.97e36; rewriting QA/info records with a
   different count raises instead of writing a partial table; block
   attributes always get an `attrib_name%d` variable, as in SEACAS.
+- Parallel files: component paths are ordered by numeric rank (`.10` after
+  `.2`); a different number of time steps raises `ExodusConsistencyError`
+  (was a numpy broadcast error); a warning is issued when the number of
+  files differs from `num_processors`.  `util.epu()` accepts base names
+  containing dots.
 
 ### Compatibility
 

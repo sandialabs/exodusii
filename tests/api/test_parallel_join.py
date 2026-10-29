@@ -22,6 +22,7 @@ from pathlib import Path
 
 import netCDF4
 import numpy as np
+import pytest
 
 from exodusii.api.file import ExodusFile
 from exodusii.api.parallel import ParallelExodusFile
@@ -301,3 +302,39 @@ def test_join_keeps_side_set_distribution_factors(datadir: Path, tmp_path: Path)
                 for i, (e, s) in enumerate(zip(out_ids, np.asarray(actual.sides), strict=True))
             }
             assert out_df == ref_df
+
+
+def test_component_files_sorted_by_numeric_rank(tmp_path: Path) -> None:
+    from exodusii.api.parallel import _rank_sort_key
+
+    names = [f"m.exo.12.{rank}" for rank in (10, 2, 0, 11, 1)]
+    assert sorted(names, key=_rank_sort_key) == [f"m.exo.12.{r}" for r in (0, 1, 2, 10, 11)]
+    padded = [f"m.exo.12.{rank:02d}" for rank in (10, 2, 0)]
+    assert sorted(padded, key=_rank_sort_key) == sorted(padded)
+
+
+def test_mismatched_step_counts_raise_consistency_error(tmp_path: Path) -> None:
+    from exodusii.core.errors import ExodusConsistencyError
+
+    paths = []
+    for rank, steps in enumerate((2, 3)):
+        path = tmp_path / f"s.exo.2.{rank}"
+        with ExodusWriter.create(path) as w:
+            w.initialize("t", 1, node_count=1, element_count=0)
+            w.write_coordinates([[float(rank)]])
+            for step in range(steps):
+                w.write_time(float(step))
+        paths.append(path)
+    with pytest.raises(ExodusConsistencyError, match="number of time steps"):
+        ParallelExodusFile.open(*paths)
+
+
+def test_warns_when_file_count_differs_from_num_processors(datadir: Path) -> None:
+    from exodusii.core.errors import ExodusConsistencyError
+
+    files = sorted(glob.glob(str(datadir / "edges.exo.4.*")))[:3]
+    with (
+        pytest.warns(UserWarning, match="written for 4 processors"),
+        pytest.raises(ExodusConsistencyError, match="num_nodes_global"),
+    ):
+        ParallelExodusFile.open(*files)
