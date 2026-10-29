@@ -277,6 +277,9 @@ and uses semantic versioning once versioned releases are established.
   (`1-3,7`); `NODESET MATCH` / `SIDESET MATCH` no longer enable coordinate
   matching; `IGNORE SIDESET DISTRIBUTION FACTORS` and `SIDESET DISTRIBUTION`
   are honoured.
+- Fixed `ParallelExodusFile.write()` dropping side-set distribution factors
+  when Nemesis `ss_df_cnt_global` is 0 (it routinely is); factors stored by
+  the component files are written, as SEACAS epu does.
 
 ### Compatibility
 

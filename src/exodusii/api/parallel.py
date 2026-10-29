@@ -1712,11 +1712,11 @@ class ParallelExodusFile:
     ) -> npt.NDArray[np.float64] | None:
         """Return distribution factors to write to a joined serial file.
 
-        User-facing set reads should expose factors found in component files.
-        For joined-file writing, Nemesis global distribution-factor counts are
-        authoritative when present. If the global count is zero, suppress local
-        factors so we do not create ``num_df_*`` dimensions absent from the
-        expected joined file.
+        Follows SEACAS epu: node-set factors are always written (components
+        without stored factors contribute 1.0); other sets carry the factors
+        the components store.  Nemesis ``*_df_cnt_global`` counts are not
+        authoritative -- they are routinely 0 even when every component stores
+        factors (e.g. ``tests/data/mkmesh.par.*``).
         """
 
         if not set_info.count:
@@ -1731,10 +1731,8 @@ class ParallelExodusFile:
                 return set_info.dist_facts
             return np.ones(set_info.count, dtype=np.float64)
 
-        global_count = self._global_set_distribution_factor_count(on, set_info.id)
-        if global_count == 0:
-            return None
-
+        # epu: dfCount is the sum of the component counts (epu.C:3333,
+        # :3462); write whatever the components store.
         return set_info.dist_facts if set_info.distribution_factors else None
 
     def _local_set_global_labels(

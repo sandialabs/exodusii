@@ -270,3 +270,34 @@ def test_join_keeps_large_ids(tmp_path: Path) -> None:
         assert exo.int64
         assert exo.ids(Entity.NODE).tolist() == [big, big + 1, big + 2]
         assert exo.ids(Entity.ELEMENT).tolist() == [big, big + 1]
+
+
+def test_join_keeps_side_set_distribution_factors(datadir: Path, tmp_path: Path) -> None:
+    # Nemesis ss_df_cnt_global is 0 in these files, but every component
+    # stores dist_fact_ss2 and so does the serial reference (epu writes them).
+    joined = tmp_path / "mkmesh.exo"
+    files = sorted(glob.glob(str(datadir / "mkmesh.par.2.*")))
+    with ParallelExodusFile.open(*files) as pef:
+        pef.write(joined)
+
+    with ExodusFile.open(datadir / "mkmesh.gen") as ref, ExodusFile.open(joined) as out:
+        for set_id in ref.side_set_ids().tolist():
+            expected = ref.side_set(set_id)
+            actual = out.side_set(set_id)
+            if expected.dist_facts is None:
+                assert actual.dist_facts is None
+                continue
+            assert actual.dist_facts is not None
+            # Compare per (element id, side), independent of storage order.
+            ref_ids = ref.ids("element")[np.asarray(expected.elems) - 1]
+            out_ids = out.ids("element")[np.asarray(actual.elems) - 1]
+            per_side = len(expected.dist_facts) // expected.count
+            ref_df = {
+                (int(e), int(s)): tuple(expected.dist_facts[i * per_side : (i + 1) * per_side])
+                for i, (e, s) in enumerate(zip(ref_ids, np.asarray(expected.sides), strict=True))
+            }
+            out_df = {
+                (int(e), int(s)): tuple(actual.dist_facts[i * per_side : (i + 1) * per_side])
+                for i, (e, s) in enumerate(zip(out_ids, np.asarray(actual.sides), strict=True))
+            }
+            assert out_df == ref_df
