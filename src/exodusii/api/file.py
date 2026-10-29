@@ -2577,13 +2577,7 @@ def _one_based_name_index(names: tuple[str, ...], requested: str) -> int:
 def _decode_char_field(chars: Any) -> str:
     """Decode one fixed-width NetCDF char field (stop at NUL, trim right)."""
 
-    array = np.asarray(chars)
-    if array.dtype.kind == "S":
-        raw = b"".join(bytes(c) for c in array.reshape(-1))
-        text = raw.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
-    else:
-        text = "".join(str(c) for c in array.reshape(-1)).split("\x00", 1)[0]
-    return text.rstrip()
+    return decode_text(np.asarray(chars).reshape(-1).tobytes())
 
 
 def _four_fields(values: list[str]) -> tuple[str, str, str, str]:

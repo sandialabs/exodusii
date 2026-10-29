@@ -293,6 +293,10 @@ and uses semantic versioning once versioned releases are established.
   (`ExodusIIFile`, `ParallelExodusIIFile`) still returns zeros.
 - Block and set IDs of 0 or below are accepted (libexodus reserves only
   -1).
+- Fixed string decoding: text ends at the first NUL (stale bytes after it
+  were kept, e.g. `abc\0old` read as `abcold`), bytes that are not valid
+  UTF-8 decode as Latin-1 instead of raising, and leading whitespace is
+  kept (only trailing padding is removed, as in libexodus).
 
 ### Compatibility
 

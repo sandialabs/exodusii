@@ -19,8 +19,8 @@ def decode_text(value: Any, *, strip: bool = True) -> str:
         A Python string, bytes object, NumPy byte/string scalar, masked value, or
         other scalar object.
     strip
-        If true, strip trailing NULs and whitespace. Exodus string fields are
-        fixed-width and commonly padded.
+        If true, strip trailing whitespace.  Exodus string fields are
+        fixed-width and padded; leading whitespace is significant.
 
     Returns
     -------
@@ -31,6 +31,10 @@ def decode_text(value: Any, *, strip: bool = True) -> str:
     -----
     Masked character entries decode to ``""``. This is useful for NetCDF4 char
     arrays where unused trailing characters may be masked.
+
+    Text ends at the first NUL, as in C: libexodus writes only
+    ``strlen + 1`` bytes, so stale characters can follow it.  Bytes that are
+    not valid UTF-8 are decoded as Latin-1.
     """
 
     if np.ma.is_masked(value):
@@ -38,17 +42,20 @@ def decode_text(value: Any, *, strip: bool = True) -> str:
 
     if isinstance(value, str):
         text = value
-    elif isinstance(value, bytes):
-        text = value.decode("utf-8")
-    elif isinstance(value, np.bytes_):
-        text = bytes(value).decode("utf-8")
-    elif isinstance(value, np.str_):
-        text = str(value)
+    elif isinstance(value, bytes | np.bytes_):
+        text = _decode_bytes(bytes(value))
     else:
         text = str(value)
 
-    text = text.replace("\x00", "")
-    return text.strip() if strip else text.rstrip("\x00")
+    text = text.split("\x00", 1)[0]
+    return text.rstrip() if strip else text
+
+
+def _decode_bytes(raw: bytes) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def stringify(value: Any, *, strip: bool = True) -> str | np.ndarray:
@@ -176,9 +183,22 @@ def _is_character_vector(array: np.ndarray | np.ma.MaskedArray) -> bool:
 
 
 def _join_character_vector(array: np.ndarray | np.ma.MaskedArray, *, strip: bool) -> str:
-    text = "".join(decode_text(item, strip=False) for item in array)
-    text = text.replace("\x00", "")
-    return text.strip() if strip else text.rstrip("\x00")
+    plain = np.asarray(array)
+    if plain.dtype.kind == "S" and not np.ma.is_masked(array):
+        # Decode the field as a whole so multi-byte UTF-8 survives.
+        text = _decode_bytes(plain.tobytes())
+    else:
+        text = "".join(_character(item) for item in array)
+    text = text.split("\x00", 1)[0]
+    return text.rstrip() if strip else text
+
+
+def _character(item: Any) -> str:
+    if np.ma.is_masked(item):
+        return "\x00"
+    if isinstance(item, bytes | np.bytes_):
+        return _decode_bytes(bytes(item)) or "\x00"
+    return str(item) or "\x00"
 
 
 def _encode_one_fixed_width(value: str, *, width: int, dtype: str) -> np.ndarray:

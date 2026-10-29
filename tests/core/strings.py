@@ -156,3 +156,24 @@ def test_encode_fixed_width_truncates() -> None:
 def test_encode_fixed_width_rejects_nonpositive_width() -> None:
     with pytest.raises(ValueError, match="width must be positive"):
         encode_fixed_width("abc", width=0)
+
+
+def test_decode_text_stops_at_first_nul() -> None:
+    # libexodus writes strlen + 1 bytes; a shorter rename leaves stale bytes.
+    assert decode_text(b"abc\x00old") == "abc"
+    assert stringify(np.frombuffer(b"abc\x00old  ", dtype="S1")) == "abc"
+
+
+def test_decode_text_keeps_leading_whitespace() -> None:
+    assert decode_text("  indented   ") == "  indented"
+    assert stringify(np.frombuffer(b"  indented\x00\x00", dtype="S1")) == "  indented"
+
+
+def test_decode_text_non_utf8_falls_back_to_latin1() -> None:
+    assert decode_text(b"caf\xe9") == "café"
+    assert stringify(np.frombuffer(b"caf\xe9\x00", dtype="S1")) == "café"
+
+
+def test_stringify_multibyte_utf8_character_vector() -> None:
+    raw = "naïve".encode() + b"\x00\x00"
+    assert stringify(np.frombuffer(raw, dtype="S1")) == "naïve"
