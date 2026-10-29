@@ -443,7 +443,7 @@ class ExodusIIFile:
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self.reader.values(
-            var_name, on="element", block=block_id, time=legacy_time_index(time_step)
+            var_name, on="element", block=block_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_element_variable_values_across_blocks(
@@ -1583,7 +1583,7 @@ class ExodusIIFile:
         time = legacy_time_index(time_step)
 
         if on in {Entity.ELEMENT, Entity.EDGE, Entity.FACE}:
-            return self.reader.values(name, on=on, block_id=id_value, time=time)
+            return self.reader.values(name, on=on, block_id=id_value, time=time, fill=0.0)
 
         if on in {
             Entity.NODE_SET,
@@ -1592,7 +1592,7 @@ class ExodusIIFile:
             Entity.FACE_SET,
             Entity.ELEMENT_SET,
         }:
-            return self.reader.values(name, on=on, set_id=id_value, time=time)
+            return self.reader.values(name, on=on, set_id=id_value, time=time, fill=0.0)
 
         return self.reader.values(name, on=on, time=time)
 

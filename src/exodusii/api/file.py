@@ -1797,6 +1797,7 @@ class ExodusFile:
         block: int | None = None,
         block_id: int | None = None,
         set_id: int | None = None,
+        fill: float = np.nan,
     ) -> npt.NDArray[np.float64]:
         """Return result variable values for any entity location.
 
@@ -1832,6 +1833,9 @@ class ExodusFile:
             For set variables (node set, side set, etc.), restrict output to
             a single set with this Exodus ID.  When omitted, values from all
             sets are concatenated.
+        fill : float, optional
+            Value returned for blocks/sets where the variable is not stored
+            (truth-table entry 0).  Default ``nan``.
 
         Returns
         -------
@@ -1908,7 +1912,11 @@ class ExodusFile:
             return self._node_values(name, time=time)
         if ent in {Entity.ELEMENT, Entity.EDGE, Entity.FACE}:
             return self._object_block_values(
-                name, on=ent, time=time, block_id=block_id if block_id is not None else block
+                name,
+                on=ent,
+                time=time,
+                block_id=block_id if block_id is not None else block,
+                fill=fill,
             )
         if ent in {
             Entity.NODE_SET,
@@ -1917,7 +1925,7 @@ class ExodusFile:
             Entity.FACE_SET,
             Entity.ELEMENT_SET,
         }:
-            return self._set_values(name, on=ent, time=time, set_id=set_id)
+            return self._set_values(name, on=ent, time=time, set_id=set_id, fill=fill)
 
         raise NotImplementedError(f"values for {ent.value!r} are not implemented yet")
 
@@ -2366,7 +2374,13 @@ class ExodusFile:
         raise ExodusLookupError(f"attribute {name!r} not found")
 
     def _object_block_values(
-        self, name: str, *, on: Entity, time: TimeSelector = None, block_id: int | None = None
+        self,
+        name: str,
+        *,
+        on: Entity,
+        time: TimeSelector = None,
+        block_id: int | None = None,
+        fill: float = np.nan,
     ) -> npt.NDArray[np.float64]:
         spec = variable_spec(on)
         variable_index = self._variable_index(on, name)
@@ -2377,7 +2391,9 @@ class ExodusFile:
         if block_id is None:
             block_ids = self.block_ids(spec.location_entity)
             chunks = [
-                self._object_block_values(name, on=on, time=time, block_id=int(current_id))
+                self._object_block_values(
+                    name, on=on, time=time, block_id=int(current_id), fill=fill
+                )
                 for current_id in block_ids
             ]
             if not chunks:
@@ -2391,8 +2407,8 @@ class ExodusFile:
         if values is None:
             count = self.block(spec.location_entity, block_id).count
             if time is None:
-                return np.zeros((len(self.times()), count), dtype=np.float64)
-            return np.zeros(count, dtype=np.float64)
+                return np.full((len(self.times()), count), fill, dtype=np.float64)
+            return np.full(count, fill, dtype=np.float64)
 
         array = np.asarray(values, dtype=np.float64)
         if time is None:
@@ -2402,7 +2418,13 @@ class ExodusFile:
         return np.asarray(array[selection.index], dtype=np.float64)
 
     def _set_values(
-        self, name: str, *, on: Entity, time: TimeSelector = None, set_id: int | None = None
+        self,
+        name: str,
+        *,
+        on: Entity,
+        time: TimeSelector = None,
+        set_id: int | None = None,
+        fill: float = np.nan,
     ) -> npt.NDArray[np.float64]:
         spec = variable_spec(on)
         variable_index = self._variable_index(on, name)
@@ -2413,7 +2435,7 @@ class ExodusFile:
         if set_id is None:
             set_ids = self.set_ids(spec.location_entity)
             chunks = [
-                self._set_values(name, on=on, time=time, set_id=int(current_id))
+                self._set_values(name, on=on, time=time, set_id=int(current_id), fill=fill)
                 for current_id in set_ids
             ]
             if not chunks:
@@ -2427,8 +2449,8 @@ class ExodusFile:
         set_info = self.set(spec.location_entity, set_id)
         if values is None:
             if time is None:
-                return np.zeros((len(self.times()), set_info.count), dtype=np.float64)
-            return np.zeros(set_info.count, dtype=np.float64)
+                return np.full((len(self.times()), set_info.count), fill, dtype=np.float64)
+            return np.full(set_info.count, fill, dtype=np.float64)
 
         array = np.asarray(values, dtype=np.float64)
         if time is None:

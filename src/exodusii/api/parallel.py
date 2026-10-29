@@ -1264,6 +1264,7 @@ class ParallelExodusFile:
         block: int | None = None,
         block_id: int | None = None,
         set_id: int | None = None,
+        fill: float = np.nan,
     ) -> npt.NDArray[np.float64]:
         """Return aggregate result variable values.
 
@@ -1327,7 +1328,9 @@ class ParallelExodusFile:
 
             if requested_block_id is None:
                 chunks = [
-                    self.values(name, on=location, time=time, block_id=int(current_block_id))
+                    self.values(
+                        name, on=location, time=time, block_id=int(current_block_id), fill=fill
+                    )
                     for current_block_id in self.block_ids(block_location)
                 ]
                 if not chunks:
@@ -1335,7 +1338,7 @@ class ParallelExodusFile:
                 return np.concatenate(chunks, axis=0 if time is not None else 1)
 
             return self._block_object_values(
-                name, on=location, block=int(requested_block_id), time=time
+                name, on=location, block=int(requested_block_id), time=time, fill=fill
             )
 
         if location in {
@@ -1345,7 +1348,7 @@ class ParallelExodusFile:
             Entity.FACE_SET,
             Entity.ELEMENT_SET,
         }:
-            return self._set_values(name, on=location, set_id=set_id, time=time)
+            return self._set_values(name, on=location, set_id=set_id, time=time, fill=fill)
 
         raise ExodusInvalidEntityError(f"values for {location.value!r} are not implemented")
 
@@ -1402,11 +1405,11 @@ class ParallelExodusFile:
         return output
 
     def _set_values(
-        self, name: str, *, on: Entity, set_id: int | None, time: TimeSelector
+        self, name: str, *, on: Entity, set_id: int | None, time: TimeSelector, fill: float = np.nan
     ) -> npt.NDArray[np.float64]:
         if set_id is None:
             chunks = [
-                self._set_values(name, on=on, set_id=int(current_id), time=time)
+                self._set_values(name, on=on, set_id=int(current_id), time=time, fill=fill)
                 for current_id in self.set_ids(on)
             ]
             if not chunks:
@@ -1418,14 +1421,9 @@ class ParallelExodusFile:
 
         output: npt.NDArray[np.float64]
         if time is None:
-            first_chunk = next(
-                file.values(name, on=on, set_id=set_id, time=time)
-                for file in self._files
-                if self._file_set_is_active(file, on, set_id)
-            )
-            output = np.zeros((first_chunk.shape[0], len(keys)), dtype=np.float64)
+            output = np.full((len(self.times()), len(keys)), fill, dtype=np.float64)
         else:
-            output = np.zeros(len(keys), dtype=np.float64)
+            output = np.full(len(keys), fill, dtype=np.float64)
 
         key_to_row = {key: row for row, key in enumerate(keys)}
         for file_index, file in enumerate(self._files):
@@ -1435,7 +1433,7 @@ class ParallelExodusFile:
             local_set = file.set(on, set_id)
             local_labels = self._local_set_global_labels(file_index, local_set, on)
             local_keys = _set_value_keys_from_local(local_labels, local_set, on)
-            local_values = file.values(name, on=on, set_id=set_id, time=time)
+            local_values = file.values(name, on=on, set_id=set_id, time=time, fill=fill)
 
             for local_index, key in enumerate(local_keys):
                 output_index = key_to_row[key]
@@ -2588,7 +2586,7 @@ class ParallelExodusFile:
         return maps
 
     def _block_object_values(
-        self, name: str, *, on: Entity, block: int, time: TimeSelector
+        self, name: str, *, on: Entity, block: int, time: TimeSelector, fill: float = np.nan
     ) -> npt.NDArray[np.float64]:
         """Fast aggregate element/edge/face block variable values.
 
@@ -2617,15 +2615,15 @@ class ParallelExodusFile:
 
         if first_array is None:
             if time is None:
-                return np.zeros((len(self.times()), len(block_gids)), dtype=np.float64)
-            return np.zeros(len(block_gids), dtype=np.float64)
+                return np.full((len(self.times()), len(block_gids)), fill, dtype=np.float64)
+            return np.full(len(block_gids), fill, dtype=np.float64)
 
         output: npt.NDArray[np.float64]
         if time is None:
-            output = np.zeros((first_array.shape[0], len(block_gids)), dtype=np.float64)
+            output = np.full((first_array.shape[0], len(block_gids)), fill, dtype=np.float64)
             selection_index = None
         else:
-            output = np.zeros(len(block_gids), dtype=np.float64)
+            output = np.full(len(block_gids), fill, dtype=np.float64)
             selection_index = self._resolve_time_index(time)
 
         for file_index, file in enumerate(self._files):

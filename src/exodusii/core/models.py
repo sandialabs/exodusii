@@ -295,7 +295,7 @@ class Block:
         object.__setattr__(self, "entity", normalized)
         object.__setattr__(self, "element_type", self.element_type.upper())
 
-        _require_positive_int("id", self.id)
+        _require_valid_id(self.id)
         _require_positive_int("index", self.index)
         _require_nonnegative_int("count", self.count)
         _require_nonnegative_int("nodes_per_entity", self.nodes_per_entity)
@@ -476,7 +476,7 @@ class SetInfo:
 
         object.__setattr__(self, "entity", normalized)
 
-        _require_positive_int("id", self.id)
+        _require_valid_id(self.id)
         _require_positive_int("index", self.index)
         _require_nonnegative_int("count", self.count)
         _require_nonnegative_int("distribution_factors", self.distribution_factors)
@@ -707,6 +707,15 @@ def _require_positive_int(name: str, value: Any) -> None:
         raise TypeError(f"{name} must be an int")
     if value < 1:
         raise ValueError(f"{name} must be positive")
+
+
+def _require_valid_id(value: Any) -> None:
+    """Exodus IDs may be any integer except EX_INVALID_ID (-1)."""
+
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+        raise TypeError("id must be an int")
+    if value == -1:
+        raise ValueError("id must not be -1 (EX_INVALID_ID)")
 
 
 def _require_nonnegative_int(name: str, value: Any) -> None:

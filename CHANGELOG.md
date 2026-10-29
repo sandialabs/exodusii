@@ -287,6 +287,12 @@ and uses semantic versioning once versioned releases are established.
   (`Pyramid5`), BAR/BEAM/TRUSS/ROD (`Line2`, length), and higher-order
   variants (TETRA10, HEX20/27, TRI6, QUAD8/9, WEDGE15, …) via their corner
   nodes.  New `element_class()` lookup.
+- Values of block/set variables that the truth table marks as not stored
+  are now NaN instead of zeros (which were indistinguishable from data);
+  `values(..., fill=)` chooses the fill value.  The legacy API
+  (`ExodusIIFile`, `ParallelExodusIIFile`) still returns zeros.
+- Block and set IDs of 0 or below are accepted (libexodus reserves only
+  -1).
 
 ### Compatibility
 

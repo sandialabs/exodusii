@@ -145,11 +145,22 @@ def test_block_rejects_non_block_entity() -> None:
         Block(id=1, index=1, entity="node", element_type="node", count=1, nodes_per_entity=1)
 
 
-def test_block_rejects_bad_id() -> None:
-    with pytest.raises(ValueError, match="id must be positive"):
+def test_block_rejects_invalid_id() -> None:
+    with pytest.raises(ValueError, match="EX_INVALID_ID"):
+        Block(
+            id=-1, index=1, entity="element_block", element_type="quad", count=1, nodes_per_entity=4
+        )
+
+
+def test_block_and_set_accept_zero_and_negative_ids() -> None:
+    # libexodus allows any ID except EX_INVALID_ID.
+    assert (
         Block(
             id=0, index=1, entity="element_block", element_type="quad", count=1, nodes_per_entity=4
-        )
+        ).id
+        == 0
+    )
+    assert SetInfo(id=-5, index=1, entity="node_set", count=1).id == -5
 
 
 def test_block_rejects_negative_count() -> None:

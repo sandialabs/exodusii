@@ -641,56 +641,64 @@ class ParallelExodusIIFile:
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.ELEMENT, block_id=block_id, time=legacy_time_index(time_step)
+            var_name,
+            on=Entity.ELEMENT,
+            block_id=block_id,
+            time=legacy_time_index(time_step),
+            fill=0.0,
         )
 
     def get_edge_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.EDGE, block_id=block_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.EDGE, block_id=block_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_face_variable_values(
         self, block_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.FACE, block_id=block_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.FACE, block_id=block_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_node_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.NODE_SET, set_id=set_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.NODE_SET, set_id=set_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_side_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.SIDE_SET, set_id=set_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.SIDE_SET, set_id=set_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_edge_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.EDGE_SET, set_id=set_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.EDGE_SET, set_id=set_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_face_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.FACE_SET, set_id=set_id, time=legacy_time_index(time_step)
+            var_name, on=Entity.FACE_SET, set_id=set_id, time=legacy_time_index(time_step), fill=0.0
         )
 
     def get_element_set_variable_values(
         self, set_id: int | None, var_name: str, time_step: int | None = None
     ) -> npt.NDArray[np.float64]:
         return self._parallel.values(
-            var_name, on=Entity.ELEMENT_SET, set_id=set_id, time=legacy_time_index(time_step)
+            var_name,
+            on=Entity.ELEMENT_SET,
+            set_id=set_id,
+            time=legacy_time_index(time_step),
+            fill=0.0,
         )
 
     def get_node_variable_history(self, var_name: str, node_id: int) -> npt.NDArray[np.float64]:
@@ -708,7 +716,9 @@ class ParallelExodusIIFile:
             )
             matches = np.nonzero(np.asarray(block_gids, dtype=np.int64) == int(elem_id))[0]
             if len(matches):
-                values = self._parallel.values(var_name, on=Entity.ELEMENT, block_id=int(block_id))
+                values = self._parallel.values(
+                    var_name, on=Entity.ELEMENT, block_id=int(block_id), fill=0.0
+                )
                 return values[:, int(matches[0])]
 
         raise ExodusLookupError(f"element ID {elem_id} not found")
