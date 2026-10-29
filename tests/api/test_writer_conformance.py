@@ -143,3 +143,54 @@ def test_node_set_distribution_factors_reuse_entry_dimension(tmp_path: Path) -> 
         assert "num_df_ns1" not in ds.dimensions
     with ExodusFile.open(path) as exo:
         assert np.allclose(exo.node_set(1).dist_facts, [0.5, 0.25])  # ty: ignore[invalid-argument-type]
+
+
+def test_node_variables_without_nodes(tmp_path: Path) -> None:
+    path = tmp_path / "empty_rank.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 2, node_count=0, element_count=0)
+        w.define_node_variables(["U"])
+        w.write_time(0.0)
+    with ExodusFile.open(path) as exo:
+        assert exo.variable_names("node") == ("U",)
+
+
+def test_skipped_time_steps_read_as_nan(tmp_path: Path) -> None:
+    path = tmp_path / "gap.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=2, element_count=0)
+        w.write_coordinates([[0.0], [1.0]])
+        w.define_node_variables(["u"])
+        w.write_time(0.0)
+        w.write_node_values("u", [1.0, 1.0])
+        w.write_time(5.0, step=3)
+        w.write_node_values("u", [3.0, 3.0])
+    with ExodusFile.open(path) as exo:
+        times = exo.times()
+        assert times[0] == 0.0 and times[2] == 5.0 and np.isnan(times[1])
+        assert np.isnan(exo.values("u", on="node", time=1)).all()
+
+
+def test_rewriting_records_with_a_different_count_raises(tmp_path: Path) -> None:
+    with ExodusWriter.create(tmp_path / "rec.exo") as w:
+        w.initialize("t", 1, node_count=0, element_count=0)
+        w.write_info_records(["a", "b"])
+        w.write_info_records(["c", "d"])  # same count: overwrite is fine
+        with pytest.raises(ExodusWriteError, match="info records"):
+            w.write_info_records(["only one"])
+        w.write_qa_records([("code", "1", "d", "t")])
+        with pytest.raises(ExodusWriteError, match="QA records"):
+            w.write_qa_records([("a", "1", "d", "t"), ("b", "1", "d", "t")])
+
+
+def test_block_attributes_always_get_a_name_variable(tmp_path: Path) -> None:
+    path = tmp_path / "attr.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 1, node_count=2, element_count=1, element_blocks=1)
+        w.write_coordinates([[0.0], [1.0]])
+        w.define_element_block(1, "bar2", [[1, 2]])
+        w.write_block_attributes(Entity.ELEMENT_BLOCK, 1, [[1.0, 2.0]])
+    with netCDF4.Dataset(path) as ds:
+        assert ds["attrib_name1"].shape[0] == 2
+    with ExodusFile.open(path) as exo:
+        assert np.asarray(exo.attributes("element_block", 1)).tolist() == [[1.0, 2.0]]

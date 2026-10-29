@@ -457,6 +457,12 @@ class ExodusWriter:
 
         if not self._backend.has_dimension(DimensionName.NUM_INFO_RECORDS.value):
             self._backend.create_dimension(DimensionName.NUM_INFO_RECORDS.value, len(records))
+        elif self._dimension_size(DimensionName.NUM_INFO_RECORDS.value) != len(records):
+            raise ExodusWriteError(
+                "info records were already written with "
+                f"{self._dimension_size(DimensionName.NUM_INFO_RECORDS.value)} entries; "
+                f"cannot rewrite them with {len(records)}"
+            )
 
         if not self._backend.has_variable(VariableName.INFO_RECORDS.value):
             self._backend.create_variable(
@@ -505,6 +511,12 @@ class ExodusWriter:
 
         if not self._backend.has_dimension(DimensionName.NUM_QA_RECORDS.value):
             self._backend.create_dimension(DimensionName.NUM_QA_RECORDS.value, len(normalized))
+        elif self._dimension_size(DimensionName.NUM_QA_RECORDS.value) != len(normalized):
+            raise ExodusWriteError(
+                "QA records were already written with "
+                f"{self._dimension_size(DimensionName.NUM_QA_RECORDS.value)} entries; "
+                f"cannot rewrite them with {len(normalized)}"
+            )
 
         if not self._backend.has_variable(VariableName.QA_RECORDS.value):
             self._backend.create_variable(
@@ -683,6 +695,8 @@ class ExodusWriter:
             return
 
         if on is Entity.NODE:
+            if not self._backend.has_dimension(DimensionName.NUM_NODES.value):
+                return  # no nodes: names only (ex_put_variable_param)
             for variable_index in range(1, len(names) + 1):
                 self._backend.create_variable(
                     variable_value_name(on, variable_index),
@@ -806,18 +820,21 @@ class ExodusWriter:
 
         self._backend.write_variable(attr_var, array)
 
-        if names is not None:
-            if spec.attribute_names_variable is None:
-                raise ValueError(f"{on.value} does not support attribute names")
-            if len(names) != attr_count:
-                raise ValueError("attribute name count must match attribute column count")
-
+        if names is not None and len(names) != attr_count:
+            raise ValueError("attribute name count must match attribute column count")
+        if spec.attribute_names_variable is not None:
+            # SEACAS always defines attrib_name%d; names default to blank.
             name_var = spec.attribute_names_variable(block_index)
             if not self._backend.has_variable(name_var):
                 self._backend.create_variable(
                     name_var, str, (attr_dim, DimensionName.NAME_LENGTH.value)
                 )
-            self._backend.write_variable(name_var, self._encode_names(names))
+                if names is None:
+                    self._backend.write_variable(name_var, self._encode_names([""] * attr_count))
+            if names is not None:
+                self._backend.write_variable(name_var, self._encode_names(names))
+        elif names is not None:
+            raise ValueError(f"{on.value} does not support attribute names")
 
     def set_block_status(self, entity: Entity | str, block_id: int, active: bool) -> None:
         """Set the active/inactive status flag for a block.
@@ -1847,7 +1864,8 @@ class ExodusWriter:
             Explicit 1-based time-step index.  If ``None`` (default), the
             internal counter is incremented and the next sequential step is
             used.  If provided, the internal counter is updated to
-            ``max(current_step, step)``.
+            ``max(current_step, step)``.  Values at skipped steps read back
+            as NaN.
 
         Returns
         -------

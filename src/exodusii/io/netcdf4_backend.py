@@ -338,6 +338,11 @@ def _default_fill_value(dtype_code: str) -> Any:
     if dtype_code == "S1":
         return b"\x00"
 
+    if dtype_code in {"f4", "f8"}:
+        # Unwritten float slots (e.g. skipped time steps) read back as NaN
+        # rather than as a plausible-looking 9.97e36.
+        return np.nan
+
     if dtype_code in default_fillvals:
         return default_fillvals[dtype_code]
 

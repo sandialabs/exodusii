@@ -318,6 +318,11 @@ and uses semantic versioning once versioned releases are established.
   block entity instead of raising a bare `KeyError`.
 - `region_mass(block_id=None)` sums over every block that stores the
   density.
+- Writer edge cases: node variables can be defined on a mesh without nodes
+  (e.g. an empty rank); unwritten float values (skipped time steps) read
+  back as NaN instead of 9.97e36; rewriting QA/info records with a
+  different count raises instead of writing a partial table; block
+  attributes always get an `attrib_name%d` variable, as in SEACAS.
 
 ### Compatibility
 
