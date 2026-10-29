@@ -31,14 +31,20 @@ STEPS``, ``FINAL TIME TOLERANCE``, per-category ``<GLOBAL|NODAL|ELEMENT|
 NODESET|SIDESET|EDGEBLOCK|FACEBLOCK> VARIABLES`` blocks (with ``(all)``,
 per-variable tolerances and ``!NAME`` exclusions), ``ELEMENT ATTRIBUTES``,
 ``STEP OFFSET``, ``EXCLUDE TIMES``, ``INTERPOLATE``, ``APPLY MATCHING`` /
-``NODESET MATCH`` / ``SIDESET MATCH``, and ``IGNORE CASE`` / ``CASE
-SENSITIVE``.
+``NODESET MATCH`` / ``SIDESET MATCH``, ``IGNORE CASE`` / ``CASE
+SENSITIVE``, ``IGNORE ATTRIBUTES``, ``IGNORE NANS``, ``IGNORE SIDESET
+DISTRIBUTION FACTORS`` and ``SIDESET DISTRIBUTION`` (tolerance).  ``STEP
+OFFSET AUTOMATIC`` / ``MATCH`` select exodiff's automatic offsets;
+``NODESET MATCH`` / ``SIDESET MATCH`` (set-entry sorting) are the default.
+
+As in exodiff, names, tolerances and ``!`` exclusions apply only to the
+category they are listed under, and when a command file is used, variable
+categories it does not mention are not compared.
 
 Accepted-but-inert exodiff directives (parsed, then reported as a warning on
 the returned :class:`CommandFileResult`): ``CALCULATE NORMS/L1NORMS/L2NORMS``,
-``IGNORE MAPS/NANS/DUPS/ATTRIBUTES``, ``IGNORE SIDESET DISTRIBUTION``, ``SHORT
-BLOCKS`` / ``NO SHORT``, ``PEDANTIC``, ``RETURN STATUS`` / ``IGNORE STATUS``,
-``MAX NAMES``, ``SIDESET DISTRIBUTION``.
+``IGNORE MAPS/DUPS``, ``SHORT BLOCKS`` / ``NO SHORT``, ``PEDANTIC``,
+``RETURN STATUS`` / ``IGNORE STATUS``, ``MAX NAMES``.
 """
 
 from __future__ import annotations
@@ -53,6 +59,8 @@ from typing import Any
 
 import yaml
 
+from exodusii.api.diff import STEP_OFFSET_AUTOMATIC
+from exodusii.api.diff import STEP_OFFSET_MATCH
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import TimeSelection
 from exodusii.core.entities import Entity
@@ -67,6 +75,7 @@ __all__ = [
     "YamlCommandFileReader",
     "command_file_reader",
     "diff_options_to_yaml",
+    "parse_step_list",
     "read_command_file",
     "write_command_file",
 ]
@@ -274,11 +283,15 @@ def _is_indented(line: str) -> bool:
     return bool(line) and line[0] in (" ", "\t")
 
 
-def _parse_tolerance_spec(toks: _Tokens, base: Tolerance, line: str) -> Tolerance:
+def _parse_tolerance_spec(
+    toks: _Tokens, base: Tolerance, line: str, *, allow_bare_value: bool = False
+) -> Tolerance:
     """Parse an optional ``<mode> <value>`` and/or ``FLOOR <f>`` from *toks*.
 
     Starts from *base* and overrides mode/value/floor as specified.  Leaves the
-    cursor positioned after the consumed tokens.
+    cursor positioned after the consumed tokens.  With *allow_bare_value*
+    (per-variable lines, SEACAS ``Parse_Variables``), a number without a mode
+    sets the value and keeps the inherited mode, e.g. ``<tab> U 0.5``.
     """
 
     mode = base.mode
@@ -286,6 +299,23 @@ def _parse_tolerance_spec(toks: _Tokens, base: Tolerance, line: str) -> Toleranc
     floor = base.floor
 
     tok = toks.peek()
+    if allow_bare_value and tok is not None and not tok.startswith("#"):
+        try:
+            bare = float(tok)
+        except ValueError:
+            bare = None
+        if bare is not None:
+            toks.next()
+            value = bare
+            tok = toks.peek()
+            if tok is not None and _abbrev(tok, "floor", 3):
+                toks.next()
+                f = toks.next()
+                if f is None:
+                    raise CommandFileError(f"FLOOR specified but no value in line: {line!r}")
+                floor = _to_float(f, line)
+            return Tolerance(mode=mode, value=value, floor=floor)
+
     if tok is not None and _abbrev(tok, "floor", 3):
         toks.next()
         f = toks.next()
@@ -347,12 +377,19 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
     coord_tol = Tolerance(ToleranceMode.ABSOLUTE, 1.0e-6, 0.0)
     time_tol = Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 1.0e-15)
 
-    variable_tolerances: dict[str, Tolerance] = {}
-    exclude: set[str] = set()
+    # Per-category name lists: exodiff keeps names, tolerances and "!"
+    # exclusions separately for each variable type.
+    category_tolerances: dict[Entity, dict[str, Tolerance]] = {}
+    category_exclude: dict[Entity, set[str]] = {}
     include_variables: dict[Entity, set[str]] = {}
     all_categories: set[Entity] = set()
+    categories_specified: set[Entity] = set()
     category_defaults: dict[Entity, Tolerance] = {}
     attr_tol: Tolerance | None = None
+    ignore_nans = False
+    final_time_tol = Tolerance(ToleranceMode.RELATIVE, 0.0, 0.0)
+    sideset_df_tol = Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 0.0)
+    compare_sideset_df = True
 
     ignore_case = True
     coordinate_matching = False
@@ -406,42 +443,43 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
             v = cur.next()
             if v is None:
                 raise CommandFileError(f"FINAL TIME TOLERANCE without a value: {raw!r}")
-            time_tol = Tolerance(mode=time_tol.mode, value=_to_float(v, raw), floor=time_tol.floor)
+            # Separate from the time-step tolerance (SEACAS final_time_tol).
+            final_time_tol = Tolerance(ToleranceMode.RELATIVE, _to_float(v, raw), 0.0)
             continue
 
         # ── STEP OFFSET ──────────────────────────────────────────────────
         if t1 == "step" and t2 == "offset":
             tok = toks[2].lower() if len(toks) > 2 else ""
             if _abbrev(tok, "automatic", 4):
-                time_step_offset = -1
-                warnings.append(
-                    "STEP OFFSET AUTOMATIC is accepted but automatic offset "
-                    "detection is not implemented; using match-by-index."
-                )
-                time_step_offset = 0
+                time_step_offset = STEP_OFFSET_AUTOMATIC
             elif _abbrev(tok, "match", 4):
-                time_step_offset = 0
+                time_step_offset = STEP_OFFSET_MATCH
             elif tok:
                 time_step_offset = int(tok)
             continue
 
         # ── EXCLUDE TIMES ────────────────────────────────────────────────
         if _abbrev(t1, "exclude", 3) and _abbrev(t2, "times", 3):
+            spec = []
             for tok in toks[2:]:
                 if tok.startswith("#"):
                     break
-                exclude_steps.update(_parse_int_list(tok))
+                spec.append(tok)
+            try:
+                exclude_steps.update(parse_step_list(",".join(spec)))
+            except ValueError as exc:
+                raise CommandFileError(f"{exc} in line: {raw!r}") from exc
             continue
 
         # ── matching switches ────────────────────────────────────────────
         if _abbrev(t1, "apply", 3) and _abbrev(t2, "matching", 3):
             coordinate_matching = True
             continue
+        # NODESET/SIDESET MATCH select exodiff -nsmap/-ssmap: set entries are
+        # sorted before comparison.  That is already the default here.
         if t1 == "nodeset" and _abbrev(t2, "match", 3):
-            coordinate_matching = True
             continue
         if t1 == "sideset" and _abbrev(t2, "match", 3):
-            coordinate_matching = True
             continue
 
         if t1 == "interpolate":
@@ -459,6 +497,15 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
         if _abbrev(t1, "ignore", 3) and _abbrev(t2, "attributes", 3):
             compare_attributes = False
             continue
+        if _abbrev(t1, "ignore", 3) and _abbrev(t2, "nans", 3):
+            ignore_nans = True
+            continue
+        if _abbrev(t1, "ignore", 3) and _abbrev(t2, "sideset", 3):
+            t3 = toks[2].lower() if len(toks) > 2 else ""
+            if _abbrev(t3, "distribution", 3):
+                compare_sideset_df = False
+                continue
+            raise CommandFileError(f"unrecognized directive in line: {raw!r}")
 
         # ── ELEMENT ATTRIBUTES (a variable block over attributes) ────────
         if _abbrev(t1, "element", 4) and _abbrev(t2, "attributes", 3):
@@ -469,18 +516,22 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
             )
             for name, tol in zip(names, tols):
                 if name.startswith("!"):
-                    exclude.add(name[1:])
+                    category_exclude.setdefault(Entity.ELEMENT_BLOCK, set()).add(name[1:])
                 else:
-                    variable_tolerances[name] = tol
+                    category_tolerances.setdefault(Entity.ELEMENT_BLOCK, {})[name] = tol
             attr_tol = attr_default
             continue
 
         # ── SIDESET DISTRIBUTION (inert here) ────────────────────────────
         if _abbrev(t1, "sideset", 4) and _abbrev(t2, "distribution", 4):
-            warnings.append(
-                "SIDESET DISTRIBUTION tolerance is accepted but not applied "
-                "(distribution-factor comparison is not separately configurable)."
+            # SEACAS: starts from DEFAULT TOLERANCE when given, else absolute 1e-6.
+            base = (
+                default_tol if default_specified else Tolerance(ToleranceMode.ABSOLUTE, 1.0e-6, 0.0)
             )
+            cur = _Tokens(toks, 2)
+            if cur.peek() is not None and _abbrev(cur.peek() or "", "factors", 3):
+                cur.next()
+            sideset_df_tol = _parse_tolerance_spec(cur, base, raw)
             continue
 
         # ── per-category VARIABLES blocks ────────────────────────────────
@@ -489,17 +540,26 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
             cat_default, names, tols, block_all, i = _consume_variable_block(
                 toks, 2, lines, i, default_tol, raw
             )
+            categories_specified.add(category)
             includes: set[str] = set()
+            excludes: set[str] = set()
             for name, tol in zip(names, tols):
                 if name.startswith("!"):
-                    exclude.add(name[1:])
+                    excludes.add(name[1:])
                     continue
                 includes.add(name)
-                variable_tolerances[name] = tol
-            if block_all or not includes:
+                category_tolerances.setdefault(category, {})[name] = tol
+            if excludes:
+                category_exclude.setdefault(category, set()).update(excludes)
+            # exodiff Check_Parsed_Names: "(all)", or only "!" names, means
+            # compare every variable of this type except the excluded ones.
+            # A header with no names at all compares none of them.
+            if block_all or (excludes and not includes):
                 all_categories.add(category)
-            if includes:
+            elif includes:
                 include_variables.setdefault(category, set()).update(includes)
+            else:
+                include_variables.setdefault(category, set())
             category_defaults[category] = cat_default
             continue
 
@@ -531,10 +591,15 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
         node_set_tolerance=category_defaults.get(Entity.NODE_SET),
         side_set_tolerance=category_defaults.get(Entity.SIDE_SET),
         attribute_tolerance=attr_tol,
-        variable_tolerances=dict(variable_tolerances),
-        exclude=frozenset(exclude),
+        category_variable_tolerances={k: dict(v) for k, v in category_tolerances.items()},
+        category_exclude={k: frozenset(v) for k, v in category_exclude.items()},
         include_variables={k: frozenset(v) for k, v in include_variables.items()},
         all_categories=frozenset(all_categories),
+        categories_specified=frozenset(categories_specified),
+        ignore_nans=ignore_nans,
+        final_time_tolerance=final_time_tol,
+        sideset_df_tolerance=sideset_df_tol,
+        compare_sideset_df=compare_sideset_df,
         ignore_case=ignore_case,
         time_selection=time_selection,
         compare_attributes=compare_attributes,
@@ -595,23 +660,44 @@ def _consume_variable_block(
             names.append(name)
             tols.append(cat_default)
             continue
-        # optional per-name tolerance
+        # optional per-name tolerance (a bare number sets just the value)
         sub = _Tokens(toks, 1)
-        tol = _parse_tolerance_spec(sub, cat_default, line)
+        tol = _parse_tolerance_spec(sub, cat_default, line, allow_bare_value=True)
         names.append(name)
         tols.append(tol)
 
     return cat_default, names, tols, all_flag, i
 
 
-def _parse_int_list(token: str) -> list[int]:
-    out: list[int] = []
-    for part in token.replace(",", " ").split():
-        try:
-            out.append(int(part))
-        except ValueError:
+def parse_step_list(spec: str) -> list[int]:
+    """Parse an exodiff step list: ``"2"``, ``"1,4"``, ``"2-5"``, ``"1-3,7"``.
+
+    Mirrors SEACAS ``parseExcludeTimes``: comma-separated 1-based step numbers
+    or inclusive ``a-b`` ranges.
+
+    Raises
+    ------
+    ValueError
+        On values below 1, reversed ranges, or non-integer tokens.
+    """
+
+    steps: list[int] = []
+    for part in spec.replace(" ", ",").split(","):
+        part = part.strip()
+        if not part:
             continue
-    return out
+        lo_text, sep, hi_text = part.partition("-")
+        try:
+            lo = int(lo_text)
+            hi = int(hi_text) if sep else lo
+        except ValueError:
+            raise ValueError(f"invalid time step {part!r}") from None
+        if lo < 1 or hi < 1:
+            raise ValueError(f"time step {part!r} must be 1 or greater")
+        if hi < lo:
+            raise ValueError(f"time step range {part!r}: first value is greater than the second")
+        steps.extend(range(lo, hi + 1))
+    return steps
 
 
 _INERT_DIRECTIVES: tuple[tuple[str, int, str, int], ...] = (
@@ -619,7 +705,6 @@ _INERT_DIRECTIVES: tuple[tuple[str, int, str, int], ...] = (
     ("calculate", 3, "l1norms", 3),
     ("calculate", 3, "l2norms", 3),
     ("ignore", 3, "maps", 3),
-    ("ignore", 3, "nans", 3),
     ("ignore", 3, "dups", 3),
     ("short", 3, "blocks", 3),
     ("pedantic", 8, "", 0),
@@ -662,6 +747,24 @@ _YAML_CATEGORIES: dict[str, tuple[Entity, str]] = {
 _ENTITY_TO_YAML_CATEGORY: dict[Entity, str] = {
     ent: key for key, (ent, _) in _YAML_CATEGORIES.items()
 }
+# Element attributes are a "category" for scoped names/exclusions only.
+_YAML_ATTRIBUTE_CATEGORY = "attribute"
+
+
+def _yaml_category_key(ent: Entity) -> str:
+    if ent is Entity.ELEMENT_BLOCK:
+        return _YAML_ATTRIBUTE_CATEGORY
+    return _ENTITY_TO_YAML_CATEGORY.get(ent, ent.value)
+
+
+def _yaml_category_entity(key: str, where: str) -> Entity:
+    lowered = key.lower()
+    if lowered == _YAML_ATTRIBUTE_CATEGORY:
+        return Entity.ELEMENT_BLOCK
+    entry = _YAML_CATEGORIES.get(lowered)
+    if entry is None:
+        raise CommandFileError(f"unknown category {key!r} in '{where}'")
+    return entry[0]
 
 
 def _tolerance_from_yaml(spec: Any, where: str) -> Tolerance:
@@ -735,6 +838,8 @@ class YamlCommandFileReader(CommandFileReader):
           default:    {mode: relative, value: 1.0e-6, floor: 0.0}
           coordinate: {mode: absolute, value: 1.0e-6}
           time:       {mode: relative, value: 1.0e-6, floor: 1.0e-15}
+          final_time: {mode: relative, value: 0.0}   # with time.interpolate
+          sideset_df: {mode: relative, value: 1.0e-6}
           attribute:  {mode: relative, value: 1.0e-6}
           categories:                 # per-category default tolerances
             nodal:   {mode: absolute, value: 1.0e-7}
@@ -742,16 +847,24 @@ class YamlCommandFileReader(CommandFileReader):
             DISPLX:  {mode: relative, value: 1.0e-9}
         variables:
           ignore_case: true
-          exclude: [VELZ]
+          ignore_nans: false          # true => skip NaNs (exodiff -ignore_nans)
+          exclude: [VELZ]             # excluded in every category
           include:                    # per-category include lists
             nodal: [DISPLX, DISPLY]
             global: all               # 'all' (or true) => compare all
+          categories_specified: [nodal, global]  # only these are compared
+          scoped:                     # per-category overrides/exclusions
+            nodal:
+              tolerances: {DISPLX: {mode: relative, value: 1.0e-9}}
+              exclude: [VELX]
         coordinates:  {compare: true}
         attributes:   {compare: true}
+        sideset_df:   {compare: true}
         mesh_matching:
           enabled: false
           tolerance: 1.0e-6
           require_unique: true
+          match_ids: true             # false => match by file order
         time:
           start: 1
           stop: -1
@@ -786,6 +899,7 @@ class YamlCommandFileReader(CommandFileReader):
             "variables",
             "coordinates",
             "attributes",
+            "sideset_df",
             "mesh_matching",
             "time",
             "report",
@@ -822,6 +936,14 @@ def _diff_options_from_yaml(doc: dict[str, Any]) -> CommandFileResult:
         )
     if "time" in tol_sec and tol_sec["time"] is not None:
         kwargs["time_tolerance"] = _tolerance_from_yaml(tol_sec["time"], "tolerances.time")
+    if "final_time" in tol_sec and tol_sec["final_time"] is not None:
+        kwargs["final_time_tolerance"] = _tolerance_from_yaml(
+            tol_sec["final_time"], "tolerances.final_time"
+        )
+    if "sideset_df" in tol_sec and tol_sec["sideset_df"] is not None:
+        kwargs["sideset_df_tolerance"] = _tolerance_from_yaml(
+            tol_sec["sideset_df"], "tolerances.sideset_df"
+        )
     if "attribute" in tol_sec and tol_sec["attribute"] is not None:
         kwargs["attribute_tolerance"] = _tolerance_from_yaml(
             tol_sec["attribute"], "tolerances.attribute"
@@ -876,12 +998,56 @@ def _diff_options_from_yaml(doc: dict[str, Any]) -> CommandFileResult:
         kwargs["include_variables"] = include_variables
     if all_categories:
         kwargs["all_categories"] = frozenset(all_categories)
+    if "categories_specified" in var_sec and var_sec["categories_specified"] is not None:
+        specified = var_sec["categories_specified"]
+        if not isinstance(specified, list):
+            raise CommandFileError("'variables.categories_specified' must be a list")
+        kwargs["categories_specified"] = frozenset(
+            _yaml_category_entity(str(key), "variables.categories_specified") for key in specified
+        )
+    if "ignore_nans" in var_sec:
+        kwargs["ignore_nans"] = bool(var_sec["ignore_nans"])
+
+    # Category-scoped per-variable tolerances and exclusions.
+    scoped = var_sec.get("scoped") or {}
+    if not isinstance(scoped, dict):
+        raise CommandFileError("'variables.scoped' must be a mapping")
+    scoped_tols: dict[Entity, dict[str, Tolerance]] = {}
+    scoped_exclude: dict[Entity, frozenset[str]] = {}
+    for key, section in scoped.items():
+        where = f"variables.scoped.{key}"
+        ent = _yaml_category_entity(str(key), where)
+        if not isinstance(section, dict):
+            raise CommandFileError(f"'{where}' must be a mapping")
+        tols = section.get("tolerances") or {}
+        if not isinstance(tols, dict):
+            raise CommandFileError(f"'{where}.tolerances' must be a mapping")
+        if tols:
+            scoped_tols[ent] = {
+                str(name): _tolerance_from_yaml(spec, f"{where}.tolerances.{name}")
+                for name, spec in tols.items()
+            }
+        excl = section.get("exclude") or []
+        if not isinstance(excl, list):
+            raise CommandFileError(f"'{where}.exclude' must be a list")
+        if excl:
+            scoped_exclude[ent] = frozenset(str(x) for x in excl)
+    if scoped_tols:
+        kwargs["category_variable_tolerances"] = scoped_tols
+    if scoped_exclude:
+        kwargs["category_exclude"] = scoped_exclude
 
     coord_sec = doc.get("coordinates") or {}
     if not isinstance(coord_sec, dict):
         raise CommandFileError("'coordinates' must be a mapping")
     if "compare" in coord_sec:
         kwargs["compare_coordinates"] = bool(coord_sec["compare"])
+
+    sdf_sec = doc.get("sideset_df") or {}
+    if not isinstance(sdf_sec, dict):
+        raise CommandFileError("'sideset_df' must be a mapping")
+    if "compare" in sdf_sec:
+        kwargs["compare_sideset_df"] = bool(sdf_sec["compare"])
 
     attr_sec = doc.get("attributes") or {}
     if not isinstance(attr_sec, dict):
@@ -898,6 +1064,8 @@ def _diff_options_from_yaml(doc: dict[str, Any]) -> CommandFileResult:
         kwargs["matching_tolerance"] = float(mm_sec["tolerance"])
     if "require_unique" in mm_sec:
         kwargs["require_unique_mapping"] = bool(mm_sec["require_unique"])
+    if "match_ids" in mm_sec:
+        kwargs["match_ids"] = bool(mm_sec["match_ids"])
 
     time_sec = doc.get("time") or {}
     if not isinstance(time_sec, dict):
@@ -957,12 +1125,28 @@ def diff_options_to_yaml(options: DiffOptions) -> str:
     for ent, names in options.include_variables.items():
         include[_ENTITY_TO_YAML_CATEGORY.get(ent, ent.value)] = sorted(names)
 
+    scoped: dict[str, Any] = {}
+    for ent in sorted(
+        set(options.category_variable_tolerances) | set(options.category_exclude),
+        key=lambda e: e.value,
+    ):
+        section: dict[str, Any] = {}
+        tols = options.category_variable_tolerances.get(ent) or {}
+        if tols:
+            section["tolerances"] = {name: _tolerance_to_yaml(tol) for name, tol in tols.items()}
+        excl = options.category_exclude.get(ent) or frozenset()
+        if excl:
+            section["exclude"] = sorted(excl)
+        scoped[_yaml_category_key(ent)] = section
+
     doc: dict[str, Any] = {
         "version": 1,
         "tolerances": {
             "default": _tolerance_to_yaml(options.default_tolerance),
             "coordinate": _tolerance_to_yaml(options.coordinate_tolerance),
             "time": _tolerance_to_yaml(options.time_tolerance),
+            "final_time": _tolerance_to_yaml(options.final_time_tolerance),
+            "sideset_df": _tolerance_to_yaml(options.sideset_df_tolerance),
             "attribute": (
                 _tolerance_to_yaml(options.attribute_tolerance)
                 if options.attribute_tolerance is not None
@@ -973,15 +1157,24 @@ def diff_options_to_yaml(options: DiffOptions) -> str:
         },
         "variables": {
             "ignore_case": options.ignore_case,
+            "ignore_nans": options.ignore_nans,
             "exclude": sorted(options.exclude),
             "include": include,
+            "categories_specified": (
+                sorted(_yaml_category_key(ent) for ent in options.categories_specified)
+                if options.categories_specified is not None
+                else None
+            ),
+            "scoped": scoped,
         },
         "coordinates": {"compare": options.compare_coordinates},
+        "sideset_df": {"compare": options.compare_sideset_df},
         "attributes": {"compare": options.compare_attributes},
         "mesh_matching": {
             "enabled": options.coordinate_matching,
             "tolerance": float(options.matching_tolerance),
             "require_unique": options.require_unique_mapping,
+            "match_ids": options.match_ids,
         },
         "time": {
             "start": ts.start,

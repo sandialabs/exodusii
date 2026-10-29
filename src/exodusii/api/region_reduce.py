@@ -409,6 +409,28 @@ def _parse_predicate(
     return _eval_atom(expr, exo, on=on, block_id=block_id, time=time)
 
 
+def _predicate_mask(
+    expr: str,
+    exo: ExodusFile,
+    *,
+    on: str,
+    block_id: int | None,
+    blocks_used: tuple[int, ...] | None,
+    time: TimeSelector,
+) -> BoolArray:
+    """Evaluate *expr* over exactly the entities the field covers.
+
+    In multi-block mode the field is the concatenation of the eligible blocks
+    (``blocks_used``), so the predicate is evaluated per block and concatenated
+    in the same order; evaluating it over all blocks would not line up.
+    """
+
+    if block_id is not None or blocks_used is None:
+        return _parse_predicate(expr, exo, on=on, block_id=block_id, time=time)
+    parts = [_parse_predicate(expr, exo, on=on, block_id=b, time=time) for b in blocks_used]
+    return np.concatenate(parts) if parts else np.zeros(0, dtype=np.bool_)
+
+
 # ---------------------------------------------------------------------------
 # Block enumeration helpers (items 5 + 7)
 # ---------------------------------------------------------------------------
@@ -619,20 +641,30 @@ def _region_stats_history(
         blocks_mode = BLOCKS_AUTO if blocks == BLOCKS_AUTO else BLOCKS_ALL
         eligible = _iter_eligible_blocks(exo, name, on, blocks_mode=blocks_mode)
         if not eligible:
-            # Return empty history
-            empty_step = RegionStatsResult(
-                variable=name,
-                entity=on,
-                block_id=None,
-                blocks_used=tuple(eligible),
-                time_index=0,
-                time_value=float(all_times[0]) if len(all_times) else 0.0,
-                count_total=0,
-                count_selected=0,
-                symmetry_factor=symmetry_factor,
-                stats={},
+            # No eligible blocks: one empty result per requested step, with
+            # the same stats as the single-time path (extensive reducers 0,
+            # intensive reducers NaN).
+            reducers = (
+                [r.strip() for r in reduce.split(",")] if isinstance(reduce, str) else list(reduce)
             )
-            return RegionStatsHistory(steps=())
+            empty_stats = {r: (0.0 if r in EXTENSIVE_REDUCERS else float("nan")) for r in reducers}
+            return RegionStatsHistory(
+                steps=tuple(
+                    RegionStatsResult(
+                        variable=name,
+                        entity=on,
+                        block_id=None,
+                        blocks_used=(),
+                        time_index=step_idx,
+                        time_value=float(all_times[step_idx]),
+                        count_total=0,
+                        count_selected=0,
+                        symmetry_factor=symmetry_factor,
+                        stats=dict(empty_stats),
+                    )
+                    for step_idx in step_indices
+                )
+            )
         centers_list: list[FloatArray] = []
         for bid in eligible:
             conn = exo.element_connectivity(bid, zero_based=True)
@@ -659,7 +691,9 @@ def _region_stats_history(
 
         # Where predicate (re-evaluated per step since field changes)
         if where is not None:
-            pred_mask = _parse_predicate(where, exo, on=on, block_id=_bid, time=step_idx)
+            pred_mask = _predicate_mask(
+                where, exo, on=on, block_id=_bid, blocks_used=used_blocks, time=step_idx
+            )
             combined_mask = region_mask & pred_mask
         else:
             combined_mask = region_mask
@@ -781,7 +815,9 @@ def _region_stats_single(
 
     # Field predicate mask — for multi-block, re-use the per-block block_id=None path
     if where is not None:
-        pred_mask = _parse_predicate(where, exo, on=on, block_id=block_id, time=time_index)
+        pred_mask = _predicate_mask(
+            where, exo, on=on, block_id=block_id, blocks_used=used_blocks, time=time_index
+        )
         combined_mask = region_mask & pred_mask
     else:
         combined_mask = region_mask

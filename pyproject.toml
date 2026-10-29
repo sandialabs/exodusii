@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "exodusii"
-version = "26.10.27"
+version = "26.10.29"
 description = "A modern pure-Python interface for Sandia Exodus II finite element databases."
 readme = "README.md"
 requires-python = ">=3.13"

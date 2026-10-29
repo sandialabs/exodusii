@@ -285,8 +285,9 @@ def build_mesh_map(
                 )
             continue
 
-        # Sort file-2 centroids along max-spread axis.
-        e_match = _match_points_sorted(centers1, centers2, matching_tolerance)
+        # For each file-2 element find its file-1 counterpart:
+        # e_match[j_local] = i_local (file-2 -> file-1, block-local).
+        e_match = _match_points_sorted(centers2, centers1, matching_tolerance)
 
         for j_local, i_local in enumerate(e_match):
             j_global = goff2 + j_local
@@ -315,7 +316,8 @@ def build_mesh_map(
         if unmatched1.size == unmatched2.size:
             pts1 = coords1[unmatched1]
             pts2 = coords2[unmatched2]
-            fallback = _match_points_sorted(pts1, pts2, matching_tolerance)
+            # fallback[idx2_local] = idx1_local (file-2 -> file-1).
+            fallback = _match_points_sorted(pts2, pts1, matching_tolerance)
             for idx2_local, idx1_local in enumerate(fallback):
                 if idx1_local == -1:
                     continue

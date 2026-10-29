@@ -26,6 +26,8 @@ from dataclasses import replace
 from typing import Any
 from typing import TextIO
 
+from exodusii.api.diff import STEP_OFFSET_AUTOMATIC
+from exodusii.api.diff import STEP_OFFSET_MATCH
 from exodusii.api.diff import DiffOptions
 from exodusii.api.diff import DiffResult
 from exodusii.api.diff import TimeSelection
@@ -179,6 +181,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     sel.add_argument(
         "--no-attributes", action="store_true", help="Do not compare block attributes."
     )
+    sel.add_argument(
+        "--ignore-nans",
+        action="store_true",
+        help=(
+            "Skip NaN values (exodiff -ignore_nans).  By default any NaN in "
+            "either file is a difference."
+        ),
+    )
 
     ts = parser.add_argument_group("time-step selection")
     ts.add_argument(
@@ -187,10 +197,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=0,
         metavar="N",
-        help=(
-            "Offset: file1_step = file2_step + N.  "
-            "Ignored when --start/--stop/--increment are also specified."
-        ),
+        help="Offset: file1_step = file2_step + N.",
     )
     ts.add_argument(
         "--start",
@@ -234,6 +241,31 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Add O to file-1 time values before matching. [default: 0.0]",
     )
     ts.add_argument(
+        "--final-time-tolerance",
+        type=float,
+        default=0.0,
+        metavar="VALUE",
+        help=(
+            "With --interpolate, the last file-1 time must match the last file-2 "
+            "time within this (relative) tolerance. [default: 0.0]"
+        ),
+    )
+    ts.add_argument(
+        "-TA",
+        "--auto-step-offset",
+        action="store_true",
+        help="Automatic step offset: align the last steps of both files (exodiff -TA).",
+    )
+    ts.add_argument(
+        "-TM",
+        "--match-step-offset",
+        action="store_true",
+        help=(
+            "Automatic step offset: align file-2's first time with the closest "
+            "file-1 time (exodiff -TM)."
+        ),
+    )
+    ts.add_argument(
         "--interpolate",
         action="store_true",
         help=(
@@ -250,6 +282,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "Enable coordinate-based mesh matching.  Builds a permutation map "
             "from spatial coordinates before comparison, allowing files whose "
             "nodes and elements are in different orders to be compared correctly."
+        ),
+    )
+    mm.add_argument(
+        "--match-file-order",
+        action="store_true",
+        help=(
+            "Match nodes and elements by file position instead of by global ID "
+            "(exodiff -match_file_order); differing ID maps are then a "
+            "difference.  By default entities are matched by their ID maps."
         ),
     )
     mm.add_argument(
@@ -332,9 +373,12 @@ def _parse_start(value: str | None) -> int:
 
 
 def _parse_exclude_steps(value: str | None) -> frozenset[int]:
+    """Parse ``--exclude-steps`` (``"2"``, ``"1,4"``, ``"2-5"``, ``"1-3,7"``)."""
     if not value:
         return frozenset()
-    return frozenset(int(s.strip()) for s in value.split(",") if s.strip())
+    from exodusii.api.command_file import parse_step_list
+
+    return frozenset(parse_step_list(value))
 
 
 def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]]:
@@ -368,16 +412,23 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
     )
     start = _parse_start(args.start)
     exclude_steps = _parse_exclude_steps(args.exclude_steps)
+    step_offset = int(args.time_step_offset)
+    if args.auto_step_offset:
+        step_offset = STEP_OFFSET_AUTOMATIC
+    elif args.match_step_offset:
+        step_offset = STEP_OFFSET_MATCH
     time_sel = TimeSelection(
         start=start,
         stop=int(args.stop),
         increment=int(args.increment),
-        time_step_offset=int(args.time_step_offset),
+        time_step_offset=step_offset,
         exclude_steps=exclude_steps,
         time_value_scale=float(args.time_scale),
         time_value_offset=float(args.time_offset),
         interpolating=bool(args.interpolate),
     )
+
+    final_tol = Tolerance(ToleranceMode.RELATIVE, float(args.final_time_tolerance), 0.0)
 
     options: DiffOptions
 
@@ -394,6 +445,9 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
             coordinate_matching=bool(args.match_coordinates),
             matching_tolerance=float(args.matching_tolerance),
             require_unique_mapping=not bool(args.allow_partial_match),
+            match_ids=not bool(args.match_file_order),
+            ignore_nans=bool(args.ignore_nans),
+            final_time_tolerance=final_tol,
         )
         return options, warnings
 
@@ -404,6 +458,11 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
     overrides: dict[str, Any] = {}
     if args.mode is not None or float(args.tolerance) != 1.0e-6 or float(args.floor) != 0.0:
         overrides["default_tolerance"] = default_tol
+        # Category defaults inherited from the file's DEFAULT TOLERANCE follow
+        # the command-line default; explicit per-category values are kept.
+        for field_name in _CATEGORY_TOLERANCE_FIELDS:
+            if getattr(base, field_name) == base.default_tolerance:
+                overrides[field_name] = default_tol
     if float(args.coordinate_tolerance) != 1.0e-6:
         overrides["coordinate_tolerance"] = coord_tol
     if args.exclude:
@@ -422,11 +481,32 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
         overrides["matching_tolerance"] = float(args.matching_tolerance)
     if args.allow_partial_match:
         overrides["require_unique_mapping"] = False
+    if args.match_file_order:
+        overrides["match_ids"] = False
+    if args.ignore_nans:
+        overrides["ignore_nans"] = True
+    if float(args.final_time_tolerance) != 0.0:
+        overrides["final_time_tolerance"] = final_tol
     if _time_flags_set(args):
         overrides["time_selection"] = time_sel
 
     options = replace(base, **overrides) if overrides else base
     return options, warnings
+
+
+_CATEGORY_TOLERANCE_FIELDS = (
+    "global_tolerance",
+    "nodal_tolerance",
+    "element_tolerance",
+    "edge_tolerance",
+    "face_tolerance",
+    "node_set_tolerance",
+    "side_set_tolerance",
+    "edge_set_tolerance",
+    "face_set_tolerance",
+    "element_set_tolerance",
+    "attribute_tolerance",
+)
 
 
 def _time_flags_set(args: argparse.Namespace) -> bool:
@@ -437,6 +517,8 @@ def _time_flags_set(args: argparse.Namespace) -> bool:
         or int(args.increment) != 1
         or int(args.time_step_offset) != 0
         or bool(args.exclude_steps)
+        or bool(args.auto_step_offset)
+        or bool(args.match_step_offset)
         or float(args.time_scale) != 1.0
         or float(args.time_offset) != 0.0
         or bool(args.interpolate)
@@ -449,6 +531,7 @@ def _result_to_json(result: DiffResult) -> dict[str, object]:
         "file1": result.file1,
         "file2": result.file2,
         "errors": list(result.errors),
+        "differences": list(result.differences),
         "warnings": list(result.warnings),
         "coordinate_max_delta": result.coordinate_max_delta,
         "mesh_map_built": result.mesh_map_built,
@@ -478,6 +561,8 @@ def _print_text(result: DiffResult, args: argparse.Namespace, out: TextIO) -> No
         print(f"WARNING: {warning}", file=out)
     for error in result.errors:
         print(f"ERROR: {error}", file=out)
+    for difference in result.differences:
+        print(f"DIFFERENCE: {difference}", file=out)
 
     if not args.quiet:
         exceeded = [vd for vd in result.variable_diffs if vd.exceeded or args.show_all]

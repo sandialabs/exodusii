@@ -244,6 +244,29 @@ class ExodusFile:
         return "f" if int(word_size) == 4 else "d"
 
     @property
+    def int64(self) -> bool:
+        """True when the file stores IDs, maps or bulk integers as int64.
+
+        Uses the ``int64_status`` global attribute (SEACAS
+        ``EX_ALL_INT64_DB`` bits) and falls back to the on-disk type of the ID
+        maps and block IDs for files that lack the attribute.
+        """
+
+        status = self._backend.attribute(AttributeName.INT64_STATUS.value, None)
+        if status is not None and int(status) != 0:
+            return True
+
+        for name in (
+            VariableName.NODE_ID_MAP.value,
+            VariableName.ELEMENT_ID_MAP.value,
+            VariableName.ELEMENT_BLOCK_IDS.value,
+        ):
+            raw = self._backend.variable(name, default=None, raw=True)
+            if raw is not None and np.dtype(raw.dtype).itemsize == 8:
+                return True
+        return False
+
+    @property
     def dimension(self) -> int:
         """Spatial dimension of the mesh (1, 2, or 3).
 
@@ -381,18 +404,32 @@ class ExodusFile:
         ...         print(code, date)
         """
 
-        values = self._backend.variable(VariableName.QA_RECORDS.value, default=None)
-        if values is None:
-            return ()
-
-        array = np.asarray(values)
-        if array.size == 0:
+        raw = self._backend.variable(VariableName.QA_RECORDS.value, default=None, raw=True)
+        if raw is None:
             return ()
 
         records: list[tuple[str, str, str, str]] = []
 
-        # Backend/string decoding may have flattened 3-D char arrays to strings
-        # of four fields. Preserve that form if already decoded.
+        # Decode each of the four fixed-width fields separately (SEACAS
+        # ex_get_qa): fields may contain spaces or be empty, so the record
+        # must never be split on whitespace.
+        if hasattr(raw, "dimensions") and len(raw.dimensions) == 3:
+            if hasattr(raw, "set_auto_chartostring"):
+                raw.set_auto_chartostring(False)
+            chars = np.asarray(raw[...])
+            if chars.size == 0:
+                return ()
+            for record in chars:
+                fields = [_decode_char_field(field) for field in record]
+                records.append(_four_fields(fields))
+            return tuple(records)
+
+        values = self._backend.variable(VariableName.QA_RECORDS.value, default=None)
+        array = np.asarray(values)
+        if array.size == 0:
+            return ()
+
+        # Non-standard layouts: already-decoded strings of four fields.
         if array.ndim == 1:
             for item in array:
                 fields = _four_fields(str(item).split())
@@ -721,7 +758,8 @@ class ExodusFile:
             coords = np.asarray(combined, dtype=np.float64).T
 
         if displaced:
-            coords = coords + self.displacements(time=time)
+            # time=None means the last step here (see the docstring).
+            coords = coords + self.displacements(time="last" if time is None else time)
 
         return coords
 
@@ -774,14 +812,15 @@ class ExodusFile:
         ----------
         time : TimeSelector, optional
             Time step selector.  May be a float (physical time), an integer
-            step index, or ``None`` to select the last available step.
+            step index, ``"first"``/``"last"``, or ``None`` for the full time
+            history (consistent with :meth:`values`).
 
         Returns
         -------
-        ndarray of float64, shape (node_count, dimension)
-            Displacement matrix with one row per node and one column per
-            spatial dimension.  Returns an all-zeros array if no displacement
-            variables are present in the file.
+        ndarray of float64, shape (node_count, dimension) or (n_steps, node_count, dimension)
+            Displacement vectors, one row per node and one column per spatial
+            dimension; the full history has a leading time axis.  All zeros
+            when no displacement variables are present.
 
         Examples
         --------
@@ -793,9 +832,19 @@ class ExodusFile:
 
         names = self.displacement_variable_names()
         if not names:
+            if time is None:
+                return np.zeros((len(self.times()), self.node_count, self.dimension))
             return np.zeros((self.node_count, self.dimension), dtype=np.float64)
 
-        return np.column_stack([self.values(name, on=Entity.NODE, time=time) for name in names])
+        # Stack components on a new last axis: (nodes, dim) for one step and
+        # (steps, nodes, dim) for the full history.
+        return np.stack(
+            [
+                np.asarray(self.values(name, on=Entity.NODE, time=time), dtype=np.float64)
+                for name in names
+            ],
+            axis=-1,
+        )
 
     def ids(self, on: Entity | str) -> npt.NDArray[np.int64]:
         """Return Exodus IDs for a mesh object or map entity.
@@ -1598,9 +1647,30 @@ class ExodusFile:
             self._cache[cache_key] = ()
             return ()
 
-        values = self._backend.variable(spec.names_variable, default=[])
-        names = _decode_name_table(values, expected_count=expected_count)
-        result = tuple(name for name in names if name)
+        result = tuple(name for name in self._variable_name_table(ent) if name)
+        self._cache[cache_key] = result
+        return result
+
+    def _variable_name_table(self, ent: Entity) -> tuple[str, ...]:
+        """Return the full ``name_*_var`` table, including blank slots.
+
+        Positions in this table are the on-disk (1-based) variable indices, so
+        index lookups must use it rather than :meth:`variable_names`, which
+        omits blank names.
+        """
+
+        cache_key = f"variable_name_table:{ent.value}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        spec = variable_spec(ent)
+        expected_count = self.dimension_size(spec.count_dimension, default=0)
+        if expected_count == 0:
+            result: tuple[str, ...] = ()
+        else:
+            values = self._backend.variable(spec.names_variable, default=[])
+            result = _decode_name_table(values, expected_count=expected_count)
         self._cache[cache_key] = result
         return result
 
@@ -2178,6 +2248,15 @@ class ExodusFile:
         if not ent.is_block:
             raise ExodusInvalidEntityError(f"{ent.value!r} is not a block entity")
 
+        return tuple(name for name in self._attribute_name_table(ent, block_id) if name)
+
+    def _attribute_name_table(self, on: Entity | str, block_id: int) -> tuple[str, ...]:
+        """Return all attribute names for a block, including blank slots.
+
+        Positions in this table are the attribute column indices.
+        """
+
+        ent = entity(on)
         spec = block_spec(ent)
         if spec.attribute_names_variable is None:
             return ()
@@ -2194,7 +2273,7 @@ class ExodusFile:
         if expected == 0:
             return ()
 
-        return tuple(name for name in _decode_name_table(values, expected_count=expected) if name)
+        return _decode_name_table(values, expected_count=expected)
 
     def attributes(self, on: Entity | str, block_id: int) -> npt.NDArray[np.float64] | None:
         """Return all per-element attributes for a block as a 2-D array.
@@ -2274,11 +2353,11 @@ class ExodusFile:
         (512,)
         """
 
-        names = self.attribute_names(on, block_id)
+        names = self._attribute_name_table(on, block_id)
         requested = name.lower()
 
         for index, attr_name in enumerate(names):
-            if attr_name.lower() == requested:
+            if attr_name and attr_name.lower() == requested:
                 attrs = self.attributes(on, block_id)
                 if attrs is None:
                     return np.asarray([], dtype=np.float64)
@@ -2386,11 +2465,33 @@ class ExodusFile:
         selection = resolve_time(self.times(), time)
         return np.asarray(values[selection.index], dtype=np.float64)
 
+    def _nodal_variable_history(self, variable_index: int) -> npt.NDArray[np.float64]:
+        """Return the ``(time_step, num_nodes)`` history of a nodal variable.
+
+        Large-model files store one ``vals_nod_var%d`` per variable; old
+        (``file_size = 0``) files store all of them in a single
+        ``vals_nod_var(time_step, num_nod_var, num_nodes)`` array.  Both
+        layouts are read, as in SEACAS ``ex_get_var`` / ``ex_large_model``.
+        """
+
+        values = self._backend.variable(ExodusNames.node_variable(variable_index), default=None)
+        if values is None:
+            combined = self._backend.variable(
+                VariableName.NODE_VARIABLE_VALUES_COMBINED.value, default=None
+            )
+            if combined is None:
+                raise ExodusLookupError(
+                    f"nodal variable {variable_index} has no stored values "
+                    f"({ExodusNames.node_variable(variable_index)!r} or "
+                    f"{VariableName.NODE_VARIABLE_VALUES_COMBINED.value!r})"
+                )
+            combined_array = np.asarray(combined, dtype=np.float64)
+            return combined_array[:, variable_index - 1, :]
+        return np.asarray(values, dtype=np.float64)
+
     def _node_values(self, name: str, *, time: TimeSelector = None) -> npt.NDArray[np.float64]:
         variable_index = self._variable_index(Entity.NODE, name)
-        values = np.asarray(
-            self._backend.variable(ExodusNames.node_variable(variable_index)), dtype=np.float64
-        )
+        values = self._nodal_variable_history(variable_index)
 
         if time is None:
             return values
@@ -2408,7 +2509,7 @@ class ExodusFile:
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
-        names = self.variable_names(ent)
+        names = self._variable_name_table(ent)
         index = _one_based_name_index(names, name)
         self._cache[cache_key] = index
         return index
@@ -2432,17 +2533,35 @@ class ExodusFile:
 
 
 def _one_based_name_index(names: tuple[str, ...], requested: str) -> int:
+    """Return the 1-based position of *requested* in a full name table.
+
+    *names* must include blank slots so that positions match on-disk indices.
+    Blank slots never match.
+    """
+
     for index, name in enumerate(names, start=1):
-        if name == requested:
+        if name and name == requested:
             return index
 
     requested_lower = requested.lower()
     for index, name in enumerate(names, start=1):
-        if name.lower() == requested_lower:
+        if name and name.lower() == requested_lower:
             return index
 
-    available = ", ".join(names)
+    available = ", ".join(name for name in names if name)
     raise ExodusLookupError(f"variable {requested!r} not found; available variables: {available}")
+
+
+def _decode_char_field(chars: Any) -> str:
+    """Decode one fixed-width NetCDF char field (stop at NUL, trim right)."""
+
+    array = np.asarray(chars)
+    if array.dtype.kind == "S":
+        raw = b"".join(bytes(c) for c in array.reshape(-1))
+        text = raw.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+    else:
+        text = "".join(str(c) for c in array.reshape(-1)).split("\x00", 1)[0]
+    return text.rstrip()
 
 
 def _four_fields(values: list[str]) -> tuple[str, str, str, str]:
@@ -2454,7 +2573,6 @@ def _decode_name_table(values: Any, *, expected_count: int | None = None) -> tup
     """Decode an Exodus fixed-width name table.
 
     Handles raw NetCDF character arrays and already-decoded netCDF4 arrays.
-    Legacy files may pad fixed-width strings with ASCII ``"0"`` bytes.
     """
 
     array = np.asarray(values)
@@ -2472,19 +2590,14 @@ def _decode_name_table(values: Any, *, expected_count: int | None = None) -> tup
 
 
 def _strip_exodus_padding(value: str) -> str:
-    text = value.rstrip(" \x00")
+    """Trim the fixed-width padding from a decoded Exodus name.
 
-    # Some legacy files appear with fixed-width strings padded using ASCII "0"
-    # characters.  Do not strip meaningful zeros from ordinary names like
-    # "nodeset_100".  Only treat zeros as padding when the decoded field still
-    # looks fixed-width.
-    without_zeros = text.rstrip("0")
-    zero_count = len(text) - len(without_zeros)
+    Mirrors libexodus ``exi_trim``: only trailing NULs and whitespace are
+    removed.  Trailing ``"0"`` characters are always significant
+    (``"kinetic_energy_100"`` must not become ``"kinetic_energy_1"``).
+    """
 
-    if zero_count >= 2 and len(text) >= 16:
-        return without_zeros
-
-    return text
+    return value.rstrip(" \x00")
 
 
 __all__ = ["ExodusFile"]

@@ -72,10 +72,14 @@ def test_per_category_default_and_per_variable_override(tmp_path: Path) -> None:
     assert opts.nodal_tolerance is not None
     assert opts.nodal_tolerance.mode is ToleranceMode.ABSOLUTE
     assert opts.nodal_tolerance.value == pytest.approx(1e-7)
-    # DISPLX has an override; DISPLY inherits the category default.
-    assert opts.variable_tolerances["DISPLX"].mode is ToleranceMode.RELATIVE
-    assert opts.variable_tolerances["DISPLX"].value == pytest.approx(1e-9)
-    assert opts.variable_tolerances["DISPLY"].mode is ToleranceMode.ABSOLUTE
+    # DISPLX has an override; DISPLY inherits the category default.  The
+    # overrides are scoped to the NODAL category.
+    nodal = opts.category_variable_tolerances[Entity.NODE]
+    assert nodal["DISPLX"].mode is ToleranceMode.RELATIVE
+    assert nodal["DISPLX"].value == pytest.approx(1e-9)
+    assert nodal["DISPLY"].mode is ToleranceMode.ABSOLUTE
+    assert opts.tolerance_for("DISPLX", Entity.NODE).value == pytest.approx(1e-9)
+    assert opts.tolerance_for("DISPLX", Entity.GLOBAL) == opts.default_tolerance
     # Only-listed names become the include set for that category.
     assert opts.include_variables[Entity.NODE] == frozenset({"DISPLX", "DISPLY"})
     assert Entity.NODE not in opts.all_categories
@@ -86,14 +90,17 @@ def test_all_flag_makes_category_unrestricted(tmp_path: Path) -> None:
     cmd.write_text("GLOBAL VARIABLES (all) relative 1e-4\n\tFOO absolute 1e-8\n")
     opts = read_command_file(cmd).options
     assert Entity.GLOBAL in opts.all_categories
-    assert opts.variable_tolerances["FOO"].value == pytest.approx(1e-8)
+    assert opts.category_variable_tolerances[Entity.GLOBAL]["FOO"].value == pytest.approx(1e-8)
 
 
 def test_exclude_via_bang_name(tmp_path: Path) -> None:
     cmd = tmp_path / "cmds"
     cmd.write_text("NODAL VARIABLES\n\tDISPLX\n\t!VELZ\n")
     opts = read_command_file(cmd).options
-    assert "VELZ" in opts.exclude
+    # "!" exclusions are scoped to their category.
+    assert opts.category_exclude[Entity.NODE] == frozenset({"VELZ"})
+    assert opts.is_excluded("VELZ", Entity.NODE)
+    assert not opts.is_excluded("VELZ", Entity.GLOBAL)
     assert opts.include_variables[Entity.NODE] == frozenset({"DISPLX"})
 
 
@@ -105,11 +112,15 @@ def test_ignore_case_and_case_sensitive(tmp_path: Path) -> None:
     assert read_command_file(cmd).options.ignore_case is True
 
 
-def test_matching_switches_enable_coordinate_matching(tmp_path: Path) -> None:
-    for directive in ("APPLY MATCHING", "NODESET MATCH", "SIDESET MATCH"):
-        cmd = tmp_path / "cmds"
+def test_matching_switches(tmp_path: Path) -> None:
+    cmd = tmp_path / "cmds"
+    cmd.write_text("APPLY MATCHING\n")
+    assert read_command_file(cmd).options.coordinate_matching is True
+    # NODESET/SIDESET MATCH are exodiff -nsmap/-ssmap (sort set entries, the
+    # default), not coordinate matching.
+    for directive in ("NODESET MATCH", "SIDESET MATCH"):
         cmd.write_text(directive + "\n")
-        assert read_command_file(cmd).options.coordinate_matching is True
+        assert read_command_file(cmd).options.coordinate_matching is False
 
 
 def test_interpolate_and_exclude_times(tmp_path: Path) -> None:
@@ -316,6 +327,14 @@ def _rich_options() -> DiffOptions:
         exclude=frozenset({"VELZ"}),
         include_variables={Entity.NODE: frozenset({"DISPLX", "DISPLY"})},
         all_categories=frozenset({Entity.GLOBAL}),
+        categories_specified=frozenset({Entity.NODE, Entity.GLOBAL}),
+        category_variable_tolerances={
+            Entity.NODE: {"DISPLY": Tolerance(ToleranceMode.ABSOLUTE, 1e-3)},
+            Entity.ELEMENT_BLOCK: {"THICK": Tolerance(ToleranceMode.ABSOLUTE, 1e-2)},
+        },
+        category_exclude={Entity.GLOBAL: frozenset({"KE"})},
+        match_ids=False,
+        ignore_nans=True,
         ignore_case=False,
         compare_coordinates=False,
         compare_attributes=False,
@@ -352,6 +371,11 @@ def test_to_yaml_roundtrip_preserves_everything(tmp_path: Path) -> None:
     assert o2.exclude == o.exclude
     assert o2.include_variables == o.include_variables
     assert o2.all_categories == o.all_categories
+    assert o2.categories_specified == o.categories_specified
+    assert o2.category_variable_tolerances == o.category_variable_tolerances
+    assert o2.category_exclude == o.category_exclude
+    assert o2.match_ids is False
+    assert o2.ignore_nans is True
     assert o2.ignore_case == o.ignore_case
     assert o2.compare_coordinates == o.compare_coordinates
     assert o2.compare_attributes == o.compare_attributes

@@ -237,7 +237,8 @@ def test_detects_node_count_difference(tmp_path: Path) -> None:
 
     result = diff(a, b)
     assert not result.same
-    assert any("node count" in e for e in result.errors)
+    # SEACAS: differing global sizes are a difference (exit 2), not an error.
+    assert any("node count" in d for d in result.differences)
 
 
 def test_detects_missing_variable(tmp_path: Path) -> None:
@@ -261,7 +262,9 @@ def test_detects_missing_variable(tmp_path: Path) -> None:
 
     result = diff(a, b)
     assert not result.same
-    assert any("TEMP" in e and "missing from file2" in e for e in result.errors)
+    assert any(
+        "TEMP" in d and "in the first file but not the second" in d for d in result.differences
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,16 +340,21 @@ def test_nan_mismatch_is_a_difference(tmp_path: Path) -> None:
     assert temp.max_delta == float("inf")
 
 
-def test_matching_nan_is_not_a_difference(tmp_path: Path) -> None:
+def test_matching_nan_is_a_difference(tmp_path: Path) -> None:
     a = tmp_path / "a.exo"
     b = tmp_path / "b.exo"
     _write_basic(a, nan_temp=True)
     _write_basic(b, nan_temp=True)
 
+    # SEACAS exodiff flags any NaN, even at the same place in both files.
     result = diff(a, b)
-    # NaN in the same place in both files -> not flagged as a NaN mismatch.
+    assert not result.same
     temp = [vd for vd in result.variable_diffs if vd.name == "TEMP"]
-    assert not temp or not temp[0].exceeded
+    assert temp and temp[0].exceeded
+
+    # ...unless NaNs are explicitly ignored (exodiff -ignore_nans).
+    result = diff(a, b, DiffOptions(ignore_nans=True))
+    assert result.same
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +380,15 @@ def test_time_step_count_mismatch_warns(tmp_path: Path) -> None:
         writer.write_node_values("TEMP", np.arange(4, dtype=float))
         writer.write_element_values("ENERGY", [1.0], block_id=10)
 
+    # SEACAS exodiff: differing step counts are a difference...
     result = diff(a, b)
+    assert not result.same
+    assert any("number of time steps differs" in d for d in result.differences)
+
+    # ...unless the step selection accounts for it (an explicit stop step):
+    # only the overlapping step is compared, and it matches -> same.
+    result = diff(a, b, DiffOptions(time_selection=TimeSelection(stop=1)))
     assert any("time step count differs" in w for w in result.warnings)
-    # Only the overlapping step is compared, and it matches -> same.
     assert result.same
 
 
@@ -677,7 +691,19 @@ def test_interpolating_midpoint_values(tmp_path: Path) -> None:
         compare_coordinates=False,
     )
     result = diff(a, b, opts)
-    assert result.same, result.errors
+    # Every interpolated value matches...
+    assert not result.variable_diffs, result.variable_diffs
+    # ...but, as in SEACAS exodiff, the final times (2.5 vs 3.0) must agree
+    # within the final-time tolerance (default 0).
+    assert any("final database times differ" in d for d in result.differences)
+
+    loose = DiffOptions(
+        time_selection=ts,
+        default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 1.0e-10),
+        final_time_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 0.5),
+        compare_coordinates=False,
+    )
+    assert diff(a, b, loose).same
 
 
 def test_interpolating_outside_range_skipped(tmp_path: Path) -> None:
@@ -712,8 +738,13 @@ def test_interpolating_outside_range_skipped(tmp_path: Path) -> None:
         compare_coordinates=False,
     )
     result = diff(a, b, opts)
-    # Steps 0-2 match; step 3 (t=5.0) is out of range and skipped -> same.
-    assert result.same, result.errors
+    # Steps 0-2 match; step 3 (t=5.0) is out of range and skipped...
+    assert not result.variable_diffs, result.variable_diffs
+    # ...and the final times (5.0 vs 3.0) differ (SEACAS final-time check).
+    assert result.differences == [
+        "final database times differ: 5.000000e+00 != 3.000000e+00 "
+        "(not within relative tolerance 0)"
+    ]
 
 
 # ---------------------------------------------------------------------------

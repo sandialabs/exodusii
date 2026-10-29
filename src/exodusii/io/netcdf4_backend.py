@@ -208,6 +208,7 @@ class NetCDF4Backend:
             raise ExodusVariableError(f"variable {name!r} not found")
 
         variable = self._dataset.variables[name]
+        _check_integer_range(name, variable, value)
 
         try:
             if not indices:
@@ -288,6 +289,37 @@ def _dtype_code(dtype: type[int] | type[float] | type[str] | str) -> str:
         return dtype
 
     raise TypeError(f"unsupported NetCDF variable dtype {dtype!r}")
+
+
+def _check_integer_range(name: str, variable: Any, value: Any) -> None:
+    """Raise instead of letting NumPy/netCDF4 silently wrap integers.
+
+    Writing ``5_000_000_001`` into an ``int32`` variable would otherwise store
+    ``705032705``.
+    """
+
+    dtype = np.dtype(getattr(variable, "dtype", np.float64))
+    if dtype.kind not in {"i", "u"}:
+        return
+
+    array = np.asarray(value)
+    if array.size == 0 or array.dtype.kind not in {"i", "u", "f", "O"}:
+        return
+    if array.dtype.kind in {"i", "u"} and np.can_cast(array.dtype, dtype, casting="safe"):
+        return
+
+    info = np.iinfo(dtype.str)
+    try:
+        low = array.min()
+        high = array.max()
+    except TypeError:
+        return
+    if low < info.min or high > info.max:
+        bad = high if high > info.max else low
+        hint = " (create the writer with int64=True)" if dtype.itemsize < 8 else ""
+        raise ExodusWriteError(
+            f"value {int(bad)} does not fit in {dtype.name} variable {name!r}{hint}"
+        )
 
 
 def _is_string_like(value: Any) -> bool:

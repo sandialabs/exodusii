@@ -442,12 +442,11 @@ class ParallelExodusFile:
         if key in cache:
             return int(cache[key])
 
-        for index, variable_name in enumerate(self.variable_names(on), start=1):
-            if variable_name == name or variable_name.lower() == name.lower():
-                cache[key] = index
-                return index
-
-        raise ExodusLookupError(f"variable {name!r} not found")
+        # Delegate to the component file: its index lookup uses the full name
+        # table (blank slots included), so positions match on-disk indices.
+        index = self._files[0]._variable_index(on, name)
+        cache[key] = index
+        return index
 
     def _global_dimension(self, name: str) -> int | None:
         return self._files[0].backend.dimension(name, None)
@@ -552,7 +551,9 @@ class ParallelExodusFile:
         if not blocks:
             raise ExodusLookupError(f"{location.value} ID {block_id} not found")
 
-        first = blocks[0]
+        # Prefer a component that actually holds objects: NULL (empty) local
+        # blocks carry no element type or nodes-per-entity.
+        first = next((b for b in blocks if b.count), blocks[0])
         gids = self._block_object_gids(location, block_id)
 
         return Block(
@@ -846,9 +847,19 @@ class ParallelExodusFile:
 
         names = self.displacement_variable_names()
         if not names:
+            if time is None:
+                return np.zeros((len(self.times()), self.node_count, self.dimension))
             return np.zeros((self.node_count, self.dimension), dtype=np.float64)
 
-        return np.column_stack([self.values(name, on=Entity.NODE, time=time) for name in names])
+        # Stack components on a new last axis: (nodes, dim) for one step and
+        # (steps, nodes, dim) for the full history.
+        return np.stack(
+            [
+                np.asarray(self.values(name, on=Entity.NODE, time=time), dtype=np.float64)
+                for name in names
+            ],
+            axis=-1,
+        )
 
     def variable_names(self, on: Entity | str) -> tuple[str, ...]:
         """Return the result variable names defined for an entity type.
@@ -1088,6 +1099,7 @@ class ParallelExodusFile:
 
         node_gids: list[int] = []
         factors_by_gid: dict[int, float] = {}
+        any_factors = False
         name = ""
 
         for file_index, file in enumerate(self._files):
@@ -1100,21 +1112,30 @@ class ParallelExodusFile:
                 continue
 
             node_map = self._maps[file_index].node_lid_to_gid
+            local_factors = node_set.dist_facts
+            has_local_factors = local_factors is not None and len(local_factors) == len(
+                node_set.nodes
+            )
+            any_factors = any_factors or has_local_factors
             for position, local_node_id in enumerate(node_set.nodes):
                 gid = int(node_map[int(local_node_id) - 1])
                 node_gids.append(gid)
-
-                if node_set.dist_facts is not None:
-                    factors_by_gid[gid] = float(node_set.dist_facts[position])
+                # Last processor wins for shared nodes; processors without
+                # stored factors contribute 1.0 (SEACAS epu get_put_nodesets).
+                factors_by_gid[gid] = (
+                    float(local_factors[position])
+                    if has_local_factors and local_factors is not None
+                    else 1.0
+                )
 
         unique_gids = sorted(set(node_gids))
-        if not unique_gids:
+        if not unique_gids and not _contains(self.node_set_ids(), set_id):
             raise ExodusLookupError(f"node_set ID {set_id} not found")
 
         nodes = np.asarray(unique_gids, dtype=np.int64)
         dist_facts = (
             np.asarray([factors_by_gid[gid] for gid in unique_gids], dtype=np.float64)
-            if factors_by_gid
+            if any_factors
             else None
         )
 
@@ -1355,10 +1376,7 @@ class ParallelExodusFile:
         """Fast aggregate nodal variable values without serial name decoding."""
 
         variable_index = self._variable_index(Entity.NODE, name)
-        variable_name = variable_value_name(Entity.NODE, variable_index)
-
-        first_values = self._files[0].variable(variable_name)
-        first_array = np.asarray(first_values, dtype=np.float64)
+        first_array = self._files[0]._nodal_variable_history(variable_index)
 
         output: npt.NDArray[np.float64]
         if time is None:
@@ -1369,7 +1387,9 @@ class ParallelExodusFile:
             selection_index = self._resolve_time_index(time)
 
         for file_index, file in enumerate(self._files):
-            local_values = np.asarray(file.variable(variable_name), dtype=np.float64)
+            local_values = (
+                first_array if file_index == 0 else file._nodal_variable_history(variable_index)
+            )
             node_map = self._maps[file_index].node_lid_to_gid
 
             for local_index, gid in enumerate(node_map):
@@ -1699,6 +1719,18 @@ class ParallelExodusFile:
         expected joined file.
         """
 
+        if not set_info.count:
+            return None
+
+        if on is Entity.NODE_SET:
+            # SEACAS epu always writes node-set factors: components without
+            # stored factors contribute 1.0 (epu.C put_nodesets).  Nemesis
+            # ns_df_cnt_global is routinely 0 even when factors exist, so it
+            # is not authoritative here.
+            if set_info.distribution_factors:
+                return set_info.dist_facts
+            return np.ones(set_info.count, dtype=np.float64)
+
         global_count = self._global_set_distribution_factor_count(on, set_info.id)
         if global_count == 0:
             return None
@@ -1916,7 +1948,12 @@ class ParallelExodusFile:
         joined.exo
         """
 
-        with ExodusWriter.create(filename) as writer:
+        int64 = any(file.int64 for file in self._files) or any(
+            np.iinfo(np.int32).max < int(ids.max())
+            for ids in (self.ids(Entity.NODE), self.joined_object_order(Entity.ELEMENT))
+            if len(ids)
+        )
+        with ExodusWriter.create(filename, int64=int64) as writer:
             self._write_to(writer)
         return str(filename)
 
@@ -2013,6 +2050,14 @@ class ParallelExodusFile:
         return self._block_object_values(name, on=Entity.ELEMENT, block=block, time=time)
 
     def _write_to(self, writer: ExodusWriter) -> None:
+        """Join the component files into *writer* (SEACAS epu semantics).
+
+        Objects are written block by block, sorted by global ID within each
+        block; :meth:`joined_object_order` gives that order and is written as
+        the joined file's ID maps.  Set entries are translated with the same
+        order so side sets and element sets reference the right objects.
+        """
+
         writer.initialize(
             self.title,
             self.dimension,
@@ -2028,80 +2073,17 @@ class ParallelExodusFile:
             face_blocks=self.face_block_count,
             face_sets=len(self.face_set_ids()),
             element_sets=len(self.element_set_ids()),
+            floating_point_word_size=4 if self.storage_type == "f" else 8,
         )
 
         if self.node_count:
             writer.write_coordinates(self.coordinates(), names=self.coordinate_names().tolist())
 
-        for block_id in self.element_block_ids():
-            block = self.element_block(int(block_id))
+        self._write_id_maps(writer)
+        self._write_blocks(writer)
+        self._write_sets(writer)
+        self._write_records_and_properties(writer)
 
-            nodal_conn = self.element_connectivity(block.id)
-            if nodal_conn.size == 0:
-                # Cannot define a conventional serial element block without
-                # nodal connectivity. Preserve block metadata with a zero-width
-                # placeholder is not NetCDF-safe, so fail clearly.
-                raise NotImplementedError(
-                    f"element block {block.id} has no nodal connectivity; "
-                    "edge/face-only element block writing is not implemented yet"
-                )
-
-            edge_conn = self.element_edge_connectivity(block.id)
-            face_conn = self.element_face_connectivity(block.id)
-
-            writer.define_element_block(
-                block.id, block.element_type, self.element_connectivity(block.id), name=block.name
-            )
-
-            if edge_conn is not None:
-                writer.write_element_edge_connectivity(block.id, edge_conn)
-
-            if face_conn is not None:
-                writer.write_element_face_connectivity(block.id, face_conn)
-
-        for block_id in self.edge_block_ids():
-            block = self.edge_block(int(block_id))
-            writer.define_edge_block(
-                block.id, block.element_type, self.edge_connectivity(block.id), name=block.name
-            )
-
-        for block_id in self.face_block_ids():
-            block = self.face_block(int(block_id))
-            writer.define_face_block(
-                block.id, block.element_type, self.face_connectivity(block.id), name=block.name
-            )
-
-        for set_id in self.node_set_ids():
-            node_set = self.node_set(int(set_id))
-            nodes = (
-                _labels_to_contiguous(node_set.nodes, self._node_gid_to_index)
-                if node_set.nodes is not None
-                else np.asarray([], dtype=np.int64)
-            )
-            writer.define_node_set(
-                node_set.id,
-                nodes,
-                distribution_factors=self._distribution_factors_for_write(
-                    Entity.NODE_SET, node_set
-                ),
-                name=node_set.name,
-            )
-        for set_id in self.side_set_ids():
-            side_set = self.side_set(int(set_id))
-            elements = (
-                _labels_to_contiguous(side_set.elems, self._element_gid_to_index)
-                if side_set.elems is not None
-                else np.asarray([], dtype=np.int64)
-            )
-            writer.define_side_set(
-                side_set.id,
-                elements,
-                side_set.sides if side_set.sides is not None else [],
-                distribution_factors=self._distribution_factors_for_write(
-                    Entity.SIDE_SET, side_set
-                ),
-                name=side_set.name,
-            )
         global_names = self.variable_names(Entity.GLOBAL)
         node_names = self.variable_names(Entity.NODE)
         element_names = self.variable_names(Entity.ELEMENT)
@@ -2120,21 +2102,37 @@ class ParallelExodusFile:
         if node_names:
             writer.define_node_variables(node_names)
         if element_names:
-            writer.define_element_variables(element_names)
+            writer.define_element_variables(
+                element_names, truth_table=self.variable_truth_table(Entity.ELEMENT)
+            )
         if edge_names:
-            writer.define_edge_variables(edge_names)
+            writer.define_edge_variables(
+                edge_names, truth_table=self.variable_truth_table(Entity.EDGE)
+            )
         if face_names:
-            writer.define_face_variables(face_names)
+            writer.define_face_variables(
+                face_names, truth_table=self.variable_truth_table(Entity.FACE)
+            )
         if node_set_names:
-            writer.define_node_set_variables(node_set_names)
+            writer.define_node_set_variables(
+                node_set_names, truth_table=self.variable_truth_table(Entity.NODE_SET)
+            )
         if side_set_names:
-            writer.define_side_set_variables(side_set_names)
+            writer.define_side_set_variables(
+                side_set_names, truth_table=self.variable_truth_table(Entity.SIDE_SET)
+            )
         if edge_set_names:
-            writer.define_edge_set_variables(edge_set_names)
+            writer.define_edge_set_variables(
+                edge_set_names, truth_table=self.variable_truth_table(Entity.EDGE_SET)
+            )
         if face_set_names:
-            writer.define_face_set_variables(face_set_names)
+            writer.define_face_set_variables(
+                face_set_names, truth_table=self.variable_truth_table(Entity.FACE_SET)
+            )
         if element_set_names:
-            writer.define_element_set_variables(element_set_names)
+            writer.define_element_set_variables(
+                element_set_names, truth_table=self.variable_truth_table(Entity.ELEMENT_SET)
+            )
 
         for step, time in enumerate(self.times(), start=1):
             writer.write_time(float(time), step=step)
@@ -2152,6 +2150,262 @@ class ParallelExodusFile:
             face_set_names=face_set_names,
             element_set_names=element_set_names,
         )
+
+    def _write_id_maps(self, writer: ExodusWriter) -> None:
+        """Write global ID maps in joined-file order (SEACAS epu)."""
+
+        if self.node_count:
+            writer.write_node_id_map(self.ids(Entity.NODE))
+        if self.element_count:
+            writer.write_element_id_map(self.joined_object_order(Entity.ELEMENT))
+        if self.edge_count and len(self.edge_block_ids()):
+            writer.write_edge_id_map(self.joined_object_order(Entity.EDGE))
+        if self.face_count and len(self.face_block_ids()):
+            writer.write_face_id_map(self.joined_object_order(Entity.FACE))
+
+    def _write_blocks(self, writer: ExodusWriter) -> None:
+        for block_id in self.element_block_ids():
+            block = self.element_block(int(block_id))
+            if block.count == 0:
+                writer.define_element_block(
+                    block.id, block.element_type, np.zeros((0, 0), dtype=np.int64), name=block.name
+                )
+                continue
+
+            nodal_conn = self.element_connectivity(block.id)
+            if nodal_conn.size == 0:
+                raise NotImplementedError(
+                    f"element block {block.id} has no nodal connectivity; "
+                    "edge/face-only element block writing is not implemented yet"
+                )
+
+            writer.define_element_block(block.id, block.element_type, nodal_conn, name=block.name)
+
+            edge_conn = self.element_edge_connectivity(block.id)
+            if edge_conn is not None:
+                writer.write_element_edge_connectivity(block.id, edge_conn)
+            face_conn = self.element_face_connectivity(block.id)
+            if face_conn is not None:
+                writer.write_element_face_connectivity(block.id, face_conn)
+            self._write_block_attributes(writer, Entity.ELEMENT_BLOCK, block.id)
+
+        for block_id in self.edge_block_ids():
+            block = self.edge_block(int(block_id))
+            conn = (
+                self.edge_connectivity(block.id)
+                if block.count
+                else np.zeros((0, 0), dtype=np.int64)
+            )
+            writer.define_edge_block(block.id, block.element_type, conn, name=block.name)
+            if block.count:
+                self._write_block_attributes(writer, Entity.EDGE_BLOCK, block.id)
+
+        for block_id in self.face_block_ids():
+            block = self.face_block(int(block_id))
+            conn = (
+                self.face_connectivity(block.id)
+                if block.count
+                else np.zeros((0, 0), dtype=np.int64)
+            )
+            writer.define_face_block(block.id, block.element_type, conn, name=block.name)
+            if block.count:
+                self._write_block_attributes(writer, Entity.FACE_BLOCK, block.id)
+
+    def attributes(self, on: Entity | str, block_id: int) -> npt.NDArray[np.float64] | None:
+        """Return per-object block attributes assembled from all component files.
+
+        Rows follow :meth:`block_connectivity` order (ascending global object
+        ID within the block).  Returns ``None`` when no component stores
+        attributes for the block.
+        """
+
+        location = entity(on)
+        block_gids = self._block_object_gids_or_empty(location, block_id)
+        row_of = {gid: row for row, gid in enumerate(block_gids)}
+        output: npt.NDArray[np.float64] | None = None
+
+        for file_index, file in enumerate(self._files):
+            if not self._file_block_is_active(file, location, block_id):
+                continue
+            local = file.attributes(location, block_id)
+            if local is None:
+                continue
+            local = np.asarray(local, dtype=np.float64)
+            if output is None:
+                output = np.zeros((len(block_gids), local.shape[1]), dtype=np.float64)
+            local_gids = self._block_object_gids_for_file(file_index, location, block_id)
+            for local_row, gid in enumerate(local_gids):
+                output[row_of[int(gid)]] = local[local_row]
+        return output
+
+    def attribute_names(self, on: Entity | str, block_id: int) -> tuple[str, ...]:
+        """Return block attribute names from the first component that has them."""
+
+        location = entity(on)
+        for file in self._files:
+            if _contains(file.block_ids(location), block_id):
+                names = file._attribute_name_table(location, block_id)
+                if names:
+                    return names
+        return ()
+
+    def _write_block_attributes(self, writer: ExodusWriter, on: Entity, block_id: int) -> None:
+        attrs = self.attributes(on, block_id)
+        if attrs is None:
+            return
+        names = self.attribute_names(on, block_id)
+        writer.write_block_attributes(
+            on, block_id, attrs, names=list(names) if len(names) == attrs.shape[1] else None
+        )
+
+    def _write_sets(self, writer: ExodusWriter) -> None:
+        nodes_position = self._node_gid_to_index
+        elements_position = self._joined_position_map(Entity.ELEMENT)
+
+        for set_id in self.node_set_ids():
+            node_set = self.node_set(int(set_id))
+            nodes = (
+                _labels_to_contiguous(node_set.nodes, nodes_position)
+                if node_set.nodes is not None
+                else np.asarray([], dtype=np.int64)
+            )
+            writer.define_node_set(
+                node_set.id,
+                nodes,
+                distribution_factors=self._distribution_factors_for_write(
+                    Entity.NODE_SET, node_set
+                ),
+                name=node_set.name,
+            )
+
+        for set_id in self.side_set_ids():
+            side_set = self.side_set(int(set_id))
+            elements = (
+                _labels_to_contiguous(side_set.elems, elements_position)
+                if side_set.elems is not None
+                else np.asarray([], dtype=np.int64)
+            )
+            writer.define_side_set(
+                side_set.id,
+                elements,
+                side_set.sides if side_set.sides is not None else [],
+                distribution_factors=self._distribution_factors_for_write(
+                    Entity.SIDE_SET, side_set
+                ),
+                name=side_set.name,
+            )
+
+        for on, positions in (
+            (Entity.EDGE_SET, self._joined_position_map(Entity.EDGE) if self.edge_count else {}),
+            (Entity.FACE_SET, self._joined_position_map(Entity.FACE) if self.face_count else {}),
+            (Entity.ELEMENT_SET, elements_position),
+        ):
+            for set_id in self.set_ids(on):
+                object_set = self.set(on, int(set_id))
+                entries = (
+                    _labels_to_contiguous(object_set.entries, positions)
+                    if object_set.entries is not None
+                    else np.asarray([], dtype=np.int64)
+                )
+                writer.define_set(
+                    on,
+                    object_set.id,
+                    entries,
+                    extra_entries=object_set.extra_entries
+                    if on is not Entity.ELEMENT_SET
+                    else None,
+                    distribution_factors=self._distribution_factors_for_write(on, object_set),
+                    name=object_set.name,
+                )
+
+    def _write_records_and_properties(self, writer: ExodusWriter) -> None:
+        qa = self.qa_records()
+        if qa:
+            writer.write_qa_records(qa)
+        info = self.info_records()
+        if info:
+            writer.write_info_records(info)
+
+        for on in (
+            Entity.ELEMENT_BLOCK,
+            Entity.EDGE_BLOCK,
+            Entity.FACE_BLOCK,
+            Entity.NODE_SET,
+            Entity.SIDE_SET,
+            Entity.EDGE_SET,
+            Entity.FACE_SET,
+            Entity.ELEMENT_SET,
+        ):
+            ids = self.block_ids(on) if on.is_block else self.set_ids(on)
+            if not len(ids):
+                continue
+            for name, values in self._merged_properties(on, ids).items():
+                writer.define_property(on, name, values)
+
+    def _merged_properties(self, on: Entity, ids: npt.NDArray[np.int64]) -> dict[str, list[int]]:
+        """Merge user properties (not ``ID``) across components by entity ID."""
+
+        merged: dict[str, dict[int, int]] = {}
+        for file in self._files:
+            local_ids = file.block_ids(on) if on.is_block else file.set_ids(on)
+            if not len(local_ids):
+                continue
+            for name in file.property_names(on):
+                if not name or name.upper() == "ID":
+                    continue
+                values = file.property_values(on, name)
+                slot = merged.setdefault(name, {})
+                for local_id, value in zip(local_ids, values, strict=False):
+                    slot.setdefault(int(local_id), int(value))
+
+        return {
+            name: [by_id.get(int(entity_id), 0) for entity_id in ids]
+            for name, by_id in merged.items()
+        }
+
+    def variable_truth_table(
+        self, on: Entity | str, *, id: int | None = None
+    ) -> npt.NDArray[np.int64] | None:
+        """Return the global truth table: the OR of the component tables.
+
+        A (block/set, variable) entry is 1 when any component stores that
+        variable for that block/set.  Blocks/sets that are empty on every
+        processor get 0.
+        """
+
+        ent = entity(on)
+        spec = variable_spec(ent)
+        if spec.truth_table_variable is None or spec.location_entity is None:
+            return None
+
+        location = spec.location_entity
+        ids = self.block_ids(location) if location.is_block else self.set_ids(location)
+        names = self.variable_names(ent)
+        if not len(ids) or not names:
+            return None
+
+        table = np.zeros((len(ids), len(self._files[0]._variable_name_table(ent))), dtype=np.int64)
+        for file in self._files:
+            local_ids = file.block_ids(location) if location.is_block else file.set_ids(location)
+            if not len(local_ids):
+                continue
+            local_table = file.variable_truth_table(ent)
+            if local_table is None:
+                continue
+            for local_row, local_id in enumerate(local_ids):
+                active = (
+                    self._file_block_is_active(file, location, int(local_id))
+                    if location.is_block
+                    else self._file_set_is_active(file, location, int(local_id))
+                )
+                if not active:
+                    continue
+                row = _one_based_index(ids, int(local_id)) - 1
+                table[row] |= np.asarray(local_table[local_row], dtype=np.int64)
+
+        if id is not None:
+            return table[_one_based_index(ids, id) - 1]
+        return table
 
     def _write_all_variable_histories(
         self,
@@ -2226,9 +2480,11 @@ class ParallelExodusFile:
             for block_id_value in block_id_array:
                 block_id_int = int(block_id_value)
                 location_index = writer._location_index(spec.location_entity, block_id_int)
+                target = variable_value_name(on, variable_index, location_index)
+                if not writer.backend.has_variable(target):
+                    continue  # truth table 0 or NULL block
                 writer.backend.write_variable(
-                    variable_value_name(on, variable_index, location_index),
-                    self.values(name, on=on, block_id=block_id_int, time=None),
+                    target, self.values(name, on=on, block_id=block_id_int, time=None)
                 )
 
     def _write_set_variable_histories(
@@ -2248,9 +2504,11 @@ class ParallelExodusFile:
             for set_id_value in set_id_array:
                 set_id_int = int(set_id_value)
                 location_index = writer._location_index(spec.location_entity, set_id_int)
+                target = variable_value_name(on, variable_index, location_index)
+                if not writer.backend.has_variable(target):
+                    continue  # truth table 0 or NULL set
                 writer.backend.write_variable(
-                    variable_value_name(on, variable_index, location_index),
-                    self.values(name, on=on, set_id=set_id_int, time=None),
+                    target, self.values(name, on=on, set_id=set_id_int, time=None)
                 )
 
     def _file_block_is_active(self, file: ExodusFile, location: Entity, block_id: int) -> bool:
@@ -2395,6 +2653,76 @@ class ParallelExodusFile:
         return output
 
     def _block_object_gids(self, location: Entity, block_id: int) -> list[int]:
+        gids = self._block_object_gids_or_empty(location, block_id)
+        if not gids and not _contains(self.block_ids(location), block_id):
+            raise ExodusLookupError(f"{location.value} ID {block_id} not found")
+        return gids
+
+    def joined_object_order(self, location: Entity | str) -> npt.NDArray[np.int64]:
+        """Return global object IDs in joined-file (block-by-block) order.
+
+        A joined serial file stores elements (or edges/faces) block by block,
+        in :meth:`block_ids` order, sorted by global ID within each block.
+        Entry ``k`` of the result is the global ID of the object at 1-based
+        position ``k + 1`` in the joined file; this is also the joined file's
+        ``elem_num_map`` (``edge_num_map`` / ``face_num_map``).
+
+        This order generally differs from ``ids(...)`` (ascending global ID),
+        so translating entity references (side sets, element sets) must use
+        this order -- the same convention as SEACAS epu.
+
+        Parameters
+        ----------
+        location : Entity or str
+            ``Entity.ELEMENT``, ``Entity.EDGE`` or ``Entity.FACE`` (or the
+            corresponding block entity).
+        """
+
+        loc = entity(location)
+        block_location = {
+            Entity.ELEMENT: Entity.ELEMENT_BLOCK,
+            Entity.EDGE: Entity.EDGE_BLOCK,
+            Entity.FACE: Entity.FACE_BLOCK,
+        }.get(loc, loc)
+        if not block_location.is_block:
+            raise ExodusInvalidEntityError(f"{loc.value!r} is not an object or block entity")
+
+        cache = self.__dict__.setdefault("_joined_order_cache", {})
+        cached = cache.get(block_location)
+        if cached is not None:
+            return cached
+
+        order: list[int] = []
+        for block_id in self.block_ids(block_location):
+            order.extend(self._block_object_gids_or_empty(block_location, int(block_id)))
+        # Objects not owned by any block (malformed or block-less files) go
+        # last, by ascending global ID, so the order always covers every object.
+        all_gids = {
+            Entity.ELEMENT_BLOCK: self._element_gid_to_index,
+            Entity.EDGE_BLOCK: self._edge_gid_to_index,
+            Entity.FACE_BLOCK: self._face_gid_to_index,
+        }[block_location]
+        if len(order) != len(all_gids):
+            seen = set(order)
+            order.extend(gid for gid in sorted(all_gids) if gid not in seen)
+        result = np.asarray(order, dtype=np.int64)
+        cache[block_location] = result
+        return result
+
+    def _joined_position_map(self, location: Entity) -> dict[int, int]:
+        """Return ``{global_id: 1-based position in the joined file}``."""
+
+        cache = self.__dict__.setdefault("_joined_position_cache", {})
+        cached = cache.get(location)
+        if cached is None:
+            cached = {
+                int(gid): position
+                for position, gid in enumerate(self.joined_object_order(location), start=1)
+            }
+            cache[location] = cached
+        return cached
+
+    def _block_object_gids_or_empty(self, location: Entity, block_id: int) -> list[int]:
         gids: list[int] = []
         for file_index, file in enumerate(self._files):
             if self._file_block_is_active(file, location, block_id):
@@ -2408,9 +2736,6 @@ class ParallelExodusFile:
                     gids.extend(
                         self._block_object_gids_for_file(file_index, location, block_id).tolist()
                     )
-
-        if not gids:
-            raise ExodusLookupError(f"{location.value} ID {block_id} not found")
 
         return sorted(set(gids))
 

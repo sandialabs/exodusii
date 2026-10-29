@@ -293,10 +293,29 @@ def test_interpolate_flag(tmp_path: Path) -> None:
 
     stream = StringIO()
     status = main(
-        ["--interpolate", "--absolute", "-t", "1e-10", "--no-coordinates", str(a), str(b)],
+        [
+            "--interpolate",
+            "--absolute",
+            "-t",
+            "1e-10",
+            "--final-time-tolerance",
+            "0.5",
+            "--no-coordinates",
+            str(a),
+            str(b),
+        ],
         file=stream,
     )
     assert status == _SAME, stream.getvalue()
+
+    # Without a final-time tolerance the final times (2.5 vs 3.0) differ.
+    stream = StringIO()
+    status = main(
+        ["--interpolate", "--absolute", "-t", "1e-10", "--no-coordinates", str(a), str(b)],
+        file=stream,
+    )
+    assert status == _DIFFERENT
+    assert "final database times differ" in stream.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +437,7 @@ def test_cli_flag_overrides_command_file(tmp_path: Path) -> None:
 
     # File says "loose" (same), but a tight CLI tolerance overrides -> different.
     cmd = tmp_path / "cmds"
-    cmd.write_text("DEFAULT TOLERANCE absolute 1.0\n")
+    cmd.write_text("DEFAULT TOLERANCE absolute 1.0\nNODAL VARIABLES (all)\n")
     stream = StringIO()
 
     status = main(

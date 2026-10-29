@@ -1678,7 +1678,7 @@ def _zero_based_index(values: npt.ArrayLike, value: int) -> int:
 def _fixed_name(name: str) -> npt.NDArray[np.bytes_]:
     from exodusii.core.strings import encode_fixed_width
 
-    return encode_fixed_width(name, width=256)
+    return encode_fixed_width(name, width=255, total=256)
 
 
 def _string_list(values: Any) -> list[str]:
@@ -1693,7 +1693,7 @@ def _string_list(values: Any) -> list[str]:
 def _fixed_names(names: list[str]) -> npt.NDArray[np.bytes_]:
     from exodusii.core.strings import encode_fixed_width
 
-    return encode_fixed_width(names, width=256)
+    return encode_fixed_width(names, width=255, total=256)
 
 
 def _current_coordinates(writer: ExodusWriter) -> npt.NDArray[np.float64]:

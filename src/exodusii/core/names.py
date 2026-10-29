@@ -18,6 +18,12 @@ from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
 from exodusii.core.errors import ExodusInvalidEntityError
 
+# Bits of the ``int64_status`` global attribute (exodusII.h).
+EX_MAPS_INT64_DB = 0x0400
+EX_IDS_INT64_DB = 0x0800
+EX_BULK_INT64_DB = 0x1000
+EX_ALL_INT64_DB = EX_MAPS_INT64_DB | EX_IDS_INT64_DB | EX_BULK_INT64_DB
+
 
 class AttributeName(StrEnum):
     """Common Exodus global and variable attribute names."""
@@ -28,6 +34,8 @@ class AttributeName(StrEnum):
     FILE_SIZE = "file_size"
     FLOATING_POINT_WORD_SIZE = "floating_point_word_size"
     FLOATING_POINT_WORD_SIZE_LEGACY = "floating point word size"
+    INT64_STATUS = "int64_status"
+    MAXIMUM_NAME_LENGTH = "maximum_name_length"
     ELEMENT_TYPE = "elem_type"
     PROPERTY_NAME = "name"
 
@@ -154,6 +162,7 @@ class VariableName(StrEnum):
     FACE_SET_VARIABLE_TRUTH_TABLE = "fset_var_tab"
     ELEMENT_SET_VARIABLE_TRUTH_TABLE = "elset_var_tab"
 
+    NODE_VARIABLE_VALUES_COMBINED = "vals_nod_var"
     NODE_ID_MAP = "node_num_map"
     ELEMENT_ID_MAP = "elem_num_map"
     EDGE_ID_MAP = "edge_num_map"
@@ -603,4 +612,14 @@ def _validate_positive_index(index: int, *, name: str = "index") -> None:
 
 EX = ExodusNames
 
-__all__ = ["EX", "AttributeName", "DimensionName", "ExodusNames", "VariableName"]
+__all__ = [
+    "EX",
+    "EX_ALL_INT64_DB",
+    "EX_BULK_INT64_DB",
+    "EX_IDS_INT64_DB",
+    "EX_MAPS_INT64_DB",
+    "AttributeName",
+    "DimensionName",
+    "ExodusNames",
+    "VariableName",
+]

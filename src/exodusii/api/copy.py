@@ -99,6 +99,7 @@ def copy(source: Any, target: ExodusWriter) -> None:
         face_blocks=len(source.face_block_ids()) if hasattr(source, "face_block_ids") else 0,
         face_sets=len(source.face_set_ids()) if hasattr(source, "face_set_ids") else 0,
         element_sets=len(source.element_set_ids()) if hasattr(source, "element_set_ids") else 0,
+        floating_point_word_size=_word_size(source),
     )
 
     if source.node_count:
@@ -151,7 +152,9 @@ def copy_file(source: str | Path | ExodusFile, target: str | Path) -> str:
         close_source = True
 
     try:
-        with ExodusWriter.create(target) as writer:
+        with ExodusWriter.create(
+            target, int64=bool(getattr(source_file, "int64", False))
+        ) as writer:
             copy(source_file, writer)
     finally:
         if close_source:
@@ -177,6 +180,14 @@ def _copy_blocks(source: Any, target: ExodusWriter) -> None:
         target.define_element_block(
             block.id, block.element_type, source.element_connectivity(block.id), name=block.name
         )
+        if block.count and hasattr(source, "element_edge_connectivity"):
+            edge_conn = source.element_edge_connectivity(block.id)
+            if edge_conn is not None:
+                target.write_element_edge_connectivity(block.id, edge_conn)
+        if block.count and hasattr(source, "element_face_connectivity"):
+            face_conn = source.element_face_connectivity(block.id)
+            if face_conn is not None:
+                target.write_element_face_connectivity(block.id, face_conn)
         _copy_block_attributes(source, target, Entity.ELEMENT_BLOCK, block.id)
 
     if hasattr(source, "edge_block_ids"):
@@ -403,6 +414,8 @@ def _copy_block_variable_history_at_step(
 ) -> None:
     for name in names:
         for block_id in block_ids:
+            if not _variable_defined(source, on, name, int(block_id)):
+                continue  # truth table 0: the target has no such variable
             values = source.values(name, on=on, block_id=int(block_id), time=time_index)
 
             if on is Entity.ELEMENT:
@@ -424,6 +437,8 @@ def _copy_set_variable_history_at_step(
 ) -> None:
     for name in names:
         for set_id in set_ids:
+            if not _variable_defined(source, on, name, int(set_id)):
+                continue  # truth table 0: the target has no such variable
             target.write_values(
                 name,
                 source.values(name, on=on, set_id=int(set_id), time=time_index),
@@ -505,6 +520,36 @@ def _copy_block_attributes(source: Any, target: ExodusWriter, on: Entity, block_
 
     names = source.attribute_names(on, block_id) if hasattr(source, "attribute_names") else None
     target.write_block_attributes(on, block_id, attrs, names=names)
+
+
+def _word_size(source: Any) -> int:
+    """Floating-point word size of *source* (SEACAS ``floating_point_word_size``)."""
+
+    storage = getattr(source, "storage_type", "d")
+    if callable(storage):
+        storage = storage()
+    return 4 if str(storage) == "f" else 8
+
+
+def _variable_defined(source: Any, on: Entity, name: str, location_id: int) -> bool:
+    """Return whether *name* is stored for block/set *location_id* (truth table)."""
+
+    if not hasattr(source, "variable_truth_table"):
+        return True
+    try:
+        row = source.variable_truth_table(on, id=location_id)
+    except Exception:
+        return True
+    if row is None:
+        return True
+    # Truth-table columns follow the on-disk name table (blank slots included).
+    table = getattr(source, "_variable_name_table", None)
+    names = tuple(table(on)) if callable(table) else tuple(source.variable_names(on))
+    lowered = name.lower()
+    for index, candidate in enumerate(names):
+        if candidate == name or candidate.lower() == lowered:
+            return index < len(row) and bool(row[index])
+    return True
 
 
 def _has_variable(source: Any, name: str) -> bool:

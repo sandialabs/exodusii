@@ -96,7 +96,7 @@ def string_array(value: Any, *, strip: bool = True) -> np.ndarray:
 
 
 def encode_fixed_width(
-    values: str | Iterable[str], *, width: int = 32, dtype: str = "S1"
+    values: str | Iterable[str], *, width: int = 32, dtype: str = "S1", total: int | None = None
 ) -> np.ndarray:
     """Encode strings as a fixed-width NetCDF-style character array.
 
@@ -105,25 +105,43 @@ def encode_fixed_width(
     values
         A single string or iterable of strings.
     width
-        Fixed output width.
+        Maximum number of characters stored per string (longer strings are
+        truncated).
     dtype
         Character dtype. Usually ``"S1"`` for bytes or ``"U1"`` for Unicode.
+    total
+        Width of the output field (default ``width``).  Use ``total = width +
+        1`` to guarantee a terminating NUL, as Exodus C readers expect.
 
     Returns
     -------
     ndarray
-        If ``values`` is a string, shape is ``(width,)``. Otherwise shape is
-        ``(len(values), width)``.
+        If ``values`` is a string, shape is ``(total,)``. Otherwise shape is
+        ``(len(values), total)``.
     """
 
     if width < 1:
         raise ValueError("width must be positive")
+    field = width if total is None else total
+    if field < width:
+        raise ValueError("total must be at least width")
 
     if isinstance(values, str):
-        return _encode_one_fixed_width(values, width=width, dtype=dtype)
+        return _pad(_encode_one_fixed_width(values, width=width, dtype=dtype), field, dtype)
 
-    encoded = [_encode_one_fixed_width(value, width=width, dtype=dtype) for value in values]
+    encoded = [
+        _pad(_encode_one_fixed_width(value, width=width, dtype=dtype), field, dtype)
+        for value in values
+    ]
     return np.asarray(encoded, dtype=dtype)
+
+
+def _pad(chars: np.ndarray, total: int, dtype: str) -> np.ndarray:
+    if len(chars) == total:
+        return chars
+    out = np.zeros(total, dtype=dtype)
+    out[: len(chars)] = chars
+    return out
 
 
 def _stringify_array(value: np.ndarray | np.ma.MaskedArray, *, strip: bool) -> str | np.ndarray:
@@ -171,6 +189,8 @@ def _encode_one_fixed_width(value: str, *, width: int, dtype: str) -> np.ndarray
 
     if np_dtype.kind == "S":
         raw = text.encode("utf-8")[:width]
+        # Do not cut a multi-byte UTF-8 sequence in half.
+        raw = raw.decode("utf-8", errors="ignore").encode("utf-8")
         if raw:
             out[: len(raw)] = np.frombuffer(raw, dtype="S1")
         return out

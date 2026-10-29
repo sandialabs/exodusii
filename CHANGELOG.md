@@ -182,6 +182,101 @@ and uses semantic versioning once versioned releases are established.
 - Fixed legacy block attribute name writing so it no longer overwrites existing
   attribute values.
 - Fixed writer error reporting for missing block/set locations.
+- Fixed name tables losing trailing zeros: names of 16+ characters ending in
+  `00` (e.g. `kinetic_energy_100`) were read back truncated, which could make
+  a lookup return another variable's data.  Only NULs and trailing whitespace
+  are padding (libexodus `exi_trim`).
+- Fixed blank variable and attribute names shifting the on-disk index, so
+  values after a blank slot were read from the wrong column.
+- Fixed `ExodusWriter.write_values(..., on=GLOBAL)` overwriting every global
+  variable in the step instead of only the named one.
+- Fixed integer IDs/maps above `2**31 - 1` silently wrapping.  Out-of-range
+  values now raise `ExodusWriteError`; `ExodusWriter.create(path, int64=True)`
+  stores IDs, maps, connectivity and set entries as NC_INT64 and writes the
+  `int64_status` attribute.  `ExodusFile.int64` reports the stored width, and
+  `copy_file` and parallel joins preserve it.
+- Fixed zero-entry blocks and sets crashing the writer (`NC_UNLIMITED size
+  already in use`); they are now written as NULL entities (status 0, no
+  dimensions), as SEACAS does.
+- Fixed node/element/edge-set distribution factors to reuse the entry-count
+  dimension (e.g. `dist_fact_ns1(num_nod_ns1)`) and to require one factor per
+  entry, matching `ex_put_sets`.
+- Fixed `ParallelExodusFile.write()` (join), to match SEACAS epu:
+  - side sets and element sets referenced the wrong elements whenever a
+    block's element IDs were not one contiguous range;
+  - node, element, edge and face ID maps were dropped (IDs became 1..n);
+  - element/edge/face sets, block attributes, QA/info records and user
+    properties were dropped;
+  - the truth table was written as all ones; it is now the OR of the component
+    tables;
+  - blocks and node sets empty on every processor made `block()`,
+    `node_set()` and `write()` fail;
+  - node-set distribution factors are always written (missing components
+    contribute 1.0), even when Nemesis `ns_df_cnt_global` is zero.  This
+    replaces the earlier rule that suppressed them, and matches both epu and
+    the serial reference files.
+- Fixed legacy `get_element_variable_history` on parallel files returning
+  another element's history.
+- Fixed `diff` / `exodiff` reporting "Files are the same" where SEACAS exodiff
+  reports a difference:
+  - time values differing beyond the time tolerance, and differing numbers of
+    time steps, are differences (new `DiffResult.differences`; exit status 2);
+  - element connectivity, element types (exodiff `close_compare`) and
+    per-block element counts are compared (mesh error; exit status 1);
+  - nodes and elements are matched by their ID maps by default (exodiff
+    `-match_ids`); unmatched ID sets are an error.  `DiffOptions(match_ids=False)`
+    / `--match-file-order` matches by position instead;
+  - element blocks are matched by ID rather than by file position;
+  - any NaN is a difference, even at the same location in both files;
+    `DiffOptions(ignore_nans=True)`, `--ignore-nans` and the `IGNORE NANS`
+    command-file directive skip them.
+- Fixed `--match-coordinates` building inverted element and free-node maps, so
+  files with permuted elements (or free nodes) were reported as different.
+- Fixed exodiff command files: variable categories that are not listed are
+  not compared, and per-variable tolerances and `!NAME` exclusions apply only
+  to the category they are listed under (`DiffOptions.categories_specified`,
+  `category_variable_tolerances`, `category_exclude`).
+- Fixed `copy()` / `copy_file()` crashing on files with gaps in their truth
+  tables, writing float32 files as float64, and dropping element-to-edge /
+  element-to-face connectivity.
+- Fixed QA records being split on whitespace: each of the four fields is
+  decoded separately, so fields with spaces or empty fields read back intact.
+- Fixed `displacements(time=None)` returning `(n_steps, n_nodes * dim)`; it
+  now returns `(n_steps, n_nodes, dim)` (serial and parallel), and
+  `coordinates(displaced=True)` without a time uses the last step instead of
+  crashing.
+- Fixed old-format (`file_size = 0`) files: nodal variables stored in the
+  combined `vals_nod_var(time_step, num_nod_var, num_nodes)` array are read.
+- Fixed `region_stats(where=...)` with several blocks (broadcast error), and
+  `time="all"` with no eligible blocks now returns one empty result per step.
+- Fixed `write_time(value, step=k)` on an earlier step: later writes without
+  an explicit step now go to step `k`.
+- Defining block or set variables before all declared blocks/sets now raises
+  a clear `ExodusWriteError` instead of writing a truth table that claims
+  variables exist for blocks defined later.
+- The writer now records `maximum_name_length` (raised to the longest name
+  written), stores `api_version`/`version` as NC_FLOAT, and NUL-terminates
+  every name, QA field and info line (at most `len - 1` characters are kept).
+- `diff`: node and side sets are compared with sorted entries (exodiff
+  `-nsmap`/`-ssmap`), their member lists must agree when they carry
+  variables, and side-set distribution factors are compared
+  (`DiffOptions.sideset_df_tolerance` / `compare_sideset_df`).
+- `diff`: when interpolating, every file-1 step is compared, times snap to
+  file-2 steps within the time tolerance, and the final times must agree
+  within `DiffOptions.final_time_tolerance` (`--final-time-tolerance`).  A
+  step selection that compares nothing is a difference.  Automatic step
+  offsets `STEP_OFFSET_AUTOMATIC` / `STEP_OFFSET_MATCH` (`-TA` / `-TM`,
+  `STEP OFFSET AUTOMATIC` / `MATCH`) are implemented.
+- `diff` exit codes follow exodiff: a variable in only one file, a variable
+  requested in a command file but in neither file, and differing node or
+  element counts are differences (exit 2; counts stop the comparison);
+  a truth-table mismatch skips that block with a warning.
+- exodiff command files: a bare per-variable value (`<tab> T 0.5`) sets the
+  tolerance value; `FINAL TIME TOLERANCE` no longer overwrites the time-step
+  tolerance; `EXCLUDE TIMES` (and `--exclude-steps`) accept ranges
+  (`1-3,7`); `NODESET MATCH` / `SIDESET MATCH` no longer enable coordinate
+  matching; `IGNORE SIDESET DISTRIBUTION FACTORS` and `SIDESET DISTRIBUTION`
+  are honoured.
 
 ### Compatibility
 
