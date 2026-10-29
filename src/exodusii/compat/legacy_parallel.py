@@ -30,6 +30,14 @@ class ParallelExodusIIFile:
     def __init__(self, *files: str | Path) -> None:
         self._parallel = ParallelExodusFile.open(*files)
 
+    @classmethod
+    def from_reader(cls, reader: ParallelExodusFile) -> "ParallelExodusIIFile":
+        """Wrap an open :class:`ParallelExodusFile` without reopening it."""
+
+        legacy = cls.__new__(cls)
+        legacy._parallel = reader
+        return legacy
+
     @property
     def files(self) -> tuple[ExodusFile, ...]:
         """Component modern Exodus files."""

@@ -842,7 +842,7 @@ def _region_stats_single(
 def region_mass(
     exo: ExodusFile,
     *,
-    block_id: int,
+    block_id: int | None = None,
     region: Region,
     density_name: str = "DENSITY",
     volfrac_name: str | None = None,
@@ -863,8 +863,9 @@ def region_mass(
     ----------
     exo : ExodusFile
         Open Exodus database.
-    block_id : int
-        Element block ID to use.
+    block_id : int or None, optional
+        Element block ID to use.  ``None`` (default) sums over every
+        non-empty block that stores *density_name* (and *volfrac_name*).
     region : Region
         Geometric region predicate.
     density_name : str, optional
@@ -895,45 +896,46 @@ def region_mass(
     time_value = selection.value
 
     coords = exo.coordinates()
-    conn = exo.element_connectivity(block_id, zero_based=True)
-    centers = entity_centers(conn, coords)
-
-    block = exo.element_block(block_id)
-    vols = np.abs(np.asarray(element_volumes(block.element_type, conn, coords), dtype=np.float64))
-    density = np.asarray(
-        exo.values(density_name, on="element", block_id=block_id, time=time_index), dtype=np.float64
-    )
-
-    count_total = int(centers.shape[0])
-
-    # Region mask
-    region_mask = np.asarray(region.contains(centers), dtype=np.bool_)
-
-    # Optional field predicate
-    if where is not None:
-        pred_mask = _parse_predicate(where, exo, on="element", block_id=block_id, time=time_index)
-        combined_mask = region_mask & pred_mask
+    if block_id is not None:
+        block_ids = [block_id]
     else:
-        combined_mask = region_mask
+        block_ids = _iter_eligible_blocks(exo, density_name, "element", blocks_mode=BLOCKS_AUTO)
+        if volfrac_name is not None:
+            with_volfrac = set(
+                _iter_eligible_blocks(exo, volfrac_name, "element", blocks_mode=BLOCKS_AUTO)
+            )
+            block_ids = [b for b in block_ids if b in with_volfrac]
 
-    count_selected = int(combined_mask.sum())
-
-    # Volume-fraction weighting
-    if volfrac_name is not None:
-        volfrac = np.asarray(
-            exo.values(volfrac_name, on="element", block_id=block_id, time=time_index),
-            dtype=np.float64,
+    count_total = 0
+    count_selected = 0
+    raw_mass = 0.0
+    for bid in block_ids:
+        conn = exo.element_connectivity(bid, zero_based=True)
+        centers = entity_centers(conn, coords)
+        block = exo.element_block(bid)
+        vols = np.abs(np.asarray(element_volumes(block.element_type, conn, coords)))
+        mass_array = vols * np.asarray(
+            exo.values(density_name, on="element", block_id=bid, time=time_index), dtype=np.float64
         )
-        mass_array = vols * density * volfrac
-    else:
-        mass_array = vols * density
+        if volfrac_name is not None:
+            mass_array = mass_array * np.asarray(
+                exo.values(volfrac_name, on="element", block_id=bid, time=time_index),
+                dtype=np.float64,
+            )
 
-    raw_mass = float(mass_array[combined_mask].sum()) if count_selected else 0.0
+        mask = np.asarray(region.contains(centers), dtype=np.bool_)
+        if where is not None:
+            mask &= _parse_predicate(where, exo, on="element", block_id=bid, time=time_index)
+
+        count_total += int(centers.shape[0])
+        count_selected += int(mask.sum())
+        raw_mass += float(mass_array[mask].sum())
+
     total_mass = raw_mass * symmetry_factor
 
     return RegionMassResult(
         block_id=block_id,
-        blocks_used=None,
+        blocks_used=None if block_id is not None else tuple(block_ids),
         time_index=time_index,
         time_value=float(time_value),
         count_total=count_total,

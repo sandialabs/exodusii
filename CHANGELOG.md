@@ -308,6 +308,16 @@ and uses semantic versioning once versioned releases are established.
   now the exact isoparametric integral.  The point-on-boundary test for
   quadrilateral regions is now relative to the element size instead of a
   fixed 1e-8.
+- `ExodusWriter` methods taking an entity (`write_block_attributes`,
+  `define_block`, `define_set`, `define_variables`, `define_property`,
+  `set_block_status`, `set_set_status`, `write_id_map`, `write_values`)
+  accept string names such as `"element_block"`, not only `Entity` members.
+- The extension helpers (`compute_element_volumes`, `compute_element_centers`,
+  `compute_node_volumes`, …) accept `ExodusFile` / `ParallelExodusFile`.
+- `block_connectivity("element", …)` (and `"edge"`, `"face"`) selects the
+  block entity instead of raising a bare `KeyError`.
+- `region_mass(block_id=None)` sums over every block that stores the
+  density.
 
 ### Compatibility
 

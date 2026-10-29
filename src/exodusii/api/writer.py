@@ -32,6 +32,7 @@ import numpy as np
 import numpy.typing as npt
 
 from exodusii.core.entities import Entity
+from exodusii.core.entities import entity as as_entity
 from exodusii.core.errors import ExodusLookupError
 from exodusii.core.errors import ExodusWriteError
 from exodusii.core.names import EX_ALL_INT64_DB
@@ -524,7 +525,7 @@ class ExodusWriter:
         )
         self._backend.write_variable(VariableName.QA_RECORDS.value, encoded)
 
-    def define_property(self, on: Entity, name: str, values: npt.ArrayLike) -> None:
+    def define_property(self, on: Entity | str, name: str, values: npt.ArrayLike) -> None:
         """Define and write a named integer property array for a block or set entity.
 
         Properties are per-block or per-set integer scalars used to annotate
@@ -559,6 +560,7 @@ class ExodusWriter:
         ...     w.define_property(Entity.ELEMENT_BLOCK, "material_id", [101, 202])
         """
 
+        on = as_entity(on)
         values_array = np.asarray(values, dtype=np.int64)
 
         property_factory = None
@@ -596,7 +598,7 @@ class ExodusWriter:
         return index
 
     def define_variables(
-        self, on: Entity, names: Sequence[str], *, truth_table: npt.ArrayLike | None = None
+        self, on: Entity | str, names: Sequence[str], *, truth_table: npt.ArrayLike | None = None
     ) -> None:
         """Define result variables for any supported entity type.
 
@@ -644,6 +646,7 @@ class ExodusWriter:
         ...                    truth_table=truth)
         """
 
+        on = as_entity(on)
         self._require_initialized()
         spec = variable_spec(on)
         if on not in {Entity.GLOBAL, Entity.NODE}:
@@ -730,7 +733,7 @@ class ExodusWriter:
 
     def write_block_attributes(
         self,
-        on: Entity,
+        on: Entity | str,
         block_id: int,
         values: npt.ArrayLike,
         *,
@@ -773,6 +776,7 @@ class ExodusWriter:
         ...                          names=["thickness", "youngs_modulus"])
         """
 
+        on = as_entity(on)
         spec = block_spec(on)
         if spec.attributes_dimension is None or spec.attributes_variable is None:
             raise ValueError(f"{on.value} does not support attributes")
@@ -815,7 +819,7 @@ class ExodusWriter:
                 )
             self._backend.write_variable(name_var, self._encode_names(names))
 
-    def set_block_status(self, entity: Entity, block_id: int, active: bool) -> None:
+    def set_block_status(self, entity: Entity | str, block_id: int, active: bool) -> None:
         """Set the active/inactive status flag for a block.
 
         Parameters
@@ -833,11 +837,12 @@ class ExodusWriter:
         >>> w.set_block_status(Entity.ELEMENT_BLOCK, 10, active=False)
         """
 
+        entity = as_entity(entity)
         spec = block_spec(entity)
         block_index = self._location_index(spec.entity, block_id)
         self._backend.write_variable(spec.status_variable, 1 if active else 0, block_index - 1)
 
-    def set_set_status(self, entity: Entity, set_id: int, active: bool) -> None:
+    def set_set_status(self, entity: Entity | str, set_id: int, active: bool) -> None:
         """Set the active/inactive status flag for a set.
 
         Parameters
@@ -854,6 +859,7 @@ class ExodusWriter:
         >>> w.set_set_status(Entity.NODE_SET, 5, active=False)
         """
 
+        entity = as_entity(entity)
         spec = set_spec(entity)
         set_index = self._location_index(spec.entity, set_id)
         self._backend.write_variable(spec.status_variable, 1 if active else 0, set_index - 1)
@@ -922,7 +928,7 @@ class ExodusWriter:
         for axis in range(dimension):
             self._backend.write_variable(ExodusNames.coordinate(axis), array[:, axis])
 
-    def write_id_map(self, on: Entity, values: npt.ArrayLike) -> None:
+    def write_id_map(self, on: Entity | str, values: npt.ArrayLike) -> None:
         """Write a global object ID map for nodes, elements, edges, or faces.
 
         An ID map translates the local (file-internal) 1-based indices to
@@ -956,6 +962,7 @@ class ExodusWriter:
         >>> w.write_id_map(Entity.NODE, [101, 102, 103, 104])
         """
 
+        on = as_entity(on)
         array = np.asarray(values, dtype=np.int64)
 
         if on is Entity.NODE:
@@ -1036,7 +1043,7 @@ class ExodusWriter:
 
     def define_block(
         self,
-        entity: Entity,
+        entity: Entity | str,
         block_id: int,
         element_type: str,
         connectivity: npt.ArrayLike,
@@ -1101,6 +1108,7 @@ class ExodusWriter:
         >>> w.define_block(Entity.ELEMENT_BLOCK, 1, "quad4", conn, name="surface")
         """
 
+        entity = as_entity(entity)
         self._require_initialized()
         spec = block_spec(entity)
 
@@ -1338,7 +1346,7 @@ class ExodusWriter:
 
     def define_set(
         self,
-        entity: Entity,
+        entity: Entity | str,
         set_id: int,
         entries: npt.ArrayLike,
         *,
@@ -1391,6 +1399,7 @@ class ExodusWriter:
         >>> w.define_set(Entity.NODE_SET, 1, [1, 2, 3, 4])
         """
 
+        entity = as_entity(entity)
         self._require_initialized()
         spec = set_spec(entity)
 
@@ -1887,7 +1896,7 @@ class ExodusWriter:
         name: str,
         values: npt.ArrayLike,
         *,
-        on: Entity,
+        on: Entity | str,
         step: int | None = None,
         block_id: int | None = None,
         set_id: int | None = None,
@@ -1944,6 +1953,7 @@ class ExodusWriter:
         >>> w.write_values("stress", stress_array, on=Entity.ELEMENT, block_id=1)
         """
 
+        on = as_entity(on)
         step = self._current_or_requested_step(step)
         spec = variable_spec(on)
         variable_index = self._name_index(spec.names_variable, name)

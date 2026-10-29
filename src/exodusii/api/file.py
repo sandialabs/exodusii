@@ -2029,7 +2029,7 @@ class ExodusFile:
     def region_mass(
         self,
         *,
-        block_id: int,
+        block_id: int | None = None,
         region: Any,
         density_name: str = "DENSITY",
         volfrac_name: str | None = None,
@@ -2048,8 +2048,9 @@ class ExodusFile:
 
         Parameters
         ----------
-        block_id : int
-            Element block ID.
+        block_id : int or None, optional
+            Element block ID.  ``None`` (default) sums over every block that
+            stores the density (and volume fraction).
         region : Region
             Geometric region predicate.
         density_name : str, optional

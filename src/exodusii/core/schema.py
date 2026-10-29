@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from exodusii.core.entities import Entity
 from exodusii.core.entities import entity
+from exodusii.core.errors import ExodusInvalidEntityError
 from exodusii.core.names import DimensionName
 from exodusii.core.names import ExodusNames
 from exodusii.core.names import VariableName
@@ -382,10 +383,23 @@ def object_spec(value: Entity | str) -> ObjectSpec:
     return OBJECT_SPECS[entity(value)]
 
 
-def block_spec(value: Entity | str) -> BlockSpec:
-    """Return block schema."""
+#: Object entity -> the block entity that holds it.
+_OBJECT_BLOCKS = {
+    Entity.ELEMENT: Entity.ELEMENT_BLOCK,
+    Entity.EDGE: Entity.EDGE_BLOCK,
+    Entity.FACE: Entity.FACE_BLOCK,
+}
 
-    return BLOCK_SPECS[entity(value)]
+
+def block_spec(value: Entity | str) -> BlockSpec:
+    """Return block schema; ``"element"``/``"edge"``/``"face"`` select their block."""
+
+    ent = entity(value)
+    ent = _OBJECT_BLOCKS.get(ent, ent)
+    try:
+        return BLOCK_SPECS[ent]
+    except KeyError:
+        raise ExodusInvalidEntityError(f"{ent.value!r} is not a block entity") from None
 
 
 def set_spec(value: Entity | str) -> SetSpec:

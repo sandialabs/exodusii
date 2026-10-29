@@ -12,8 +12,27 @@ from exodusii.mesh.geometry import entity_centers
 from exodusii.mesh.geometry import nodal_volumes
 
 
+def _legacy(file):
+    """Accept modern readers by wrapping them in the legacy interface."""
+
+    from exodusii.api.file import ExodusFile
+    from exodusii.api.parallel import ParallelExodusFile
+
+    if isinstance(file, ExodusFile):
+        from exodusii.compat.legacy_file import ExodusIIFile
+
+        return ExodusIIFile.from_reader(file)
+    if isinstance(file, ParallelExodusFile):
+        from exodusii.compat.legacy_parallel import ParallelExodusIIFile
+
+        return ParallelExodusIIFile.from_reader(file)
+    return file
+
+
 def compute_element_centers(file, block_id: int | None = None, time_step: int | None = None):
     """Compute element centers using the legacy extension API."""
+
+    file = _legacy(file)
 
     if block_id is None:
         centers = [
@@ -30,6 +49,8 @@ def compute_element_centers(file, block_id: int | None = None, time_step: int | 
 def compute_element_volumes(file, block_id: int, time_step: int | None = None):
     """Compute element volumes using the legacy extension API."""
 
+    file = _legacy(file)
+
     block = file.get_element_block(block_id)
     conn = file.get_element_conn(block_id) - 1
     coords = file.get_coords(time_step=time_step)
@@ -38,6 +59,8 @@ def compute_element_volumes(file, block_id: int, time_step: int | None = None):
 
 def compute_node_volumes(file, time_step: int | None = None):
     """Compute nodal volumes using the legacy extension API."""
+
+    file = _legacy(file)
 
     result = np.zeros(file.num_nodes(), dtype=np.float64)
 
@@ -52,6 +75,8 @@ def compute_node_volumes(file, time_step: int | None = None):
 
 def compute_element_length(file, time: float):
     """Compute average characteristic element length."""
+
+    file = _legacy(file)
 
     time_step = _legacy_time_step(file, time)
     lengths = []
@@ -77,6 +102,8 @@ def compute_node_variable_values_at_element_center(
     file, block_id: int | None, var_name: str, time_step: int | None = None
 ):
     """Average nodal variable values to element centers."""
+
+    file = _legacy(file)
 
     if block_id is None:
         values = [
@@ -106,6 +133,8 @@ def compute_edge_centers(file, block_id: int | None = None, time_step: int | Non
     ``None``.
     """
 
+    file = _legacy(file)
+
     if block_id is None:
         centers = [
             compute_edge_centers(file, int(block), time_step=time_step)
@@ -125,6 +154,8 @@ def compute_face_centers(file, block_id: int | None = None, time_step: int | Non
     in *block_id*, or concatenated across all face blocks when *block_id* is
     ``None``.
     """
+
+    file = _legacy(file)
 
     if block_id is None:
         centers = [
@@ -155,6 +186,7 @@ def compute_volume_averaged_elem_variable(
 
     del processes
 
+    file = _legacy(file)
     block = file.get_element_block(block_id)
     coords = file.get_coords(time_step=time_step)
     if file.num_dimensions() == 2 and zfill is not None:

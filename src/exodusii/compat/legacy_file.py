@@ -72,6 +72,17 @@ class ExodusIIFile:
         else:
             self._writer = ExodusWriter.create(filename)
 
+    @classmethod
+    def from_reader(cls, reader: ExodusFile) -> "ExodusIIFile":
+        """Wrap an open :class:`ExodusFile` without reopening it."""
+
+        legacy = cls.__new__(cls)
+        legacy.filename = reader.path
+        legacy.mode = "r"
+        legacy._reader = reader
+        legacy._writer = None
+        return legacy
+
     @property
     def reader(self) -> ExodusFile:
         if self.mode != "r":
