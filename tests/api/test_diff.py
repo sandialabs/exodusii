@@ -385,8 +385,7 @@ def test_time_step_count_mismatch_warns(tmp_path: Path) -> None:
     assert not result.same
     assert any("number of time steps differs" in d for d in result.differences)
 
-    # ...unless the step selection accounts for it (an explicit stop step):
-    # only the overlapping step is compared, and it matches -> same.
+    # ...unless an explicit stop step accounts for it.
     result = diff(a, b, DiffOptions(time_selection=TimeSelection(stop=1)))
     assert any("time step count differs" in w for w in result.warnings)
     assert result.same
@@ -693,8 +692,7 @@ def test_interpolating_midpoint_values(tmp_path: Path) -> None:
     result = diff(a, b, opts)
     # Every interpolated value matches...
     assert not result.variable_diffs, result.variable_diffs
-    # ...but, as in SEACAS exodiff, the final times (2.5 vs 3.0) must agree
-    # within the final-time tolerance (default 0).
+    # ...but the final times (2.5 vs 3.0) must agree within the final-time tolerance.
     assert any("final database times differ" in d for d in result.differences)
 
     loose = DiffOptions(

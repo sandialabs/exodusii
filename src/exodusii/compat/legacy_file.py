@@ -1032,8 +1032,6 @@ class ExodusIIFile:
             block_id, elem_type, zeros, edge_connectivity=edge_conn, face_connectivity=face_conn
         )
         if num_attr and num_block_elems:
-            # Allocated as zeros with blank names, as exodusii < 2 did;
-            # filled later by put_element_attr / put_element_attribute_names.
             self.writer.write_block_attributes(
                 Entity.ELEMENT_BLOCK,
                 block_id,
@@ -1579,10 +1577,8 @@ class ExodusIIFile:
         return LegacyQueryArray(data, active_aliases)
 
     def _put_variable_params(self, on: Entity, num_vars: int) -> None:
-        # Block/set value variables are created with an all-zero truth table:
-        # put_*_variable_truth_table then creates the ones its table selects.
-        # Without a truth table call, a value write creates its variable
-        # (exodusii < 2 created all of them up front).
+        # Value variables are created by put_*_variable_truth_table, or on
+        # first write when no truth table is given.
         spec = variable_spec(on)
         if spec.truth_table_variable is None or spec.location_entity is None:
             self.writer.define_variables(on, [""] * num_vars)

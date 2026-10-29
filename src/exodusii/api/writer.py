@@ -47,16 +47,12 @@ from exodusii.core.schema import variable_value_name
 from exodusii.core.strings import encode_fixed_width
 from exodusii.io.netcdf4_backend import NetCDF4Backend
 
-#: Fixed-width string dimensions, each holding at most ``len - 1`` characters
-#: plus a terminating NUL: ``len_string`` = MAX_STR_LENGTH + 1 and
-#: ``len_line`` = MAX_LINE_LENGTH + 1 (SEACAS), ``len_name`` = 256 (SEACAS
-#: NC_MAX_NAME + 1, rounded down).
+#: Fixed-width string sizes; each field keeps ``len - 1`` characters plus a NUL.
 STRING_LENGTH = 33
 LINE_LENGTH = 81
 NAME_LENGTH = 256
-#: Initial ``maximum_name_length`` attribute (SEACAS ex_create: 32).
+#: Initial ``maximum_name_length`` attribute (as ex_create writes).
 DEFAULT_MAX_NAME_LENGTH = 32
-#: Value stored in the ``api_version`` / ``version`` attributes.
 EXODUS_API_VERSION = 9.06
 
 
@@ -115,15 +111,13 @@ class ExodusWriter:
     def __init__(self, backend: NetCDF4Backend, *, int64: bool = False) -> None:
         self._backend = backend
         self._initialized = False
-        # NetCDF type for IDs, maps, connectivity and set entries.  SEACAS
-        # EX_ALL_INT64_DB stores these as NC_INT64 (and requires a non-classic
-        # NetCDF-4 file); status arrays and truth tables stay NC_INT.
+        # IDs, maps, connectivity and set entries; status arrays and truth
+        # tables stay NC_INT (EX_ALL_INT64_DB).
         self._int64 = bool(int64)
         self._int_dtype = "i8" if self._int64 else "i4"
-        # (entity, 1-based index) of blocks/sets defined with zero entries.
+        # (entity, 1-based index) of blocks/sets with zero entries.
         self._null_blocks: set[tuple[Entity, int]] = set()
         self._null_sets: set[tuple[Entity, int]] = set()
-        # Decoded name tables: {variable: (raw bytes, names)}.
         self._defined_names: dict[str, tuple[bytes, list[str]]] = {}
         # NetCDF type for floating-point data; follows floating_point_word_size
         # (SEACAS nc_flt_code: 4 -> NC_FLOAT, 8 -> NC_DOUBLE).
@@ -339,8 +333,7 @@ class ExodusWriter:
         self._float_dtype = "f4" if floating_point_word_size == 4 else "f8"
 
         self._backend.set_attribute(AttributeName.TITLE.value, title)
-        # SEACAS ex_create writes api_version/version as NC_FLOAT and the
-        # word size, file size, maximum_name_length and int64_status as NC_INT.
+        # Attribute types follow ex_create (NC_FLOAT versions, NC_INT others).
         self._backend.set_attribute(AttributeName.API_VERSION.value, np.float32(EXODUS_API_VERSION))
         self._backend.set_attribute(AttributeName.VERSION.value, np.float32(EXODUS_API_VERSION))
         self._backend.set_attribute(
@@ -671,9 +664,7 @@ class ExodusWriter:
                 raise ExodusWriteError(f"define {label}s before defining {on.value} variables")
             allocated = self._dimension_size(self._location_count_dimension(spec.location_entity))
             if len(location_ids) != allocated:
-                # The truth table and per-location value variables are sized
-                # and created now; later blocks/sets would be left without
-                # variables while the table claimed they had them.
+                # Value variables are created now; later blocks would lack them.
                 label = spec.location_entity.value.replace("_", " ")
                 raise ExodusWriteError(
                     f"define all {allocated} {label}s before defining {on.value} variables "
@@ -823,7 +814,7 @@ class ExodusWriter:
         if names is not None and len(names) != attr_count:
             raise ValueError("attribute name count must match attribute column count")
         if spec.attribute_names_variable is not None:
-            # SEACAS always defines attrib_name%d; names default to blank.
+            # attrib_name%d always exists (blank by default), as in SEACAS.
             name_var = spec.attribute_names_variable(block_index)
             if not self._backend.has_variable(name_var):
                 self._backend.create_variable(
@@ -1138,9 +1129,8 @@ class ExodusWriter:
         block_index = self._next_block_index(spec.entity, block_id)
 
         if conn.shape[0] == 0:
-            # NULL block (SEACAS ex_put_block_params): record the ID and name
-            # with status 0, but create no dimensions or variables.  A
-            # zero-length NetCDF dimension would be unlimited.
+            # NULL block: ID, name and status 0 only.  A zero-length NetCDF
+            # dimension would be unlimited.
             self._null_blocks.add((spec.entity, block_index))
             self._backend.write_variable(spec.ids_variable, int(block_id), block_index - 1)
             self._backend.write_variable(spec.status_variable, 0, block_index - 1)
@@ -1427,7 +1417,7 @@ class ExodusWriter:
         set_index = self._next_set_index(spec.entity, set_id)
 
         if len(entry_array) == 0:
-            # NULL set (SEACAS ex_put_sets): ID and name only, status 0.
+            # NULL set: ID, name and status 0 only.
             self._null_sets.add((spec.entity, set_index))
             self._backend.write_variable(spec.ids_variable, int(set_id), set_index - 1)
             self._backend.write_variable(spec.status_variable, 0, set_index - 1)
@@ -1462,9 +1452,7 @@ class ExodusWriter:
                     dist_dim = spec.dist_factor_count_dimension(set_index)
                     self._backend.create_dimension(dist_dim, len(factors))
                 else:
-                    # SEACAS ex_put_sets: non-side sets store one factor per
-                    # entry and reuse the entry-count dimension
-                    # (e.g. dist_fact_ns1(num_nod_ns1)).
+                    # Non-side sets: one factor per entry, on the entry dimension.
                     if len(factors) != len(entry_array):
                         raise ValueError(
                             f"{spec.entity.value} {set_id}: distribution factor count "
@@ -1902,9 +1890,8 @@ class ExodusWriter:
         else:
             self._time_step = max(self._time_step, step)
 
-        # _time_step is the highest step written (the next implicit step is
-        # _time_step + 1); _current_step is the step that result writes
-        # without an explicit ``step`` go to (the most recently written one).
+        # _time_step: highest step written; _current_step: target of writes
+        # without an explicit step.
         self._current_step = step
         self._backend.write_variable(VariableName.TIME.value, float(value), step - 1)
         return step
@@ -1977,8 +1964,7 @@ class ExodusWriter:
         variable_index = self._name_index(spec.names_variable, name)
 
         if on is Entity.GLOBAL:
-            # All globals share one (time_step, num_glo_var) array; write only
-            # this variable's column.
+            # Globals share one (time_step, num_glo_var) array.
             value = np.asarray(values, dtype=np.float64).reshape(-1)
             if value.size != 1:
                 raise ValueError(
@@ -2389,7 +2375,7 @@ class ExodusWriter:
         self._backend.create_variable(
             names_name, str, (dimension_name, DimensionName.NAME_LENGTH.value)
         )
-        # EX_INVALID_ID marks slots that are allocated but never defined.
+        # EX_INVALID_ID marks allocated but undefined slots.
         self._backend.write_variable(ids_name, np.full(count, -1, dtype=np.int32))
         self._backend.write_variable(status_name, np.zeros(count, dtype=np.int32))
         self._backend.write_variable(
@@ -2534,13 +2520,7 @@ class ExodusWriter:
         return step
 
     def _encode_names(self, names: str | Sequence[str]) -> np.ndarray:
-        """Encode entity/variable names into ``len_name`` slots.
-
-        At most ``len_name - 1`` characters are stored so every name is
-        NUL-terminated (C readers force a NUL at ``len - 1``), and the
-        ``maximum_name_length`` attribute is raised to the longest name written
-        (SEACAS ``exi_update_max_name_length``).
-        """
+        """Encode names NUL-terminated and track ``maximum_name_length``."""
 
         values = [names] if isinstance(names, str) else [str(n) for n in names]
         longest = max((len(v.split("\x00", 1)[0].encode("utf-8")) for v in values), default=0)
@@ -2555,9 +2535,8 @@ class ExodusWriter:
         return encode_fixed_width(values, width=NAME_LENGTH - 1, total=NAME_LENGTH)
 
     def _name_index(self, variable_name: str, requested: str) -> int:
-        # Decoding a name table is slow (character-by-character), so cache it
-        # keyed on the raw bytes: writes made directly through the backend
-        # (e.g. the legacy compatibility layer) invalidate the entry.
+        # Decoding is slow; cache on the raw bytes so direct backend writes
+        # (legacy layer) invalidate the entry.
         raw = self._backend.variable(variable_name, default=None, raw=True)
         raw_bytes = b"" if raw is None else np.asarray(raw[...]).tobytes()
         cached = self._defined_names.get(variable_name)

@@ -363,8 +363,7 @@ def test_exodus_name_decoding_preserves_meaningful_trailing_zero() -> None:
     assert _strip_exodus_padding("nodeset_100") == "nodeset_100"
     assert _strip_exodus_padding("sideset_200") == "sideset_200"
     assert _strip_exodus_padding("MAT_10") == "MAT_10"
-    # Only NULs and trailing whitespace are padding (libexodus exi_trim);
-    # trailing zeros are always significant, however long the name.
+    # Only NULs and trailing whitespace are padding; trailing zeros are kept.
     assert _strip_exodus_padding("DT_HYDRO\x00\x00\x00  ") == "DT_HYDRO"
     assert _strip_exodus_padding("kinetic_energy_100") == "kinetic_energy_100"
     assert _strip_exodus_padding("surface_200_side00") == "surface_200_side00"

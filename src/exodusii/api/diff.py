@@ -193,8 +193,6 @@ class DiffResult:
     file2: str
     # Fatal structural errors (counts, missing variables, etc.).
     errors: list[str] = field(default_factory=list)
-    # Non-variable differences (time values/step counts, ...): not errors,
-    # but the files are not the same.
     differences: list[str] = field(default_factory=list)
     # Non-fatal warnings.
     warnings: list[str] = field(default_factory=list)
@@ -207,7 +205,6 @@ class DiffResult:
     mesh_map_built: bool = False
     unmatched_nodes: int = 0
     unmatched_elems: int = 0
-    # Steps selected by the time comparison (internal; reused for variables).
     _steps: list[tuple[int, int, float]] | None = field(default=None, repr=False, compare=False)
 
     def __bool__(self) -> bool:
@@ -417,7 +414,6 @@ class DiffOptions:
         default_factory=dict
     )
     category_exclude: Mapping[Entity, frozenset[str]] = field(default_factory=dict)
-    # ── ID matching and NaN handling (SEACAS exodiff defaults) ────────────
     match_ids: bool = True
     ignore_nans: bool = False
 
@@ -533,15 +529,12 @@ class DiffOptions:
         """
 
         if self.categories_specified is not None and ent not in self.categories_specified:
-            # exodiff command file: unlisted categories are not compared.
             return False
         if ent in self.all_categories:
             return True
         includes = self.include_variables.get(ent)
         if includes is None:
-            # No name list for this category: compare everything unless a
-            # command file listed the category without names or "(all)"
-            # (exodiff then compares none of its variables).
+            # A command-file header without names or "(all)" selects nothing.
             return self.categories_specified is None
         if self.ignore_case:
             return name.lower() in {n.lower() for n in includes}
@@ -659,8 +652,7 @@ def _compare_variable_series(
     diff_mask = finite_diff | nan_mask
     exceeded = bool(np.any(diff_mask))
 
-    # Report the worst delta location; prefer a NaN entry if present (its
-    # delta is meaningless, so mark it as infinite).
+    # A NaN location wins; its delta is meaningless, so report inf.
     if np.any(nan_mask):
         index = tuple(int(i) for i in np.argwhere(nan_mask)[0])
         max_delta = float("inf")
@@ -767,13 +759,10 @@ def diff(
     try:
         _compare_mesh_metadata(exo1, exo2, result, opts)
         if result.differences:
-            # Global sizes differ: nothing else can be compared (exodiff
-            # Check_Global returns before any further comparison).
+            # Nothing else is comparable (exodiff stops here too).
             result.same = False
             return result
 
-        # Build coordinate-based mesh map when requested; otherwise match
-        # nodes/elements by global ID (exodiff -match_ids, the default).
         mesh_map: MeshMap | None = None
         if not opts.coordinate_matching and not result.errors:
             mesh_map = _id_mesh_map(exo1, exo2, opts, result)
@@ -820,8 +809,7 @@ def _compare_mesh_metadata(
 ) -> None:
     if exo1.dimension != exo2.dimension:
         result.errors.append(f"dimension differs: {exo1.dimension} != {exo2.dimension}")
-    # SEACAS Check_Global: differing node/element counts end the comparison
-    # with "Files are different" (exit status 2).
+    # Count mismatches are differences (exit 2), not errors, as in exodiff.
     if exo1.node_count != exo2.node_count:
         result.differences.append(f"node count differs: {exo1.node_count} != {exo2.node_count}")
     if exo1.element_count != exo2.element_count:
@@ -830,8 +818,7 @@ def _compare_mesh_metadata(
         )
     ids1 = exo1.element_block_ids().tolist()
     ids2 = exo2.element_block_ids().tolist()
-    # Blocks are matched by ID, not position (exodiff check.C
-    # Check_Element_Block uses Get_Element_Block_by_Id).
+    # Blocks are matched by ID, not position.
     if sorted(ids1) != sorted(ids2):
         # When coordinate matching is enabled, block IDs may differ; we
         # demote this from a fatal error to a warning and let the matching
@@ -883,13 +870,11 @@ def _first_unmatched(ids1: np.ndarray, ids2: np.ndarray) -> int | None:
 def _id_mesh_map(
     exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
 ) -> MeshMap | None:
-    """Match nodes and elements by global ID (SEACAS ``Compute_FileId_Maps``).
+    """Match nodes and elements by global ID.
 
-    Returns ``None`` when both files store their entities in the same ID
-    order (the common case), a :class:`MeshMap` when the same IDs are stored
-    in a different order, and records an error when the ID sets cannot be
-    matched.  With ``match_ids=False`` (exodiff ``-match_file_order``),
-    entities are matched by position and differing ID maps are a difference.
+    Returns ``None`` when the ID maps are identical, otherwise a
+    :class:`MeshMap`; unmatched ID sets are recorded as errors.  With
+    ``match_ids=False`` differing maps are recorded as a difference instead.
     """
 
     node_ids1 = np.asarray(exo1.ids(Entity.NODE), dtype=np.int64)
@@ -970,11 +955,10 @@ def _id_mesh_map(
 
 
 def _element_types_compatible(type1: str, type2: str) -> bool:
-    """Return whether two element types agree (exodiff ``close_compare``).
+    """Return whether two element types agree, as exodiff ``close_compare``.
 
-    Comparison is case-insensitive; trailing node counts must agree when both
-    names have them, but one name may omit it (``QUAD`` matches ``quad4``,
-    ``tri`` matches ``triangle6``; ``tri3`` does not match ``tri6``).
+    Case-insensitive; trailing node counts must match when both names have
+    one (``QUAD`` == ``quad4``, ``tri`` == ``triangle6``, ``tri3`` != ``tri6``).
     """
 
     a = type1.strip().upper()
@@ -1004,12 +988,7 @@ def _compare_element_blocks(
     result: DiffResult,
     mesh_map: MeshMap | None,
 ) -> None:
-    """Compare element block topology and connectivity (exodiff check.C).
-
-    Element types (``close_compare``), element counts, nodes per element and
-    connectivity -- after mapping file-1 nodes/elements into file-2 -- must
-    agree.  Any mismatch is a mesh incompatibility (exodiff exits 1).
-    """
+    """Compare element types, counts and connectivity; mismatches are errors."""
 
     inv_block_map: dict[int, int] = (
         {v: k for k, v in mesh_map.block_map.items()} if mesh_map is not None else {}
@@ -1050,8 +1029,6 @@ def _compare_element_blocks(
             continue
 
         if mesh_map is not None:
-            # Express file-1 connectivity in file-2 node numbering and align
-            # file-2 rows to file-1 element order.
             expected = mesh_map.node_map_inv[conn1 - 1] + 1
             try:
                 _perm, perm_inv = mesh_map.block_elem_perm(block_id2)
@@ -1105,15 +1082,10 @@ def _compare_coordinates(
 def _compare_times(
     exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult
 ) -> None:
-    """Compare time-step counts and matched time values (SEACAS exodiff).
+    """Record differing time values and unexplained step-count mismatches.
 
-    * A compared step whose time values differ beyond ``time_tolerance`` is a
-      difference (``exodiff.C`` marks the step FAILED), except when
-      interpolating.
-    * Differing numbers of time steps are a difference unless the compared
-      steps account for it: a step offset with ``n1 - offset == n2``, an
-      explicit stop step, or interpolation (``exodiff.C`` "# time steps
-      differ").
+    A step-count mismatch is accepted when an offset (``n1 - offset == n2``),
+    a stop step or interpolation accounts for it.
     """
     times1 = exo1.times()
     times2 = exo2.times()
@@ -1139,12 +1111,9 @@ def _compare_times(
     steps = _steps_to_compare(exo1, exo2, opts, result)
     result._steps = steps
     if ts.interpolating:
-        # When interpolating, file-1 times are matched to arbitrary file-2
-        # times; differing values are expected.  exodiff instead checks that
-        # the final compared file-1 time matches the final file-2 time
-        # within the final-time tolerance (default 0.0: must be equal).
-        # exodiff applies this on the last loop step (the last file-1 step
-        # within the selection), even when it is outside file 2's range.
+        # Times differ by design when interpolating; only the last selected
+        # file-1 time must match file 2's last time (exodiff checks it even
+        # when that step is outside file 2's range).
         last1 = min(n1, ts.stop) if ts.stop > 0 else n1
         if n1 and n2 and last1 >= max(1, ts.start):
             t1 = float(times1[last1 - 1]) * ts.time_value_scale + ts.time_value_offset
@@ -1184,8 +1153,7 @@ def _surrounding_steps(
             return a == b
         return not time_tolerance.diff(a, b)
 
-    # Snap to a step within tolerance first (also covers values just outside
-    # the range due to round-off).
+    # Snapping first also catches values just outside the range (round-off).
     for index, value in enumerate(times2):
         if same(t, float(value)):
             return index, index, 0.0
@@ -1221,12 +1189,8 @@ STEP_OFFSET_MATCH = -2
 
 
 def _resolve_step_offset(times1: np.ndarray, times2: np.ndarray, offset: int) -> int:
-    """Resolve the automatic step-offset modes (``exodiff.C``).
-
-    * ``AUTOMATIC`` (``-1``): ``n1 - n2``, so the last steps line up.
-    * ``MATCH`` (``-2``): the file-1 step closest in time to the first
-      file-2 step lines up with it.
-    """
+    """Resolve AUTOMATIC (align the last steps) and MATCH (align file 2's
+    first time with the closest file-1 time) offsets."""
 
     n1, n2 = len(times1), len(times2)
     if offset == STEP_OFFSET_AUTOMATIC:
@@ -1245,13 +1209,11 @@ def _resolve_step_offset(times1: np.ndarray, times2: np.ndarray, offset: int) ->
 def _steps_to_compare(
     exo1: ExodusFile, exo2: ExodusFile, opts: DiffOptions, result: DiffResult | None
 ) -> list[StepTriple]:
-    """Return the list of (file1_idx, file2_lo_idx, proportion) triples.
+    """Return ``(file1_idx, file2_lo_idx, proportion)`` triples, as exodiff loops.
 
-    Mirrors the SEACAS exodiff time loop (``exodiff.C``): the loop variable
-    is the file-2 step (file-1 step = file-2 step + offset) and runs up to
-    ``min(n1, n2)`` -- or over **all file-1 steps** when interpolating --
-    capped by an explicit stop step.  When *result* is given, a selection
-    that compares no steps is recorded as a difference.
+    Steps run to ``min(n1, n2)`` (all file-1 steps when interpolating),
+    capped by ``stop``.  An empty selection is recorded in *result* as a
+    difference.
     """
     times1 = exo1.times()
     times2 = exo2.times()
@@ -1272,7 +1234,6 @@ def _steps_to_compare(
 
     offset = _resolve_step_offset(times1, times2, ts.time_step_offset)
 
-    # Upper bound of the loop variable (exodiff min_num_times).
     last = n1 if ts.interpolating else min(n1, n2)
     if ts.stop > 0:
         last = min(last, ts.stop)
@@ -1443,8 +1404,7 @@ def _names_to_compare(
     def _wanted(name: str) -> bool:
         return opts.is_included(name, ent) and not opts.is_excluded(name, ent)
 
-    # SEACAS create_file.C build_variable_names: a variable in only one file
-    # is a DIFFERENCE (exit 2), not an error.
+    # A variable in only one file is a difference (exit 2), not an error.
     for name in only1:
         if _wanted(name):
             result.differences.append(
@@ -1455,8 +1415,6 @@ def _names_to_compare(
             result.differences.append(
                 f"{ent.value} variable {name!r} is in the second file but not the first"
             )
-    # A variable named explicitly (command file) that is in neither file is
-    # also a difference (create_file.C: "is not in the first file").
     includes = opts.include_variables.get(ent)
     if (
         includes
@@ -1610,8 +1568,7 @@ def _compare_block_variables(
             if not present1 and not present2:
                 continue
             if present1 != present2:
-                # SEACAS create_file.C: INFO, the variable is skipped for
-                # this block (not a difference).
+                # exodiff skips such blocks without reporting a difference.
                 result.warnings.append(
                     f"{ent.value} variable {name!r} block {block_id}: stored in only one file "
                     "(truth tables differ); not compared"
@@ -1666,14 +1623,11 @@ def _sorted_set_entries(
     node_map: np.ndarray | None = None,
     elem_map: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return ``(keys, order)`` for a node/side set (SEACAS ``-nsmap``/``-ssmap``).
+    """Return sorted ``(keys, order)`` for a node or side set, else ``None``.
 
-    *keys* identify each entry in file-2 numbering when a map is given
-    (node number, or ``element * 8 + side`` for side sets, as exodiff
-    encodes them); *order* sorts the entries by those keys, so values can be
-    compared regardless of the order entries are stored in.  ``node_map`` /
-    ``elem_map`` map 0-based file-1 indices to 0-based file-2 indices.
-    Returns ``None`` for other set types.
+    Keys are node numbers, or ``element * 8 + side`` for side sets, in
+    file-2 numbering when ``node_map`` / ``elem_map`` (0-based file-1 ->
+    file-2) are given.
     """
 
     try:
@@ -1717,13 +1671,10 @@ def _compare_set_variables(
     ent: Entity,
     mesh_map: MeshMap | None = None,
 ) -> None:
-    """Compare set variables (SEACAS ``diff_nodeset`` / ``diff_sideset``).
+    """Compare set variables of sets matched by ID.
 
-    Sets are matched by ID.  Node and side sets are compared with entries
-    sorted (exodiff's default ``-nsmap``/``-ssmap``), after mapping file-1
-    entries into file-2 numbering, so the order entries are stored in does
-    not matter.  When a set has variables, its member lists must agree
-    (exodiff ``Check_Nodeset``/``Check_Sideset``: a mesh difference).
+    Node and side set entries are compared in sorted order, so storage
+    order does not matter; their member lists must agree (a mesh error).
     """
 
     names = _names_to_compare(exo1, exo2, ent, opts, result)
@@ -1825,10 +1776,9 @@ def _compare_sideset_distribution_factors(
     result: DiffResult,
     mesh_map: MeshMap | None,
 ) -> None:
-    """Compare side-set distribution factors (SEACAS ``diff_sideset_df``).
+    """Compare side-set distribution factors, sides in sorted order.
 
-    Factors are compared side by side after sorting sides (as for set
-    variables).  Sets where either file stores no factors are skipped.
+    Sets where either file stores no factors are skipped.
     """
 
     if not opts.compare_sideset_df or opts.sideset_df_tolerance.mode is ToleranceMode.IGNORE:

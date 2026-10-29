@@ -285,8 +285,7 @@ def build_mesh_map(
                 )
             continue
 
-        # For each file-2 element find its file-1 counterpart:
-        # e_match[j_local] = i_local (file-2 -> file-1, block-local).
+        # e_match[j_local] = i_local: file-2 -> file-1, block-local.
         e_match = _match_points_sorted(centers2, centers1, matching_tolerance)
 
         for j_local, i_local in enumerate(e_match):
@@ -316,7 +315,6 @@ def build_mesh_map(
         if unmatched1.size == unmatched2.size:
             pts1 = coords1[unmatched1]
             pts2 = coords2[unmatched2]
-            # fallback[idx2_local] = idx1_local (file-2 -> file-1).
             fallback = _match_points_sorted(pts2, pts1, matching_tolerance)
             for idx2_local, idx1_local in enumerate(fallback):
                 if idx1_local == -1:

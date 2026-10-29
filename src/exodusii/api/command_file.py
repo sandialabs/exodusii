@@ -377,8 +377,7 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
     coord_tol = Tolerance(ToleranceMode.ABSOLUTE, 1.0e-6, 0.0)
     time_tol = Tolerance(ToleranceMode.RELATIVE, 1.0e-6, 1.0e-15)
 
-    # Per-category name lists: exodiff keeps names, tolerances and "!"
-    # exclusions separately for each variable type.
+    # Names, tolerances and "!" exclusions are kept per category.
     category_tolerances: dict[Entity, dict[str, Tolerance]] = {}
     category_exclude: dict[Entity, set[str]] = {}
     include_variables: dict[Entity, set[str]] = {}
@@ -444,7 +443,6 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
             v = cur.next()
             if v is None:
                 raise CommandFileError(f"FINAL TIME TOLERANCE without a value: {raw!r}")
-            # Separate from the time-step tolerance (SEACAS final_time_tol).
             final_time_tol = Tolerance(ToleranceMode.RELATIVE, _to_float(v, raw), 0.0)
             continue
 
@@ -476,8 +474,7 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
         if _abbrev(t1, "apply", 3) and _abbrev(t2, "matching", 3):
             coordinate_matching = True
             continue
-        # NODESET/SIDESET MATCH select exodiff -nsmap/-ssmap: set entries are
-        # sorted before comparison.  That is already the default here.
+        # exodiff -nsmap/-ssmap (sorted set entries) is always on here.
         if t1 == "nodeset" and _abbrev(t2, "match", 3):
             continue
         if t1 == "sideset" and _abbrev(t2, "match", 3):
@@ -513,8 +510,6 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
 
         # ── ELEMENT ATTRIBUTES (a variable block over attributes) ────────
         if _abbrev(t1, "element", 4) and _abbrev(t2, "attributes", 3):
-            # Same rules as a VARIABLES block; attributes use the
-            # ELEMENT_BLOCK category key.
             attr_default, names, tols, block_all, i = _consume_variable_block(
                 toks, 2, lines, i, default_tol, raw
             )
@@ -534,7 +529,6 @@ def _parse_exodiff_lines(lines: list[str]) -> CommandFileResult:
 
         # ── SIDESET DISTRIBUTION (inert here) ────────────────────────────
         if _abbrev(t1, "sideset", 4) and _abbrev(t2, "distribution", 4):
-            # SEACAS: starts from DEFAULT TOLERANCE when given, else absolute 1e-6.
             base = (
                 default_tol if default_specified else Tolerance(ToleranceMode.ABSOLUTE, 1.0e-6, 0.0)
             )
@@ -635,8 +629,8 @@ def _add_category(
         category_tolerances.setdefault(category, {})[name] = tol
     if excludes:
         category_exclude.setdefault(category, set()).update(excludes)
-    # exodiff Check_Parsed_Names: "(all)", or only "!" names, selects every
-    # name except the excluded ones; a header without names selects none.
+    # "(all)" or only "!" names: everything except the exclusions; a header
+    # without names selects nothing.
     if block_all or (excludes and not includes):
         all_categories.add(category)
     elif includes:
@@ -696,7 +690,6 @@ def _consume_variable_block(
             names.append(name)
             tols.append(cat_default)
             continue
-        # optional per-name tolerance (a bare number sets just the value)
         sub = _Tokens(toks, 1)
         tol = _parse_tolerance_spec(sub, cat_default, line, allow_bare_value=True)
         names.append(name)
@@ -782,7 +775,7 @@ _YAML_CATEGORIES: dict[str, tuple[Entity, str]] = {
 _ENTITY_TO_YAML_CATEGORY: dict[Entity, str] = {
     ent: key for key, (ent, _) in _YAML_CATEGORIES.items()
 }
-# Element attributes are a "category" for scoped names/exclusions only.
+# Element attributes are scoped under Entity.ELEMENT_BLOCK.
 _YAML_ATTRIBUTE_CATEGORY = "attribute"
 
 
@@ -1043,7 +1036,6 @@ def _diff_options_from_yaml(doc: dict[str, Any]) -> CommandFileResult:
     if "ignore_nans" in var_sec:
         kwargs["ignore_nans"] = bool(var_sec["ignore_nans"])
 
-    # Category-scoped per-variable tolerances and exclusions.
     scoped = var_sec.get("scoped") or {}
     if not isinstance(scoped, dict):
         raise CommandFileError("'variables.scoped' must be a mapping")

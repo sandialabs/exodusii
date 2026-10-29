@@ -32,8 +32,7 @@ def decode_text(value: Any, *, strip: bool = True) -> str:
     Masked character entries decode to ``""``. This is useful for NetCDF4 char
     arrays where unused trailing characters may be masked.
 
-    Text ends at the first NUL, as in C: libexodus writes only
-    ``strlen + 1`` bytes, so stale characters can follow it.  Bytes that are
+    Text ends at the first NUL (stale bytes may follow it).  Bytes that are
     not valid UTF-8 are decoded as Latin-1.
     """
 

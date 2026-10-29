@@ -174,8 +174,7 @@ def test_diff_array_broadcasts_scalar() -> None:
 
 
 def test_combined_array_test_is_strict_at_the_boundary() -> None:
-    # Field variables: exodiff Delta(a, b) > value; values at the tolerance
-    # compare equal.  Scalars (times, globals) use Diff(), which is >=.
+    # Arrays (fields) use Delta > value; scalars (times, globals) use >=.
     tol = Tolerance.make("combined", 0.5)
     assert not tol.diff_array([0.0], [0.5])[0]
     assert tol.diff(0.0, 0.5)

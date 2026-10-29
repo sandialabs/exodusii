@@ -15,8 +15,7 @@ def test_exodusii_parallel_write(tmpdir, datadir):
         basefile = os.path.join(datadir, f"{name}.base.exo")
         assert os.path.exists(basefile)
         base = exodusii.exo_file(basefile)
-        # The joined file carries the component QA/info records forward (as
-        # SEACAS epu does); the reference file was generated without them.
+        # The joined file carries QA/info records; the reference has none.
         dimensions = "~four|len_line|len_string|num_info|num_qa_rec"
         result = exodusii.allclose(base, joined, dimensions=dimensions, variables=None, result=True)
         print(result.equal)

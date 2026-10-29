@@ -292,11 +292,7 @@ def _dtype_code(dtype: type[int] | type[float] | type[str] | str) -> str:
 
 
 def _check_integer_range(name: str, variable: Any, value: Any) -> None:
-    """Raise instead of letting NumPy/netCDF4 silently wrap integers.
-
-    Writing ``5_000_000_001`` into an ``int32`` variable would otherwise store
-    ``705032705``.
-    """
+    """Raise instead of letting netCDF4 silently wrap integers (e.g. into int32)."""
 
     dtype = np.dtype(getattr(variable, "dtype", np.float64))
     if dtype.kind not in {"i", "u"}:
@@ -339,8 +335,7 @@ def _default_fill_value(dtype_code: str) -> Any:
         return b"\x00"
 
     if dtype_code in {"f4", "f8"}:
-        # Unwritten float slots (e.g. skipped time steps) read back as NaN
-        # rather than as a plausible-looking 9.97e36.
+        # Unwritten slots read as NaN rather than a plausible-looking 9.97e36.
         return np.nan
 
     if dtype_code in default_fillvals:

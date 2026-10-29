@@ -186,8 +186,7 @@ def test_join_preserves_attributes_records_properties_and_truth_table(tmp_path: 
 def test_join_node_set_distribution_factors_default_to_one(tmp_path: Path) -> None:
     joined = tmp_path / "joined.exo"
     with ParallelExodusFile.open(*_write_strip(tmp_path)) as pef:
-        # Rank 0 stores 0.5, rank 1 stores none, so epu fills 1.0.  The shared
-        # node 104 takes the last processor's value, as epu does.
+        # Rank 1 stores no factors (1.0); shared node 104 takes rank 1's value.
         node_set = pef.node_set(5)
         assert np.asarray(node_set.nodes).tolist() == [100, 102, 104, 106, 108]
         assert np.allclose(node_set.dist_facts, [0.5, 0.5, 1.0, 1.0, 1.0])  # ty: ignore[invalid-argument-type]
@@ -274,8 +273,7 @@ def test_join_keeps_large_ids(tmp_path: Path) -> None:
 
 
 def test_join_keeps_side_set_distribution_factors(datadir: Path, tmp_path: Path) -> None:
-    # Nemesis ss_df_cnt_global is 0 in these files, but every component
-    # stores dist_fact_ss2 and so does the serial reference (epu writes them).
+    # ss_df_cnt_global is 0 here, yet the components and mkmesh.gen store factors.
     joined = tmp_path / "mkmesh.exo"
     files = sorted(glob.glob(str(datadir / "mkmesh.par.2.*")))
     with ParallelExodusFile.open(*files) as pef:

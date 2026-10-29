@@ -532,8 +532,7 @@ class Tolerance:
             elif mode is ToleranceMode.EIGEN_ABSOLUTE:
                 mask = active & (np.abs(ax - ay) > self.value)
             elif mode in (ToleranceMode.COMBINED, ToleranceMode.EIGEN_COMBINED):
-                # exodiff compares field values with Delta(a, b) > value, so
-                # values exactly at the tolerance are equal (Diff() uses >=).
+                # Strict, as exodiff's Delta(a, b) > value (Diff() uses >=).
                 num = np.abs(ax - ay) if mode is ToleranceMode.EIGEN_COMBINED else np.abs(x - y)
                 denom = np.where(maxab > 1.0, maxab, 1.0)
                 mask = active & (num > denom * self.value)

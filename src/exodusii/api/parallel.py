@@ -101,8 +101,7 @@ class ParallelExodusFile:
         self._owned: list[ExodusFile] = []
         self._files: list[ExodusFile] = []
 
-        # Sort paths by processor rank (callers may rely on files[0]); the
-        # rank is compared numerically so unpadded names order correctly.
+        # Callers may rely on files[0] being rank 0.
         ordered_files: tuple[str | Path | ExodusFile, ...]
         if all(not isinstance(file, ExodusFile) for file in files):
             ordered_files = tuple(sorted(files, key=_rank_sort_key))
@@ -441,8 +440,6 @@ class ParallelExodusFile:
         if key in cache:
             return int(cache[key])
 
-        # Delegate to the component file: its index lookup uses the full name
-        # table (blank slots included), so positions match on-disk indices.
         index = self._files[0]._variable_index(on, name)
         cache[key] = index
         return index
@@ -550,8 +547,7 @@ class ParallelExodusFile:
         if not blocks:
             raise ExodusLookupError(f"{location.value} ID {block_id} not found")
 
-        # Prefer a component that actually holds objects: NULL (empty) local
-        # blocks carry no element type or nodes-per-entity.
+        # NULL local blocks carry no element type or nodes-per-entity.
         first = next((b for b in blocks if b.count), blocks[0])
         gids = self._block_object_gids(location, block_id)
 
@@ -850,8 +846,6 @@ class ParallelExodusFile:
                 return np.zeros((len(self.times()), self.node_count, self.dimension))
             return np.zeros((self.node_count, self.dimension), dtype=np.float64)
 
-        # Stack components on a new last axis: (nodes, dim) for one step and
-        # (steps, nodes, dim) for the full history.
         return np.stack(
             [
                 np.asarray(self.values(name, on=Entity.NODE, time=time), dtype=np.float64)
@@ -1120,8 +1114,7 @@ class ParallelExodusFile:
             for position, local_node_id in enumerate(node_set.nodes):
                 gid = int(node_map[int(local_node_id) - 1])
                 node_gids.append(gid)
-                # Last processor wins for shared nodes; processors without
-                # stored factors contribute 1.0 (SEACAS epu get_put_nodesets).
+                # As in epu: last processor wins; missing factors are 1.0.
                 factors_by_gid[gid] = (
                     float(local_factors[position])
                     if has_local_factors and local_factors is not None
@@ -1721,16 +1714,11 @@ class ParallelExodusFile:
             return None
 
         if on is Entity.NODE_SET:
-            # SEACAS epu always writes node-set factors: components without
-            # stored factors contribute 1.0 (epu.C put_nodesets).  Nemesis
-            # ns_df_cnt_global is routinely 0 even when factors exist, so it
-            # is not authoritative here.
+            # epu always writes node-set factors (1.0 where none are stored).
             if set_info.distribution_factors:
                 return set_info.dist_facts
             return np.ones(set_info.count, dtype=np.float64)
 
-        # epu: dfCount is the sum of the component counts (epu.C:3333,
-        # :3462); write whatever the components store.
         return set_info.dist_facts if set_info.distribution_factors else None
 
     def _local_set_global_labels(
@@ -2047,12 +2035,10 @@ class ParallelExodusFile:
         return self._block_object_values(name, on=Entity.ELEMENT, block=block, time=time)
 
     def _write_to(self, writer: ExodusWriter) -> None:
-        """Join the component files into *writer* (SEACAS epu semantics).
+        """Join the component files into *writer*, as SEACAS epu does.
 
-        Objects are written block by block, sorted by global ID within each
-        block; :meth:`joined_object_order` gives that order and is written as
-        the joined file's ID maps.  Set entries are translated with the same
-        order so side sets and element sets reference the right objects.
+        Objects are ordered by :meth:`joined_object_order`, which is also
+        written as the ID maps and used to translate set entries.
         """
 
         writer.initialize(
@@ -2656,17 +2642,12 @@ class ParallelExodusFile:
         return gids
 
     def joined_object_order(self, location: Entity | str) -> npt.NDArray[np.int64]:
-        """Return global object IDs in joined-file (block-by-block) order.
+        """Return global object IDs in joined-file order.
 
-        A joined serial file stores elements (or edges/faces) block by block,
-        in :meth:`block_ids` order, sorted by global ID within each block.
-        Entry ``k`` of the result is the global ID of the object at 1-based
-        position ``k + 1`` in the joined file; this is also the joined file's
-        ``elem_num_map`` (``edge_num_map`` / ``face_num_map``).
-
-        This order generally differs from ``ids(...)`` (ascending global ID),
-        so translating entity references (side sets, element sets) must use
-        this order -- the same convention as SEACAS epu.
+        A joined file stores objects block by block, sorted by global ID within
+        each block, so entry ``k`` is the global ID at 1-based position
+        ``k + 1`` (the joined ``elem_num_map``).  This generally differs from
+        ``ids(...)``; set entries must be translated with this order.
 
         Parameters
         ----------
@@ -2692,8 +2673,7 @@ class ParallelExodusFile:
         order: list[int] = []
         for block_id in self.block_ids(block_location):
             order.extend(self._block_object_gids_or_empty(block_location, int(block_id)))
-        # Objects not owned by any block (malformed or block-less files) go
-        # last, by ascending global ID, so the order always covers every object.
+        # Objects outside every block (malformed files) go last.
         all_gids = {
             Entity.ELEMENT_BLOCK: self._element_gid_to_index,
             Entity.EDGE_BLOCK: self._edge_gid_to_index,

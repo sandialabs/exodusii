@@ -715,9 +715,8 @@ class ParallelExodusIIFile:
         return self._parallel.values(var_name, on=Entity.NODE)[:, row]
 
     def get_element_variable_history(self, var_name: str, elem_id: int) -> npt.NDArray[np.float64]:
-        # Locate the element by global ID within its block.  Ranking among all
-        # sorted element IDs is wrong whenever a block's IDs are not one
-        # contiguous range.
+        # Look up within the block: global ID ranks only match block order
+        # when every block is one contiguous ID range.
         for block_id in self._parallel.element_block_ids():
             block_gids = self._parallel._block_object_gids_or_empty(
                 Entity.ELEMENT_BLOCK, int(block_id)

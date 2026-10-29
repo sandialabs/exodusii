@@ -410,9 +410,7 @@ class ExodusFile:
 
         records: list[tuple[str, str, str, str]] = []
 
-        # Decode each of the four fixed-width fields separately (SEACAS
-        # ex_get_qa): fields may contain spaces or be empty, so the record
-        # must never be split on whitespace.
+        # Fields may contain spaces or be empty: decode each one separately.
         if hasattr(raw, "dimensions") and len(raw.dimensions) == 3:
             if hasattr(raw, "set_auto_chartostring"):
                 raw.set_auto_chartostring(False)
@@ -429,7 +427,6 @@ class ExodusFile:
         if array.size == 0:
             return ()
 
-        # Non-standard layouts: already-decoded strings of four fields.
         if array.ndim == 1:
             for item in array:
                 fields = _four_fields(str(item).split())
@@ -758,7 +755,6 @@ class ExodusFile:
             coords = np.asarray(combined, dtype=np.float64).T
 
         if displaced:
-            # time=None means the last step here (see the docstring).
             coords = coords + self.displacements(time="last" if time is None else time)
 
         return coords
@@ -836,8 +832,6 @@ class ExodusFile:
                 return np.zeros((len(self.times()), self.node_count, self.dimension))
             return np.zeros((self.node_count, self.dimension), dtype=np.float64)
 
-        # Stack components on a new last axis: (nodes, dim) for one step and
-        # (steps, nodes, dim) for the full history.
         return np.stack(
             [
                 np.asarray(self.values(name, on=Entity.NODE, time=time), dtype=np.float64)
@@ -1028,8 +1022,7 @@ class ExodusFile:
         conn_name = spec.connectivity_variable(block_index)
 
         element_type = ""
-        # Polyhedral blocks (NFACED) have no nodal connectivity; the type is
-        # on the element-face or element-edge connectivity (ex_get_block_param).
+        # NFACED blocks have no connect%d; the type is on facconn/ebconn.
         for candidate in (
             conn_name,
             spec.face_connectivity_variable(block_index) if spec.face_connectivity_variable else "",
@@ -2500,10 +2493,8 @@ class ExodusFile:
     def _nodal_variable_history(self, variable_index: int) -> npt.NDArray[np.float64]:
         """Return the ``(time_step, num_nodes)`` history of a nodal variable.
 
-        Large-model files store one ``vals_nod_var%d`` per variable; old
-        (``file_size = 0``) files store all of them in a single
-        ``vals_nod_var(time_step, num_nod_var, num_nodes)`` array.  Both
-        layouts are read, as in SEACAS ``ex_get_var`` / ``ex_large_model``.
+        Reads ``vals_nod_var%d`` or, in old ``file_size = 0`` files, the
+        combined ``vals_nod_var(time_step, num_nod_var, num_nodes)``.
         """
 
         values = self._backend.variable(ExodusNames.node_variable(variable_index), default=None)
@@ -2616,12 +2607,7 @@ def _decode_name_table(values: Any, *, expected_count: int | None = None) -> tup
 
 
 def _strip_exodus_padding(value: str) -> str:
-    """Trim the fixed-width padding from a decoded Exodus name.
-
-    Mirrors libexodus ``exi_trim``: only trailing NULs and whitespace are
-    removed.  Trailing ``"0"`` characters are always significant
-    (``"kinetic_energy_100"`` must not become ``"kinetic_energy_1"``).
-    """
+    """Remove trailing NULs and whitespace (trailing zeros are significant)."""
 
     return value.rstrip(" \x00")
 

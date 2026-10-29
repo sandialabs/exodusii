@@ -180,9 +180,7 @@ def test_side_set_order_and_distribution_factors(tmp_path: Path) -> None:
 
 
 def test_interpolation_compares_every_file1_step(tmp_path: Path) -> None:
-    # G = t on both files, except file 1's last step (t = 2.0) has a bad value.
-    # File 1 has 5 steps and file 2 only 3, so the old loop over the file-2
-    # step range never reached file-1 steps 4 and 5.
+    # G = t, except file 1's last step has a bad value; file 2 has 3 steps.
     a = _write(
         tmp_path / "a.exo",
         times=(0.0, 0.5, 1.0, 1.5, 2.0),
@@ -212,8 +210,7 @@ def test_interpolation_snaps_within_time_tolerance(tmp_path: Path) -> None:
         time_selection=TimeSelection(interpolating=True),
         final_time_tolerance=Tolerance(ToleranceMode.RELATIVE, 1e-6, 0.0),
     )
-    # t = 1 + 1e-9 is within the time tolerance of file 2's t = 1: it is
-    # matched to that step instead of falling outside file 2's range.
+    # t = 1 + 1e-9 snaps to file 2's t = 1 instead of falling out of range.
     result = diff(a, b, opts)
     assert result.same, (result.differences, result.variable_diffs)
 

@@ -72,8 +72,7 @@ def test_per_category_default_and_per_variable_override(tmp_path: Path) -> None:
     assert opts.nodal_tolerance is not None
     assert opts.nodal_tolerance.mode is ToleranceMode.ABSOLUTE
     assert opts.nodal_tolerance.value == pytest.approx(1e-7)
-    # DISPLX has an override; DISPLY inherits the category default.  The
-    # overrides are scoped to the NODAL category.
+    # DISPLX has an override; DISPLY inherits the category default.
     nodal = opts.category_variable_tolerances[Entity.NODE]
     assert nodal["DISPLX"].mode is ToleranceMode.RELATIVE
     assert nodal["DISPLX"].value == pytest.approx(1e-9)
@@ -116,8 +115,7 @@ def test_matching_switches(tmp_path: Path) -> None:
     cmd = tmp_path / "cmds"
     cmd.write_text("APPLY MATCHING\n")
     assert read_command_file(cmd).options.coordinate_matching is True
-    # NODESET/SIDESET MATCH are exodiff -nsmap/-ssmap (sort set entries, the
-    # default), not coordinate matching.
+    # NODESET/SIDESET MATCH sort set entries; they do not enable -map.
     for directive in ("NODESET MATCH", "SIDESET MATCH"):
         cmd.write_text(directive + "\n")
         assert read_command_file(cmd).options.coordinate_matching is False

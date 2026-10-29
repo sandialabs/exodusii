@@ -238,7 +238,6 @@ class Lineout:
 
         tol = self.tol
         if tol is None and len(output_data):
-            # Not stored on self: the automatic tolerance depends on the data.
             tol = self.compute_tol_from_bounding_box(output_data[:, coordinate_columns])
         if tol is None:
             tol = 0.0

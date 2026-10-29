@@ -107,8 +107,7 @@ def epu(*files: str | os.PathLike[str]) -> str | None:
             if not Path(basename).exists():
                 raise ValueError(f"{basename} is not a file")
 
-        # The joined name drops the trailing ".<nproc>.<rank>"; the base
-        # may itself contain dots (e.g. "my.mesh.exo.4.0").
+        # The base may contain dots, e.g. "my.mesh.exo.4.0".
         parts = basenames[0].split(".")
         if len(parts) < 4 or not (parts[-1].isdigit() and parts[-2].isdigit()):
             raise ValueError("Expected files `base.suf.#p.#n`")

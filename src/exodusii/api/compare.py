@@ -485,9 +485,8 @@ def _open_if_needed(file: Any) -> tuple[ExodusFile, bool]:
     return ExodusFile.open(file), True
 
 
-#: Fixed-width string padding sizes.  They are storage layout, not data:
-#: writers differ (e.g. len_string 33 vs len_name 256) while the decoded
-#: strings, which are compared, are identical.
+#: String padding sizes: layout only (writers differ); the strings
+#: themselves are compared as variables.
 _STRING_PADDING_DIMENSIONS = frozenset(
     {
         DimensionName.STRING_LENGTH.value,

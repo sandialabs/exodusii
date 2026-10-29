@@ -239,9 +239,7 @@ class Quad4:
             x = self.coord[:, 0]
             y = self.coord[:, 1]
             return float(abs(0.5 * ((x[0] - x[2]) * (y[1] - y[3]) + (x[1] - x[3]) * (y[2] - y[0]))))
-        # 3-D surface element (e.g. SHELL4): half the norm of the cross
-        # product of the diagonals -- exact for planar quads, and the area of
-        # the mean plane projection for warped ones.
+        # Surface element in 3-D: exact for planar quads; mean-plane area if warped.
         d1 = self.coord[2, :3] - self.coord[0, :3]
         d2 = self.coord[3, :3] - self.coord[1, :3]
         return float(0.5 * np.linalg.norm(np.cross(d1, d2)))
@@ -1187,8 +1185,8 @@ class Pyramid5:
     """Five-node pyramid using Exodus node ordering.
 
     Nodes 0-3 form the quadrilateral base and node 4 is the apex.  The
-    volume is the sum of two tetrahedra over a diagonal split of the base
-    plus a correction for a non-planar base (exact for planar bases).
+    volume averages the two diagonal splits of the base into tetrahedra,
+    which is exact for planar bases.
     """
 
     coord: FloatArray
@@ -1288,9 +1286,8 @@ class Line2:
         return np.full(n, self.volume / n, dtype=np.float64)
 
 
-#: Element type → (geometry class, number of corner nodes).  Higher-order
-#: and structural variants use their corner nodes (as SEACAS exomerge's
-#: ``VOLUME_FORMULA`` does): exact for straight-sided elements.
+#: Element type -> (geometry class, corner node count).  Higher-order types
+#: use their corner nodes, which is exact for straight-sided elements.
 _ELEMENT_TYPES: dict[str, tuple[type, int]] = {}
 
 
@@ -1457,8 +1454,7 @@ def element_factory(element_type: str | bytes, coord: npt.ArrayLike) -> Element:
     cls, corners = element_class(element_type)
     array = np.asarray(coord, dtype=np.float64)
     if array.ndim == 2 and array.shape[0] > corners:
-        # Higher-order element: geometry from the corner nodes, which come
-        # first in Exodus node ordering.
+        # Corner nodes come first in Exodus node ordering.
         array = array[:corners]
     return cls(array)
 
@@ -1615,8 +1611,7 @@ def hex8_volumes(coords: npt.ArrayLike) -> FloatArray:
     )
 
 
-# The wedge Jacobian determinant is quadratic in the triangle coordinates
-# and quadratic in z, so these rules integrate it exactly.
+# Exact for the wedge Jacobian (quadratic in s, t and in z).
 _WEDGE_TRI_POINTS = np.array([[1 / 6, 1 / 6], [2 / 3, 1 / 6], [1 / 6, 2 / 3]])
 _WEDGE_TRI_WEIGHT = 1.0 / 6.0
 _WEDGE_Z_POINTS = (0.5 - 0.5 / np.sqrt(3.0), 0.5 + 0.5 / np.sqrt(3.0))

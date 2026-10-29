@@ -641,9 +641,7 @@ def _region_stats_history(
         blocks_mode = BLOCKS_AUTO if blocks == BLOCKS_AUTO else BLOCKS_ALL
         eligible = _iter_eligible_blocks(exo, name, on, blocks_mode=blocks_mode)
         if not eligible:
-            # No eligible blocks: one empty result per requested step, with
-            # the same stats as the single-time path (extensive reducers 0,
-            # intensive reducers NaN).
+            # Same empty stats as the single-time path.
             reducers = (
                 [r.strip() for r in reduce.split(",")] if isinstance(reduce, str) else list(reduce)
             )

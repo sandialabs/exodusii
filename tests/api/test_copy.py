@@ -133,8 +133,7 @@ def _unit_square_quad() -> np.ndarray:
 
 
 def test_copy_of_reference_files_is_allclose(tmp_path: Path) -> None:
-    # Copies may use a different string padding (len_string 33 vs
-    # len_name 256); allclose compares the strings, not their padding.
+    # The copy uses len_name 256 where the sources use len_string 33.
     datadir = Path(__file__).resolve().parents[1] / "data"
     for name in ("noh.exo", "mkmesh.gen", "edges.base.exo"):
         target = tmp_path / name
