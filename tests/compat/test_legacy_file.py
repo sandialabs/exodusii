@@ -138,3 +138,36 @@ def test_legacy_aliases() -> None:
     assert exodusii.exo_file is exodusii.File
     assert exodusii.exodusii_file is ExodusIIFile
     assert exodusii.ExodusIIFile is ExodusIIFile
+
+
+def test_legacy_put_element_block_allocates_attributes_and_subconnectivity(tmp_path) -> None:
+    # exodusii < 2 honoured num_attr / num_edges_per_elem / num_faces_per_elem.
+    import netCDF4
+
+    path = tmp_path / "attr.exo"
+    exo = ExodusIIFile(path, "w")
+    exo.put_init("attr", 1, 2, 1, 1, 0, 0)
+    exo.put_coord([0.0, 1.0])
+    exo.put_element_block(1, "bar2", 1, 2, num_edges_per_elem=1, num_attr=2)
+    exo.put_element_conn(1, [[1, 2]])
+    exo.close()
+
+    with netCDF4.Dataset(path) as ds:
+        assert ds["attrib1"].shape == (1, 2)
+        assert ds["edgconn1"].shape == (1, 1)
+
+    reader = ExodusIIFile(path)
+    try:
+        assert reader.get_element_block(1).num_elem_attrs == 2
+        assert reader.get_element_attr(1).tolist() == [[0.0, 0.0]]
+    finally:
+        reader.close()
+
+
+def test_legacy_time_step_zero_is_last_step(datadir) -> None:
+    # Kept from exodusii < 2, which indexed values[time_step - 1].
+    exo = ExodusIIFile(datadir / "noh.exo")
+    try:
+        assert exo.get_time(0) == exo.get_times()[-1]
+    finally:
+        exo.close()

@@ -297,6 +297,9 @@ and uses semantic versioning once versioned releases are established.
   were kept, e.g. `abc\0old` read as `abcold`), bytes that are not valid
   UTF-8 decode as Latin-1 instead of raising, and leading whitespace is
   kept (only trailing padding is removed, as in libexodus).
+- Fixed legacy `put_element_block(..., num_attr=, num_edges_per_elem=,
+  num_faces_per_elem=)` ignoring those arguments; attributes and
+  element-to-edge/face connectivity are allocated as in exodusii < 2.
 
 ### Compatibility
 

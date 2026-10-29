@@ -993,10 +993,39 @@ class ExodusIIFile:
         self.writer.write_coordinates(coords, names=_string_list(coord_names))
 
     def put_element_block(
-        self, block_id: int, elem_type: str, num_block_elems: int, num_nodes_per_elem: int, **_: Any
+        self,
+        block_id: int,
+        elem_type: str,
+        num_block_elems: int,
+        num_nodes_per_elem: int,
+        num_faces_per_elem: int | None = None,
+        num_edges_per_elem: int | None = None,
+        num_attr: int | None = None,
+        **_: Any,
     ) -> None:
         zeros = np.zeros((num_block_elems, num_nodes_per_elem), dtype=np.int64)
-        self.writer.define_element_block(block_id, elem_type, zeros)
+        edge_conn = (
+            np.zeros((num_block_elems, num_edges_per_elem), dtype=np.int64)
+            if num_edges_per_elem
+            else None
+        )
+        face_conn = (
+            np.zeros((num_block_elems, num_faces_per_elem), dtype=np.int64)
+            if num_faces_per_elem
+            else None
+        )
+        self.writer.define_element_block(
+            block_id, elem_type, zeros, edge_connectivity=edge_conn, face_connectivity=face_conn
+        )
+        if num_attr and num_block_elems:
+            # Allocated as zeros with blank names, as exodusii < 2 did;
+            # filled later by put_element_attr / put_element_attribute_names.
+            self.writer.write_block_attributes(
+                Entity.ELEMENT_BLOCK,
+                block_id,
+                np.zeros((num_block_elems, num_attr), dtype=np.float64),
+                names=[""] * num_attr,
+            )
 
     def put_element_block_name(self, block_id: int, name: str) -> None:
         block_index = self.writer._element_block_indices[block_id]

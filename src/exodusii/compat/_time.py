@@ -15,7 +15,9 @@ def legacy_time_index(time_step: int | None) -> int | None:
     exodusii < 2 accepted 1-based time steps and treated *any* negative
     value as "the last step" (``time_step < 0 -> values[-1]``).  A plain
     ``time_step - 1`` would turn ``-1`` into ``-2`` (the second to last
-    step), silently returning the wrong data.
+    step), silently returning the wrong data.  ``0`` maps to ``-1`` (the last
+    step) because exodusii < 2 indexed ``values[time_step - 1]``; this is kept
+    for compatibility.
 
     Parameters
     ----------
