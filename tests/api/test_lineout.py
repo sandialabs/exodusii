@@ -162,3 +162,22 @@ def test_compute_default_tolerance_empty_data() -> None:
     tol = Lineout(x=1.0).compute_tol_from_bounding_box(np.empty((0, 1)))
 
     assert tol == 0.0
+
+
+def test_apply_accepts_integer_coordinate() -> None:
+    header = ["COORDX", "COORDY", "TEMP"]
+    data = np.asarray([[1.0, 0.0, 10.0], [0.0, 0.0, 20.0], [1.0, 1.0, 30.0]])
+    for value in (0, 0.0):
+        out_header, out_data = Lineout(x="x", y=value).apply(header, data)
+        assert out_header == ["COORDX", "TEMP"]
+        assert out_data.tolist() == [[0.0, 20.0], [1.0, 10.0]]
+
+
+def test_apply_does_not_cache_automatic_tolerance() -> None:
+    lo = Lineout(x="x", y=0.0)
+    header = ["COORDX", "COORDY", "T"]
+    lo.apply(header, np.asarray([[0.0, 0.0, 1.0], [0.0, 1000.0, 2.0]]))
+    assert lo.tol is None
+    # Second dataset is much smaller: a cached 0.1 tolerance would keep y=0.05.
+    _, small = lo.apply(header, np.asarray([[0.0, 0.0, 1.0], [0.0, 0.05, 2.0], [0.0, 1.0, 3.0]]))
+    assert small.tolist() == [[0.0, 1.0]]

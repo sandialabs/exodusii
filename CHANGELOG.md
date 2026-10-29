@@ -300,6 +300,9 @@ and uses semantic versioning once versioned releases are established.
 - Fixed legacy `put_element_block(..., num_attr=, num_edges_per_elem=,
   num_faces_per_elem=)` ignoring those arguments; attributes and
   element-to-edge/face connectivity are allocated as in exodusii < 2.
+- Fixed `Lineout(y=0)` (an integer coordinate) being treated as a free
+  axis, and the automatic tolerance being cached on the lineout and reused
+  for differently scaled data.
 
 ### Compatibility
 

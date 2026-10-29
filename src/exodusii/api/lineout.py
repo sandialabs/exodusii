@@ -24,6 +24,7 @@ Typical usage with :func:`~exodusii.api.query.query`:
     result = query(exo, "n/TEMP", time="last", lineout=lo)
 """
 
+import numbers
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cmp_to_key
@@ -237,8 +238,8 @@ class Lineout:
 
         tol = self.tol
         if tol is None and len(output_data):
+            # Not stored on self: the automatic tolerance depends on the data.
             tol = self.compute_tol_from_bounding_box(output_data[:, coordinate_columns])
-            self.tol = tol
         if tol is None:
             tol = 0.0
 
@@ -249,9 +250,9 @@ class Lineout:
             spec = self.spec[axis]
             column = coordinate_columns[axis]
 
-            if isinstance(spec, float):
+            if isinstance(spec, numbers.Real) and not isinstance(spec, bool):
                 remove_columns.append(column)
-                mask = np.abs(output_data[:, column] - spec) < tol
+                mask = np.abs(output_data[:, column] - float(spec)) < tol
                 output_data = output_data[mask]
             else:
                 sort_columns.append(column)
@@ -300,12 +301,18 @@ class Lineout:
 
         tolerances: list[float] = []
         for axis, spec in enumerate(self.spec[: array.shape[1]]):
-            if isinstance(spec, float):
+            if _is_restricted(spec):
                 lower = float(np.min(array[:, axis]))
                 upper = float(np.max(array[:, axis]))
                 tolerances.append(1.0e-4 * max(upper - lower, 1.0e-30))
 
         return min(tolerances) if tolerances else 0.0
+
+
+def _is_restricted(spec: object) -> bool:
+    """True when an axis spec fixes a coordinate (a number, not an axis name)."""
+
+    return isinstance(spec, numbers.Real) and not isinstance(spec, bool)
 
 
 def lineout(
