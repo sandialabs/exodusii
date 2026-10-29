@@ -168,7 +168,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME",
-        help="Exclude a variable by name (repeatable).",
+        help=(
+            "Exclude a variable by name (repeatable).  Note: in SEACAS exodiff "
+            "-x excludes time steps; use --exclude-steps for that."
+        ),
     )
     sel.add_argument(
         "--case-sensitive",
@@ -436,6 +439,8 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
         options = DiffOptions(
             default_tolerance=default_tol,
             coordinate_tolerance=coord_tol,
+            # exodiff: time values use the default tolerance (time_tol = default_tol).
+            time_tolerance=default_tol,
             exclude=frozenset(args.exclude),
             ignore_case=not args.case_sensitive,
             time_selection=time_sel,
@@ -458,6 +463,7 @@ def _options_from_args(args: argparse.Namespace) -> tuple[DiffOptions, list[str]
     overrides: dict[str, Any] = {}
     if args.mode is not None or float(args.tolerance) != 1.0e-6 or float(args.floor) != 0.0:
         overrides["default_tolerance"] = default_tol
+        overrides["time_tolerance"] = default_tol
         # Category defaults inherited from the file's DEFAULT TOLERANCE follow
         # the command-line default; explicit per-category values are kept.
         for field_name in _CATEGORY_TOLERANCE_FIELDS:

@@ -538,3 +538,17 @@ def test_emit_options_to_file_then_reload(tmp_path: Path) -> None:
     stream = StringIO()
     status = main(["-f", str(emitted), str(a), str(b)], file=stream)
     assert status == _SAME
+
+
+def test_time_tolerance_follows_default_tolerance(tmp_path: Path) -> None:
+    # exodiff applies the default tolerance (-t / mode / floor) to time values.
+    a = tmp_path / "a.exo"
+    b = tmp_path / "b.exo"
+    for path, t in ((a, 1.0), (b, 1.001)):
+        with ExodusWriter.create(path) as writer:
+            writer.initialize("t", 1, 1, 0)
+            writer.write_coordinates([[0.0]])
+            writer.write_time(t)
+
+    assert main([str(a), str(b)], file=StringIO()) == _DIFFERENT
+    assert main(["--absolute", "-t", "0.01", str(a), str(b)], file=StringIO()) == _SAME

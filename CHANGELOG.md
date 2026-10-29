@@ -341,6 +341,9 @@ and uses semantic versioning once versioned releases are established.
 - `allclose` no longer compares string-padding dimensions (`len_string`,
   `len_name`, `len_line`, `four`), so a plain copy compares equal to its
   source; the strings themselves are still compared.
+- `exodiff` CLI: time values are compared with the default tolerance
+  (`-t`, mode flags, `--floor`), as SEACAS exodiff does; it was always
+  relative 1e-6.
 
 ### Compatibility
 
