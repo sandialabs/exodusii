@@ -171,3 +171,50 @@ def test_legacy_time_step_zero_is_last_step(datadir) -> None:
         assert exo.get_time(0) == exo.get_times()[-1]
     finally:
         exo.close()
+
+
+def _two_bar_blocks(path):
+    exo = ExodusIIFile(path, "w")
+    exo.put_init("tt", 1, 3, 2, 2, 0, 0)
+    exo.put_coord([0.0, 1.0, 2.0])
+    for block_id, conn in ((1, [[1, 2]]), (2, [[2, 3]])):
+        exo.put_element_block(block_id, "bar2", 1, 2)
+        exo.put_element_conn(block_id, conn)
+    exo.put_element_variable_params(2)
+    exo.put_element_variable_names(["A", "B"])
+    return exo
+
+
+def test_legacy_truth_table_controls_which_variables_exist(tmp_path) -> None:
+    import netCDF4
+
+    path = tmp_path / "tt.exo"
+    exo = _two_bar_blocks(path)
+    exo.put_element_variable_truth_table(np.array([[1, 0], [1, 1]]))
+    exo.put_time(1, 0.0)
+    exo.put_element_variable_values(1, 1, "A", [1.0])
+    exo.put_element_variable_values(1, 2, "B", [3.0])
+    exo.close()
+
+    with netCDF4.Dataset(path) as ds:
+        values = sorted(v for v in ds.variables if v.startswith("vals_elem_var"))
+        assert values == ["vals_elem_var1eb1", "vals_elem_var1eb2", "vals_elem_var2eb2"]
+        assert ds["elem_var_tab"][:].tolist() == [[1, 0], [1, 1]]
+
+
+def test_legacy_without_truth_table_records_written_variables(tmp_path) -> None:
+    path = tmp_path / "nott.exo"
+    exo = _two_bar_blocks(path)
+    exo.put_time(1, 0.0)
+    exo.put_element_variable_values(1, 1, "A", [1.0])
+    exo.put_element_variable_values(1, 2, "A", [2.0])
+    exo.put_element_variable_values(1, 2, "B", [3.0])
+    exo.close()
+
+    reader = ExodusIIFile(path)
+    try:
+        assert reader.get_element_variable_truth_table().tolist() == [[1, 0], [1, 1]]
+        assert reader.get_element_variable_values(None, "A", 1).tolist() == [1.0, 2.0]
+        assert reader.get_element_variable_values(2, "B", 1).tolist() == [3.0]
+    finally:
+        reader.close()

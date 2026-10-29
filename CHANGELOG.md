@@ -328,6 +328,11 @@ and uses semantic versioning once versioned releases are established.
   (was a numpy broadcast error); a warning is issued when the number of
   files differs from `num_processors`.  `util.epu()` accepts base names
   containing dots.
+- Fixed the legacy writer creating every block/set value variable in
+  `put_*_variable_params`, leaving variables the truth table marks as
+  absent.  Variables are created by `put_*_variable_truth_table`, or on
+  first write when no truth table is given (the table then records what was
+  written).
 
 ### Compatibility
 

@@ -26,6 +26,7 @@ from exodusii.core.names import DimensionName
 from exodusii.core.names import ExodusNames
 from exodusii.core.names import VariableName
 from exodusii.core.schema import variable_spec
+from exodusii.core.schema import variable_value_name
 
 #: Floating-point word size used by the legacy ``put_init`` when the caller
 #: does not pass one (exodusii < 2 always wrote single precision).
@@ -66,6 +67,7 @@ class ExodusIIFile:
 
         self._reader: ExodusFile | None = None
         self._writer: ExodusWriter | None = None
+        self._deferred_variables: set[Entity] = set()
 
         if mode == "r":
             self._reader = ExodusFile.open(filename, mode="r")
@@ -81,6 +83,7 @@ class ExodusIIFile:
         legacy.mode = "r"
         legacy._reader = reader
         legacy._writer = None
+        legacy._deferred_variables = set()
         return legacy
 
     @property
@@ -1155,7 +1158,7 @@ class ExodusIIFile:
             self.writer.write_node_values(name, values, step=time_step)
 
     def put_element_variable_params(self, num_vars: int) -> None:
-        self.writer.define_element_variables([""] * num_vars)
+        self._put_variable_params(Entity.ELEMENT, num_vars)
 
     def put_element_variable_names(self, names: Any) -> None:
         self.writer.backend.write_variable(
@@ -1165,6 +1168,7 @@ class ExodusIIFile:
     def put_element_variable_values(
         self, time_step: int | None, block_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.ELEMENT, name, block_id)
         if time_step is None:
             index = self.writer._name_index(VariableName.ELEMENT_VARIABLE_NAMES.value, name)
             block_index = self.writer._element_block_indices[block_id]
@@ -1244,36 +1248,43 @@ class ExodusIIFile:
     def put_edge_variable_values(
         self, time_step: int, block_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.EDGE, name, block_id)
         self.writer.write_values(name, values, on=Entity.EDGE, block_id=block_id, step=time_step)
 
     def put_face_variable_values(
         self, time_step: int, block_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.FACE, name, block_id)
         self.writer.write_values(name, values, on=Entity.FACE, block_id=block_id, step=time_step)
 
     def put_node_set_variable_values(
         self, time_step: int, set_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.NODE_SET, name, set_id)
         self.writer.write_values(name, values, on=Entity.NODE_SET, set_id=set_id, step=time_step)
 
     def put_side_set_variable_values(
         self, time_step: int, set_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.SIDE_SET, name, set_id)
         self.writer.write_values(name, values, on=Entity.SIDE_SET, set_id=set_id, step=time_step)
 
     def put_edge_set_variable_values(
         self, time_step: int, set_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.EDGE_SET, name, set_id)
         self.writer.write_values(name, values, on=Entity.EDGE_SET, set_id=set_id, step=time_step)
 
     def put_face_set_variable_values(
         self, time_step: int, set_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.FACE_SET, name, set_id)
         self.writer.write_values(name, values, on=Entity.FACE_SET, set_id=set_id, step=time_step)
 
     def put_element_set_variable_values(
         self, time_step: int, set_id: int, name: str, values: npt.ArrayLike
     ) -> None:
+        self._prepare_value_variable(Entity.ELEMENT_SET, name, set_id)
         self.writer.write_values(name, values, on=Entity.ELEMENT_SET, set_id=set_id, step=time_step)
 
     # ------------------------------------------------------------------
@@ -1568,7 +1579,19 @@ class ExodusIIFile:
         return LegacyQueryArray(data, active_aliases)
 
     def _put_variable_params(self, on: Entity, num_vars: int) -> None:
-        self.writer.define_variables(on, [""] * num_vars)
+        # Block/set value variables are created with an all-zero truth table:
+        # put_*_variable_truth_table then creates the ones its table selects.
+        # Without a truth table call, a value write creates its variable
+        # (exodusii < 2 created all of them up front).
+        spec = variable_spec(on)
+        if spec.truth_table_variable is None or spec.location_entity is None:
+            self.writer.define_variables(on, [""] * num_vars)
+            return
+        locations = self.writer._ids_for_variable_location(spec.location_entity)
+        self.writer.define_variables(
+            on, [""] * num_vars, truth_table=np.zeros((len(locations), num_vars), dtype=np.int64)
+        )
+        self._deferred_variables.add(on)
 
     def _put_variable_names(self, on: Entity, names: Any) -> None:
         spec = variable_spec(on)
@@ -1578,9 +1601,41 @@ class ExodusIIFile:
         spec = variable_spec(on)
         if spec.truth_table_variable is None:
             return
-        self.writer.backend.write_variable(
-            spec.truth_table_variable, np.asarray(table, dtype=np.int64)
-        )
+        array = np.asarray(table, dtype=np.int64)
+        self.writer.backend.write_variable(spec.truth_table_variable, array)
+        self._deferred_variables.discard(on)
+        if spec.location_entity is None:
+            return
+        locations = self.writer._ids_for_variable_location(spec.location_entity)
+        for row, location_id in enumerate(locations):
+            for column in range(array.shape[1]):
+                if array[row, column]:
+                    self._ensure_value_variable(on, column + 1, int(location_id))
+
+    def _prepare_value_variable(self, on: Entity, name: str, location_id: int) -> None:
+        if on in self._deferred_variables:
+            names = variable_spec(on).names_variable
+            self._ensure_value_variable(on, self.writer._name_index(names, name), location_id)
+
+    def _ensure_value_variable(self, on: Entity, variable_index: int, location_id: int) -> str:
+        """Create a block/set value variable (and mark it in the table) if missing."""
+
+        spec = variable_spec(on)
+        location = spec.location_entity
+        assert location is not None
+        location_index = self.writer._location_index(location, location_id)
+        name = variable_value_name(on, variable_index, location_index)
+        backend = self.writer.backend
+        if not backend.has_variable(name):
+            count_dim = self.writer._value_count_dimension(location, location_index)
+            backend.create_variable(
+                name, self.writer._float_dtype, (DimensionName.TIME.value, count_dim)
+            )
+            if spec.truth_table_variable is not None:
+                backend.write_variable(
+                    spec.truth_table_variable, 1, location_index - 1, variable_index - 1
+                )
+        return name
 
     def print(
         self,
