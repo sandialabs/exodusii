@@ -356,6 +356,11 @@ and uses semantic versioning once versioned releases are established.
   attributes are compared (with per-attribute tolerances and `!` /
   `(all)`), and attributes are not compared when a command file omits the
   section, as in exodiff.  `IGNORE MAPS` matches entities by file position.
+- `compat.exodus_h`: restored the names exodusii < 2 provided (all
+  `EX_INQ_*` codes, `VAR_EDGE_SET_VAR` / `VAR_FACE_SET_VAR` /
+  `VAR_ELEM_SET_VAR`, set-attribute and map-name variables, …) and fixed
+  `EX_ELEM_UNK`, which was the tuple `(-1,)`.  Existing values are
+  unchanged.
 
 ### Compatibility
 

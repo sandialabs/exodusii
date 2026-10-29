@@ -319,7 +319,7 @@ EX_VERBOSE = 1
 EX_DEBUG = 2
 EX_ABORT = 4
 
-EX_ELEM_UNK = (-1,)
+EX_ELEM_UNK = -1
 EX_ELEM_NULL_ELEMENT = 0
 EX_ELEM_TRIANGLE = 1
 EX_ELEM_QUAD = 2
@@ -333,3 +333,131 @@ EX_ELEM_SPHERE = 9
 EX_ELEM_CIRCLE = 10
 EX_ELEM_TRISHELL = 11
 EX_ELEM_PYRAMID = 12
+
+
+# Names from exodusii < 2 (values follow exodusII_int.h / exodusII.h).
+EXODUS_DEFAULT_SIZE = 1
+DIM_NUM_SIDE = "num_side"
+
+VAR_NODE_SET_DF_COUNT_GLOBAL = "ns_df_cnt_global"
+VAR_SIDE_SET_DF_COUNT_GLOBAL = "ss_df_cnt_global"
+VAR_EDGE_SET_DF_COUNT_GLOBAL = "es_df_cnt_global"
+VAR_ELEM_SET_DF_COUNT_GLOBAL = "els_df_cnt_global"
+VAR_NAME_ELEM_MAP = "emap_names"
+VAR_NAME_EDGE_MAP = "edmap_names"
+VAR_NAME_FACE_MAP = "famap_names"
+VAR_NAME_NODE_MAP = "nmap_names"
+VAR_STAT_EDGE_CONN = "econn_status"
+VAR_STAT_FACE_CONN = "fconn_status"
+VAR_NATTRIB = "nattrb"
+VAR_NAME_NATTRIB = "nattrib_name"
+
+
+def VAR_EBEPEC(num: int) -> str:
+    return ex_catstr("ebepecnt", num)
+
+
+def VAR_FBEPEC(num: int) -> str:
+    return ex_catstr("fbepecnt", num)
+
+
+def VAR_NODE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("nsattrb", num)
+
+
+def VAR_NAME_NODE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("nsattrib_name", num)
+
+
+def VAR_SIDE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("ssattrb", num)
+
+
+def VAR_NAME_SIDE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("ssattrib_name", num)
+
+
+def VAR_EDGE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("esattrb", num)
+
+
+def VAR_NAME_EDGE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("esattrib_name", num)
+
+
+def VAR_FACE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("fsattrb", num)
+
+
+def VAR_NAME_FACE_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("fsattrib_name", num)
+
+
+def VAR_ELEM_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("elsattrb", num)
+
+
+def VAR_NAME_ELEM_SET_ATTRIB(num: int) -> str:
+    return ex_catstr("elsattrib_name", num)
+
+
+def VAR_EDGE_SET_VAR(num1: int, num2: int) -> str:
+    return ex_catstr("vals_eset_var", num1, "es", num2)
+
+
+def VAR_FACE_SET_VAR(num1: int, num2: int) -> str:
+    return ex_catstr("vals_fset_var", num1, "fs", num2)
+
+
+def VAR_ELEM_SET_VAR(num1: int, num2: int) -> str:
+    return ex_catstr("vals_elset_var", num1, "es", num2)
+
+
+# ex_inquiry codes (exodusII.h).
+EX_INQ_FILE_TYPE = 1
+EX_INQ_API_VERS = 2
+EX_INQ_DB_VERS = 3
+EX_INQ_TITLE = 4
+EX_INQ_DIM = 5
+EX_INQ_NODES = 6
+EX_INQ_ELEM = 7
+EX_INQ_ELEM_BLK = 8
+EX_INQ_NODE_SETS = 9
+EX_INQ_NS_NODE_LEN = 10
+EX_INQ_SIDE_SETS = 11
+EX_INQ_SS_NODE_LEN = 12
+EX_INQ_SS_ELEM_LEN = 13
+EX_INQ_QA = 14
+EX_INQ_INFO = 15
+EX_INQ_TIME = 16
+EX_INQ_EB_PROP = 17
+EX_INQ_NS_PROP = 18
+EX_INQ_SS_PROP = 19
+EX_INQ_NS_DF_LEN = 20
+EX_INQ_SS_DF_LEN = 21
+EX_INQ_LIB_VERS = 22
+EX_INQ_EM_PROP = 23
+EX_INQ_NM_PROP = 24
+EX_INQ_ELEM_MAP = 25
+EX_INQ_NODE_MAP = 26
+EX_INQ_EDGE = 27
+EX_INQ_EDGE_BLK = 28
+EX_INQ_EDGE_SETS = 29
+EX_INQ_ES_LEN = 30
+EX_INQ_ES_DF_LEN = 31
+EX_INQ_EDGE_PROP = 32
+EX_INQ_ES_PROP = 33
+EX_INQ_FACE = 34
+EX_INQ_FACE_BLK = 35
+EX_INQ_FACE_SETS = 36
+EX_INQ_FS_LEN = 37
+EX_INQ_FS_DF_LEN = 38
+EX_INQ_FACE_PROP = 39
+EX_INQ_FS_PROP = 40
+EX_INQ_ES = 41
+EX_INQ_ELS_LEN = 42
+EX_INQ_ELS_DF_LEN = 43
+EX_INQ_ELS_PROP = 44
+EX_INQ_EDGE_MAP = 45
+EX_INQ_FACE_MAP = 46
+EX_INQ_COORD_FRAMES = 47
