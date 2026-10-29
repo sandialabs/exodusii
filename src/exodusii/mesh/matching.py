@@ -706,6 +706,7 @@ def _match_points_sorted(pts1: FloatArray, pts2: FloatArray, tol: float) -> IntA
     primary_vals = pts2_sorted[:, primary]
 
     result = np.full(n, -1, dtype=np.int64)
+    ambiguous = 0
 
     for i in range(n):
         p = pts1[i]
@@ -725,11 +726,17 @@ def _match_points_sorted(pts1: FloatArray, pts2: FloatArray, tol: float) -> IntA
         if len(hits) == 1:
             result[i] = int(sort_idx[lo + hits[0]])
         else:
-            # Multiple candidates: pick closest by Euclidean distance.
+            ambiguous += 1
             dist_sq = np.sum((window[hits] - p) ** 2, axis=1)
             best = hits[int(np.argmin(dist_sq))]
             result[i] = int(sort_idx[lo + best])
 
+    if ambiguous:
+        warnings.warn(
+            f"coordinate matching: {ambiguous} point(s) had several candidates within "
+            f"tolerance {tol:.3e}; the closest was used",
+            stacklevel=3,
+        )
     return result
 
 

@@ -45,7 +45,8 @@ def test_match_points_sorted_multiple_candidates_picks_closest():
     # Two candidates within tol; should pick the closer one.
     pts1 = np.array([[0.0, 0.0]])
     pts2 = np.array([[0.0, 0.5e-7], [0.0, 0.9e-7]])  # both within 1e-6
-    result = _match_points_sorted(pts1, pts2, tol=1e-6)
+    with pytest.warns(UserWarning, match="several candidates"):
+        result = _match_points_sorted(pts1, pts2, tol=1e-6)
     assert result[0] == 0  # 0.5e-7 is closer than 0.9e-7
 
 

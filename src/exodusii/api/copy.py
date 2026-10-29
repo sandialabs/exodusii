@@ -22,6 +22,7 @@ every time step, QA records, info records, block/set properties, and
 block/set active-status arrays.
 """
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from exodusii.api.file import ExodusFile
 from exodusii.api.writer import ExodusWriter
 from exodusii.core.entities import Entity
 from exodusii.core.schema import variable_spec
+from exodusii.core.schema import variable_value_name
 
 
 def copy(source: Any, target: ExodusWriter) -> None:
@@ -101,6 +103,8 @@ def copy(source: Any, target: ExodusWriter) -> None:
         element_sets=len(source.element_set_ids()) if hasattr(source, "element_set_ids") else 0,
         floating_point_word_size=_word_size(source),
     )
+
+    _warn_unsupported(source)
 
     if source.node_count:
         target.write_coordinates(source.coordinates(), names=source.coordinate_names().tolist())
@@ -414,8 +418,8 @@ def _copy_block_variable_history_at_step(
 ) -> None:
     for name in names:
         for block_id in block_ids:
-            if not _variable_defined(source, on, name, int(block_id)):
-                continue  # truth table 0: the target has no such variable
+            if not _target_has_variable(target, on, name, int(block_id)):
+                continue  # truth table 0 or NULL block
             values = source.values(name, on=on, block_id=int(block_id), time=time_index)
 
             if on is Entity.ELEMENT:
@@ -437,8 +441,8 @@ def _copy_set_variable_history_at_step(
 ) -> None:
     for name in names:
         for set_id in set_ids:
-            if not _variable_defined(source, on, name, int(set_id)):
-                continue  # truth table 0: the target has no such variable
+            if not _target_has_variable(target, on, name, int(set_id)):
+                continue  # truth table 0 or NULL set
             target.write_values(
                 name,
                 source.values(name, on=on, set_id=int(set_id), time=time_index),
@@ -522,6 +526,43 @@ def _copy_block_attributes(source: Any, target: ExodusWriter, on: Entity, block_
     target.write_block_attributes(on, block_id, attrs, names=names)
 
 
+#: Variable-name prefixes for Exodus data that copy() cannot carry over.
+_UNSUPPORTED_PREFIXES = {
+    "assembly": "assemblies",
+    "blob": "blobs",
+    "vals_red_var": "reduction variables",
+    "name_red_var": "reduction variables",
+    "node_map": "numbered node maps",
+    "elem_map": "numbered element maps",
+    "nsattrb": "node-set attributes",
+    "ssattrb": "side-set attributes",
+    "esattrb": "edge-set attributes",
+    "fsattrb": "face-set attributes",
+    "elsattrb": "element-set attributes",
+    "ebepecnt": "polyhedral (NSIDED/NFACED) counts",
+    "fbepecnt": "polyhedral (NSIDED/NFACED) counts",
+    "nem_ftype": "Nemesis decomposition data",
+}
+
+
+def _warn_unsupported(source: Any) -> None:
+    """Warn about source data that the copy will not contain."""
+
+    backend = getattr(source, "backend", None)
+    if backend is None or not hasattr(backend, "variables"):
+        return
+    lost = sorted(
+        {
+            label
+            for name in backend.variables()
+            for prefix, label in _UNSUPPORTED_PREFIXES.items()
+            if name.startswith(prefix) and not (prefix == "elem_map" and name == "elem_map")
+        }
+    )
+    if lost:
+        warnings.warn(f"copy does not support and will drop: {', '.join(lost)}", stacklevel=3)
+
+
 def _word_size(source: Any) -> int:
     """Floating-point word size of *source* (SEACAS ``floating_point_word_size``)."""
 
@@ -531,25 +572,19 @@ def _word_size(source: Any) -> int:
     return 4 if str(storage) == "f" else 8
 
 
-def _variable_defined(source: Any, on: Entity, name: str, location_id: int) -> bool:
-    """Return whether *name* is stored for block/set *location_id* (truth table)."""
+def _target_has_variable(target: ExodusWriter, on: Entity, name: str, location_id: int) -> bool:
+    """Whether the target stores *name* for a block/set.
 
-    if not hasattr(source, "variable_truth_table"):
+    The target writer creates value variables from the source truth table,
+    minus NULL (zero-entry) blocks/sets, which some writers mark as present.
+    """
+
+    spec = variable_spec(on)
+    if spec.location_entity is None:
         return True
-    try:
-        row = source.variable_truth_table(on, id=location_id)
-    except Exception:
-        return True
-    if row is None:
-        return True
-    # Truth-table columns follow the on-disk name table (blank slots included).
-    table = getattr(source, "_variable_name_table", None)
-    names = tuple(table(on)) if callable(table) else tuple(source.variable_names(on))
-    lowered = name.lower()
-    for index, candidate in enumerate(names):
-        if candidate == name or candidate.lower() == lowered:
-            return index < len(row) and bool(row[index])
-    return True
+    index = target._name_index(spec.names_variable, name)
+    location_index = target._location_index(spec.location_entity, location_id)
+    return target.backend.has_variable(variable_value_name(on, index, location_index))
 
 
 def _has_variable(source: Any, name: str) -> bool:

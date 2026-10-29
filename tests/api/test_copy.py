@@ -5,6 +5,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import exodusii
 from exodusii.api.copy import copy
@@ -140,3 +141,31 @@ def test_copy_of_reference_files_is_allclose(tmp_path: Path) -> None:
         copy_file(datadir / name, target)
         result = exodusii.allclose(datadir / name, target, result=True)
         assert result.equal, (name, result.errors)
+
+
+def test_copy_decomposed_component_with_null_blocks(tmp_path: Path) -> None:
+    # Component files mark variables present in their NULL (empty) blocks.
+    datadir = Path(__file__).resolve().parents[1] / "data"
+    target = tmp_path / "rank0.exo"
+    with pytest.warns(UserWarning, match="Nemesis decomposition data"):
+        copy_file(datadir / "noh.exo.3.0", target)
+    with ExodusFile.open(datadir / "noh.exo.3.0") as src, ExodusFile.open(target) as dst:
+        assert dst.element_block_ids().tolist() == src.element_block_ids().tolist()
+        name = src.variable_names("element")[0]
+        assert np.array_equal(
+            src.values(name, on="element", block_id=1), dst.values(name, on="element", block_id=1)
+        )
+
+
+def test_copy_warns_about_dropped_data(tmp_path: Path) -> None:
+    import netCDF4
+
+    source = tmp_path / "asm.exo"
+    with ExodusWriter.create(source) as w:
+        w.initialize("t", 1, node_count=1, element_count=0)
+        w.write_coordinates([[0.0]])
+    with netCDF4.Dataset(source, "a") as ds:
+        ds.createDimension("num_entity_assembly1", 1)
+        ds.createVariable("assembly1", "i4", ("num_entity_assembly1",))[:] = [1]
+    with pytest.warns(UserWarning, match="assemblies"):
+        copy_file(source, tmp_path / "copy.exo")

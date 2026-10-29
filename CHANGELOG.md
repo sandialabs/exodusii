@@ -361,6 +361,12 @@ and uses semantic versioning once versioned releases are established.
   `VAR_ELEM_SET_VAR`, set-attribute and map-name variables, …) and fixed
   `EX_ELEM_UNK`, which was the tuple `(-1,)`.  Existing values are
   unchanged.
+- `copy()` warns about source data it cannot carry over (assemblies,
+  blobs, reduction variables, numbered maps, set attributes, polyhedral
+  counts, Nemesis decomposition data), and no longer fails on decomposed
+  component files whose truth table lists variables in NULL blocks.
+- Coordinate matching warns when a point has several candidates within the
+  tolerance (the closest is used), as its documentation stated.
 
 ### Compatibility
 
