@@ -1028,12 +1028,21 @@ class ExodusFile:
         conn_name = spec.connectivity_variable(block_index)
 
         element_type = ""
-        if self._backend.has_variable(conn_name):
-            element_type = str(
-                self._backend.variable_attribute(
-                    conn_name, AttributeName.ELEMENT_TYPE.value, default=""
+        # Polyhedral blocks (NFACED) have no nodal connectivity; the type is
+        # on the element-face or element-edge connectivity (ex_get_block_param).
+        for candidate in (
+            conn_name,
+            spec.face_connectivity_variable(block_index) if spec.face_connectivity_variable else "",
+            spec.edge_connectivity_variable(block_index) if spec.edge_connectivity_variable else "",
+        ):
+            if candidate and self._backend.has_variable(candidate):
+                element_type = str(
+                    self._backend.variable_attribute(
+                        candidate, AttributeName.ELEMENT_TYPE.value, default=""
+                    )
                 )
-            )
+                if element_type:
+                    break
 
         attributes = (
             self.dimension_size(spec.attributes_dimension(block_index), default=0)

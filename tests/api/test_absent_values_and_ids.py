@@ -75,3 +75,23 @@ def test_zero_and_negative_ids_are_readable(tmp_path: Path, block_ids, set_id) -
         assert exo.element_block(block_ids[0]).count == 1
         assert np.asarray(exo.node_set(set_id).nodes).tolist() == [1, 2]
         assert exo.values("E", on="element", block_id=block_ids[0], time=0).tolist() == [7.0]
+
+
+def test_nfaced_block_reports_element_type(tmp_path: Path) -> None:
+    import netCDF4
+
+    path = tmp_path / "nfaced.exo"
+    with ExodusWriter.create(path) as w:
+        w.initialize("t", 3, node_count=8, element_count=1, element_blocks=1)
+        w.write_coordinates(np.zeros((8, 3)))
+        w.define_element_block(3, "hex8", [list(range(1, 9))])
+    # Turn the block into an NFACED block: no connect1, type on facconn1.
+    with netCDF4.Dataset(path, "a") as ds:
+        ds.renameVariable("connect1", "unused_connect1")
+        ds.createDimension("num_fac_per_el1", 6)
+        conn = ds.createVariable("facconn1", "i4", ("num_el_in_blk1", "num_fac_per_el1"))
+        conn.elem_type = "NFACED"
+        conn[:] = [[1, 2, 3, 4, 5, 6]]
+
+    with ExodusFile.open(path) as exo:
+        assert exo.element_block(3).element_type == "NFACED"

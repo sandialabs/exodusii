@@ -336,6 +336,8 @@ and uses semantic versioning once versioned releases are established.
 - The writer rejects duplicate block/set IDs and the reserved ID -1, and
   writes `EX_INVALID_ID` (-1) for slots that are allocated but never
   defined (was 0, which could collide with a real ID).
+- NFACED (polyhedral) element blocks report their element type, read from
+  the element-face (or element-edge) connectivity as libexodus does.
 
 ### Compatibility
 
