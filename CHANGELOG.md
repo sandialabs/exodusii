@@ -338,6 +338,9 @@ and uses semantic versioning once versioned releases are established.
   defined (was 0, which could collide with a real ID).
 - NFACED (polyhedral) element blocks report their element type, read from
   the element-face (or element-edge) connectivity as libexodus does.
+- `allclose` no longer compares string-padding dimensions (`len_string`,
+  `len_name`, `len_line`, `four`), so a plain copy compares equal to its
+  source; the strings themselves are still compared.
 
 ### Compatibility
 

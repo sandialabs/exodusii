@@ -129,3 +129,14 @@ def _write_source(path: Path) -> None:
 
 def _unit_square_quad() -> np.ndarray:
     return np.asarray([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=float)
+
+
+def test_copy_of_reference_files_is_allclose(tmp_path: Path) -> None:
+    # Copies may use a different string padding (len_string 33 vs
+    # len_name 256); allclose compares the strings, not their padding.
+    datadir = Path(__file__).resolve().parents[1] / "data"
+    for name in ("noh.exo", "mkmesh.gen", "edges.base.exo"):
+        target = tmp_path / name
+        copy_file(datadir / name, target)
+        result = exodusii.allclose(datadir / name, target, result=True)
+        assert result.equal, (name, result.errors)

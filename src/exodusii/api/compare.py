@@ -112,6 +112,9 @@ def allclose(
         ``"~a|b"`` compares all dimensions *except* ``a`` and ``b``.
         A plain string ``"name"`` compares only that one dimension.
         An iterable of strings compares exactly those dimensions.
+        String-padding dimensions (``len_string``, ``len_name``,
+        ``len_line``, ``four``) are never compared; the strings themselves
+        are compared as variables.
     variables : bool or str or iterable of str or None, optional
         Variables to compare.  Same selection rules as ``dimensions``.
     verbose : bool or TextIO, optional
@@ -163,7 +166,7 @@ def allclose(
         variable_names = _resolve_names(variables, exo1.variables(), exo2.variables())
 
         for name in dimension_names:
-            if name == DimensionName.TIME.value:
+            if name == DimensionName.TIME.value or name in _STRING_PADDING_DIMENSIONS:
                 continue
 
             dim1 = exo1.backend.dimension(name, None)
@@ -480,6 +483,19 @@ def _open_if_needed(file: Any) -> tuple[ExodusFile, bool]:
     # the methods allclose needs poorly. For raw allclose, require an ExodusFile
     # or path.
     return ExodusFile.open(file), True
+
+
+#: Fixed-width string padding sizes.  They are storage layout, not data:
+#: writers differ (e.g. len_string 33 vs len_name 256) while the decoded
+#: strings, which are compared, are identical.
+_STRING_PADDING_DIMENSIONS = frozenset(
+    {
+        DimensionName.STRING_LENGTH.value,
+        DimensionName.NAME_LENGTH.value,
+        DimensionName.LINE_LENGTH.value,
+        DimensionName.FOUR.value,
+    }
+)
 
 
 def _resolve_names(
