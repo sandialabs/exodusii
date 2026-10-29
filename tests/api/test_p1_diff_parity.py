@@ -372,3 +372,28 @@ def test_global_variables_use_scalar_floor(tmp_path: Path) -> None:
     b = _write(tmp_path / "b.exo", times=(0.0,), gvals=(-1.0,), nodal=())
     floor = DiffOptions(default_tolerance=Tolerance(ToleranceMode.ABSOLUTE, 0.1, 1.0))
     assert diff(a, b, floor).same
+
+
+def test_reported_step_is_the_file_step(tmp_path: Path) -> None:
+    temps = [np.zeros(6), np.zeros(6), np.r_[0, 0, 0, 0, 5.0, 0]]
+    a = _write(tmp_path / "a.exo", times=(0.0, 1.0, 2.0), gvals=(0, 1, 2))
+    with ExodusWriter.create(tmp_path / "b.exo") as w:
+        w.initialize("t", 2, node_count=6, element_count=2, element_blocks=1)
+        w.write_coordinates(COORDS)
+        w.define_element_block(10, "quad4", CONN)
+        w.define_global_variables(["G"])
+        w.define_node_variables(["T"])
+        for step, t in enumerate((0.0, 1.0, 2.0)):
+            w.write_time(t)
+            w.write_global_values([float(step) + (1.0 if step == 2 else 0.0)])
+            w.write_node_values("T", np.arange(6.0) + step + temps[step])
+    b = tmp_path / "b.exo"
+
+    result = diff(a, b, DiffOptions(time_selection=TimeSelection(start=2)))
+    by_name = {vd.name: vd for vd in result.variable_diffs}
+    assert by_name["T"].time_index == 2 and by_name["T"].entry_index == 4
+    assert by_name["G"].time_index == 2 and by_name["G"].entry_index is None
+
+    status, text = _cli("--start", 2, a, b)
+    assert status == DIFFERENT
+    assert "step 3, entry 4" in text

@@ -579,7 +579,7 @@ def _print_text(result: DiffResult, args: argparse.Namespace, out: TextIO) -> No
             if vd.set_id is not None:
                 loc.append(f"set {vd.set_id}")
             if vd.time_index is not None:
-                loc.append(f"step {vd.time_index}")
+                loc.append(f"step {vd.time_index + 1}")
             if vd.entry_index is not None:
                 loc.append(f"entry {vd.entry_index}")
             where = f" ({', '.join(loc)})" if loc else ""

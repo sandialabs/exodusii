@@ -348,6 +348,10 @@ and uses semantic versioning once versioned releases are established.
   `Delta > value` (COMBINED values exactly at the tolerance compare equal),
   and global variables use the scalar test (skipped when both magnitudes
   are at or below the floor).
+- `diff` reports the file time step of the largest difference
+  (`VariableDiff.time_index`, 0-based) instead of its position in the
+  selected steps, including for global variables; the CLI prints it
+  1-based.
 
 ### Compatibility
 

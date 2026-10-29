@@ -116,8 +116,8 @@ class VariableDiff:
     exceeded : bool
         ``True`` when ``max_delta`` exceeds the configured tolerance threshold.
     time_index : int or None
-        Zero-based time-step index of the worst entry.  ``None`` for
-        global variables or when the location could not be determined.
+        Zero-based file-1 time-step index of the worst entry.  ``None`` for
+        non-transient data (attributes, distribution factors).
     entry_index : int or None
         Zero-based index within the entity array (node index, element index,
         etc.) of the worst entry.  ``None`` when not applicable.
@@ -611,12 +611,16 @@ def _compare_variable_series(
     set_id: int | None,
     ignore_nans: bool = False,
     scalar_test: bool = False,
+    steps: list[StepTriple] | None = None,
 ) -> VariableDiff | None:
     """Compare two arrays (possibly multi-step) for one variable.
 
     *scalar_test* uses :meth:`Tolerance.diff` (exodiff ``Diff``, used for
     global variables) instead of :meth:`Tolerance.diff_array` (exodiff
     ``Delta > value``, used for field variables).
+
+    Arrays are ``(n_steps, n_entries)``, or ``(n_steps,)`` for globals, with
+    rows ordered as *steps*; the reported ``time_index`` is the file-1 step.
 
     NaN handling follows SEACAS exodiff: unless *ignore_nans*, a NaN in
     either file is a difference (even at the same location in both files).
@@ -670,7 +674,10 @@ def _compare_variable_series(
     if index:
         v1 = float(a[index])
         v2 = float(b[index])
-        if a.ndim >= 2:
+        if steps is not None:
+            time_index = steps[index[0]][0]
+            entry_index = index[1] if len(index) > 1 else None
+        elif a.ndim >= 2:
             time_index = index[0]
             entry_index = index[1] if len(index) > 1 else None
         else:
@@ -1496,6 +1503,7 @@ def _compare_global_variables(
             set_id=None,
             ignore_nans=opts.ignore_nans,
             scalar_test=True,
+            steps=steps,
         )
         _record(result, opts, vd)
 
@@ -1528,6 +1536,7 @@ def _compare_nodal_variables(
             block_id=None,
             set_id=None,
             ignore_nans=opts.ignore_nans,
+            steps=steps,
         )
         _record(result, opts, vd)
 
@@ -1642,6 +1651,7 @@ def _compare_block_variables(
                 block_id=block_id,
                 set_id=None,
                 ignore_nans=opts.ignore_nans,
+                steps=steps,
             )
             _record(result, opts, vd)
 
@@ -1801,6 +1811,7 @@ def _compare_set_variables(
                 block_id=None,
                 set_id=set_id,
                 ignore_nans=opts.ignore_nans,
+                steps=steps,
             )
             _record(result, opts, vd)
 
