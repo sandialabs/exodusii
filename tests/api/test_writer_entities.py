@@ -73,11 +73,21 @@ def test_writer_all_set_types(tmp_path: Path) -> None:
         assert exo.face_set_ids().tolist() == [40]
         assert exo.element_set_ids().tolist() == [50]
 
-        assert np.allclose(exo.node_set(10).nodes, [1, 2])
-        assert np.allclose(exo.side_set(20).sides, [3])
-        assert np.allclose(exo.edge_set(30).extra_entries, [1, -1])
-        assert np.allclose(exo.face_set(40).extra_entries, [1])
-        assert np.allclose(exo.element_set(50).entries, [1])
+        node_set = exo.node_set(10)
+        side_set = exo.side_set(20)
+        edge_set = exo.edge_set(30)
+        face_set = exo.face_set(40)
+        element_set = exo.element_set(50)
+        assert node_set.nodes is not None
+        assert side_set.sides is not None
+        assert edge_set.extra_entries is not None
+        assert face_set.extra_entries is not None
+        assert element_set.entries is not None
+        assert np.allclose(node_set.nodes, [1, 2])
+        assert np.allclose(side_set.sides, [3])
+        assert np.allclose(edge_set.extra_entries, [1, -1])
+        assert np.allclose(face_set.extra_entries, [1])
+        assert np.allclose(element_set.entries, [1])
 
 
 def _coords() -> np.ndarray:

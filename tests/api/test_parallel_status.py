@@ -34,6 +34,7 @@ def test_parallel_ignores_inactive_local_set(tmp_path: Path) -> None:
 
     with ParallelExodusFile.open(active, inactive) as exo:
         node_set = exo.node_set(100)
+        assert node_set.nodes is not None
         assert np.allclose(node_set.nodes, [1, 4])
 
 

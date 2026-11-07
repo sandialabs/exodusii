@@ -26,29 +26,42 @@ def test_file_reads_all_set_types(tmp_path: Path) -> None:
 
         node_set = exo.node_set(10)
         assert node_set.name == "node_set"
+        assert node_set.nodes is not None
+        assert node_set.dist_facts is not None
         assert np.allclose(node_set.nodes, [1, 2])
         assert np.allclose(node_set.dist_facts, [1.0, 2.0])
 
         side_set = exo.side_set(20)
         assert side_set.name == "side_set"
+        assert side_set.elems is not None
+        assert side_set.sides is not None
+        assert side_set.dist_facts is not None
         assert np.allclose(side_set.elems, [1])
         assert np.allclose(side_set.sides, [3])
         assert np.allclose(side_set.dist_facts, [3.0])
 
         edge_set = exo.edge_set(30)
         assert edge_set.name == "edge_set"
+        assert edge_set.entries is not None
+        assert edge_set.extra_entries is not None
+        assert edge_set.dist_facts is not None
         assert np.allclose(edge_set.entries, [1, 2])
         assert np.allclose(edge_set.extra_entries, [1, -1])
         assert np.allclose(edge_set.dist_facts, [4.0, 5.0])
 
         face_set = exo.face_set(40)
         assert face_set.name == "face_set"
+        assert face_set.entries is not None
+        assert face_set.extra_entries is not None
+        assert face_set.dist_facts is not None
         assert np.allclose(face_set.entries, [1])
         assert np.allclose(face_set.extra_entries, [1])
         assert np.allclose(face_set.dist_facts, [6.0])
 
         element_set = exo.element_set(50)
         assert element_set.name == "element_set"
+        assert element_set.entries is not None
+        assert element_set.dist_facts is not None
         assert np.allclose(element_set.entries, [1])
         assert np.allclose(element_set.dist_facts, [7.0])
 

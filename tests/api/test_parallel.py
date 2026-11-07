@@ -48,11 +48,16 @@ def test_parallel_sets(tmp_path: Path) -> None:
     with ParallelExodusFile.open(part0, part1) as exo:
         node_set = exo.node_set(100)
         assert node_set.name == "nodeset_100"
+        assert node_set.nodes is not None
+        assert node_set.dist_facts is not None
         assert np.allclose(node_set.nodes, [1, 4, 5, 8])
         assert np.allclose(node_set.dist_facts, [1.0, 2.0, 3.0, 4.0])
 
         side_set = exo.side_set(200)
         assert side_set.name == "sideset_200"
+        assert side_set.elems is not None
+        assert side_set.sides is not None
+        assert side_set.dist_facts is not None
         assert np.allclose(side_set.elems, [1, 2])
         assert np.allclose(side_set.sides, [2, 4])
         assert np.allclose(side_set.dist_facts, [5.0, 6.0])
@@ -310,9 +315,11 @@ def test_parallel_sets_return_global_labels(tmp_path: Path) -> None:
 
     with ParallelExodusFile.open(part0, part1) as exo:
         node_set = exo.node_set(100)
+        assert node_set.nodes is not None
         assert np.allclose(node_set.nodes, [10, 20, 70, 80])
 
         side_set = exo.side_set(200)
+        assert side_set.elems is not None
         assert np.allclose(side_set.elems, [100, 200])
 
 

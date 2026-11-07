@@ -161,6 +161,8 @@ def test_node_set(tmp_path: Path) -> None:
         assert node_set.id == 100
         assert node_set.index == 1
         assert node_set.name == "nodeset_100"
+        assert node_set.nodes is not None
+        assert node_set.dist_facts is not None
         assert np.allclose(node_set.nodes, [1, 4])
         assert np.allclose(node_set.dist_facts, [1.0, 2.0])
 
@@ -175,6 +177,9 @@ def test_side_set(tmp_path: Path) -> None:
         assert side_set.id == 200
         assert side_set.index == 1
         assert side_set.name == "sideset_200"
+        assert side_set.elems is not None
+        assert side_set.sides is not None
+        assert side_set.dist_facts is not None
         assert np.allclose(side_set.elems, [1])
         assert np.allclose(side_set.sides, [2])
         assert np.allclose(side_set.dist_facts, [3.0])

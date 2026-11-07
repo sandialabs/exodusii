@@ -478,7 +478,8 @@ def _structured(
     if array.size == 0:
         return np.empty((array.shape[0],), dtype=dtype)
 
-    return np.asarray(list(zip(*array.T, strict=False)), dtype=dtype)
+    result = np.asarray(list(zip(*array.T, strict=False)), dtype=dtype)
+    return cast(npt.NDArray[np.void], result)
 
 
 __all__ = ["QueryResult", "print_query", "query"]
