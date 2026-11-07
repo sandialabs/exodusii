@@ -142,7 +142,9 @@ def test_node_set_distribution_factors_reuse_entry_dimension(tmp_path: Path) -> 
         assert ds["dist_fact_ns1"].dimensions == ("num_nod_ns1",)
         assert "num_df_ns1" not in ds.dimensions
     with ExodusFile.open(path) as exo:
-        assert np.allclose(exo.node_set(1).dist_facts, [0.5, 0.25])
+        dist_facts = exo.node_set(1).dist_facts
+        assert dist_facts is not None
+        assert np.allclose(dist_facts, [0.5, 0.25])
 
 
 def test_node_variables_without_nodes(tmp_path: Path) -> None:

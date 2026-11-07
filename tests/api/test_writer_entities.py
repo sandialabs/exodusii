@@ -42,7 +42,9 @@ def test_writer_edge_and_face_blocks(tmp_path: Path) -> None:
         assert exo.face_block(30).name == "face_block"
 
         assert np.allclose(exo.element_connectivity(10), [[1, 2, 3, 4]])
-        assert np.allclose(exo.element_edge_connectivity(10), [[1, 2, 3, 4]])
+        edge_conn = exo.element_edge_connectivity(10)
+        assert edge_conn is not None
+        assert np.allclose(edge_conn, [[1, 2, 3, 4]])
         assert np.allclose(exo.edge_connectivity(20), [[1, 2], [2, 3], [3, 4], [4, 1]])
         assert np.allclose(exo.face_connectivity(30), [[1, 2, 3, 4]])
 
