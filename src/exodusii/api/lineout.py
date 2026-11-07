@@ -213,7 +213,8 @@ class Lineout:
             output_header, output_dense = self._apply_dense(header, dense)
 
             dtype = np.dtype([(name, "f8") for name in output_header])
-            return np.asarray(list(zip(*output_dense.T, strict=False)), dtype=dtype)
+            result = np.asarray(list(zip(*output_dense.T, strict=False)), dtype=dtype)
+            return cast(npt.NDArray[np.void], result)
 
         header = cast(list[str], list(header_or_structured))
         dense = np.asarray(data, dtype=np.float64)
