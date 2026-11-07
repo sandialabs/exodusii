@@ -5,6 +5,8 @@
 """Parallel/multi-file Exodus reader using Exodus global ID maps."""
 
 import logging
+import os
+import inspect
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -2899,13 +2901,28 @@ def _warn_missing_id_maps(missing: dict[str, list[str]], *, total: int) -> None:
     ]
     if not parts:
         return
-    warnings.warn(
+    _warn_external(
         "; ".join(parts) + ". Using sequential fallback numbering, which is only "
-        "correct for non-overlapping partitions with no shared nodes.",
-        UserWarning,
-        # Attribute the warning to the caller's code, not to exodusii internals.
-        skip_file_prefixes=(_PACKAGE_DIR,),
+        "correct for non-overlapping partitions with no shared nodes."
     )
+
+
+def _warn_external(message: str) -> None:
+    """Warn from the first stack frame outside exodusii internals."""
+    stacklevel = 2
+    frame = inspect.currentframe()
+    try:
+        if frame is not None:
+            frame = frame.f_back
+        while frame is not None:
+            filename = os.path.abspath(frame.f_code.co_filename)
+            if not filename.startswith(_PACKAGE_DIR):
+                break
+            stacklevel += 1
+            frame = frame.f_back
+        warnings.warn(message, UserWarning, stacklevel=stacklevel)
+    finally:
+        del frame
 
 
 def _summarize_paths(paths: list[str], limit: int = 3) -> str:
