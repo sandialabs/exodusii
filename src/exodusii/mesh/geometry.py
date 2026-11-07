@@ -60,9 +60,9 @@ def connected_average(conn: npt.ArrayLike, values: npt.ArrayLike) -> FloatArray:
     if nodal_values.ndim not in {1, 2}:
         raise ValueError("values must be a one- or two-dimensional array")
 
-    if connectivity.size and connectivity.max() >= nodal_values.shape[0]:
+    if connectivity.size and np.max(connectivity) >= nodal_values.shape[0]:
         raise IndexError("connectivity references a value index outside values")
-    if connectivity.size and connectivity.min() < 0:
+    if connectivity.size and np.min(connectivity) < 0:
         raise IndexError("connectivity contains negative indices")
 
     return _sum_over_nodes(nodal_values[connectivity]) / connectivity.shape[1]
@@ -252,7 +252,7 @@ def nodal_volumes(
     if num_nodes < 0:
         raise ValueError("num_nodes must be nonnegative")
 
-    if connectivity.size and connectivity.max() >= num_nodes:
+    if connectivity.size and np.max(connectivity) >= num_nodes:
         raise IndexError("connectivity references a node outside num_nodes")
 
     volumes = element_volumes(element_type, connectivity, coordinate_array)

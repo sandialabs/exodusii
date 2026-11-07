@@ -191,7 +191,7 @@ def find_nearest(array: npt.ArrayLike, value: float) -> tuple[int, float]:
     """Return index and value nearest to ``value``."""
 
     values = np.asarray(array, dtype=np.float64)
-    idx = int(np.abs(values - value).argmin())
+    idx = int(np.argmin(np.abs(values - value)))
     return idx, float(values[idx])
 
 

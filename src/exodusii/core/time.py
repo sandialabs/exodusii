@@ -140,7 +140,7 @@ def nearest_time_index(times: npt.ArrayLike, value: float) -> int:
     """Return the Python zero-based index of the time nearest to ``value``."""
 
     array = _as_time_array(times)
-    return int(np.abs(array - value).argmin())
+    return int(np.argmin(np.abs(array - value)))
 
 
 def _as_time_array(times: npt.ArrayLike) -> npt.NDArray[np.float64]:

@@ -241,7 +241,7 @@ class ExodusIIFile:
         if times.size == 0:
             raise ValueError("no time steps found")
 
-        index = int(np.abs(times - target).argmin())
+        index = int(np.argmin(np.abs(times - target)))
 
         if abs(target) > 0.0:
             relerr = abs(float(times[index]) - target) / abs(target)

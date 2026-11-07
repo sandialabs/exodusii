@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "exodusii"
-version = "26.10.29"
+version = "26.11.7"
 description = "A modern pure-Python interface for Sandia Exodus II finite element databases."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 license = { text = "BSD-3-Clause" }
 authors = [
   { name = "Timothy Jesse Fuller" }
@@ -25,6 +25,8 @@ classifiers = [
   "License :: OSI Approved :: BSD License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
 ]
@@ -82,7 +84,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.format]
@@ -121,13 +123,18 @@ skips = [
 
 [tool.pyright]
 include = ["src", "tests"]
-pythonVersion = "3.13"
+pythonVersion = "3.11"
 typeCheckingMode = "strict"
 
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.11"
 
 [[tool.mypy.overrides]]
 module = ["yaml", "yaml.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "netCDF4", "netCDF4.*"]
+follow_imports = "skip"
 ignore_missing_imports = true
