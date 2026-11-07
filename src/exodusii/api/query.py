@@ -476,7 +476,8 @@ def _structured(
     dtype = np.dtype([(name, "f8") for name in names], metadata=metadata or {})
 
     if array.size == 0:
-        return np.empty((array.shape[0],), dtype=dtype)
+        result = np.empty((array.shape[0],), dtype=dtype)
+        return cast(npt.NDArray[np.void], result)
 
     result = np.asarray(list(zip(*array.T, strict=False)), dtype=dtype)
     return cast(npt.NDArray[np.void], result)

@@ -153,7 +153,7 @@ class TestTracer:
         _write_tracer_file(path)
         with ExodusFile.open(path) as exo:
             vel = exo.tracer("VELX", ids=[21, 22, 23], time="last")
-        mean_vel = float(np.mean(list(vel.values())))
+        mean_vel = float(np.mean(np.asarray(list(vel.values()), dtype=np.float64)))
         assert mean_vel == pytest.approx((330.0 + 440.0 + 550.0) / 3)
 
     def test_missing_id_raises(self, tmp_path: Path) -> None:
