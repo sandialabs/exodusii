@@ -6,7 +6,7 @@
 
 import logging
 import os
-import inspect
+import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +33,7 @@ from exodusii.core.time import TimeSelector
 
 logger = logging.getLogger(__name__)
 
-_PACKAGE_DIR = str(Path(__file__).resolve().parents[1])
+_PACKAGE_DIR = os.path.realpath(str(Path(__file__).resolve().parents[1]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1936,7 +1936,7 @@ class ParallelExodusFile:
         """
 
         int64 = any(file.int64 for file in self._files) or any(
-            np.iinfo(np.int32).max < int(ids.max())
+            np.iinfo(np.int32).max < int(np.max(ids))
             for ids in (self.ids(Entity.NODE), self.joined_object_order(Entity.ELEMENT))
             if len(ids)
         )
@@ -2909,18 +2909,27 @@ def _warn_missing_id_maps(missing: dict[str, list[str]], *, total: int) -> None:
 
 def _warn_external(message: str) -> None:
     """Warn from the first stack frame outside exodusii internals."""
-    stacklevel = 2
-    frame = inspect.currentframe()
     try:
-        if frame is not None:
-            frame = frame.f_back
+        frame = sys._getframe(1)
+    except ValueError:
+        frame = None
+    try:
         while frame is not None:
-            filename = os.path.abspath(frame.f_code.co_filename)
-            if not filename.startswith(_PACKAGE_DIR):
+            module_name = str(frame.f_globals.get("__name__", ""))
+            filename = os.path.realpath(frame.f_code.co_filename)
+            if not module_name.startswith("exodusii") and not filename.startswith(_PACKAGE_DIR):
                 break
-            stacklevel += 1
             frame = frame.f_back
-        warnings.warn(message, UserWarning, stacklevel=stacklevel)
+        if frame is None:
+            warnings.warn(message, UserWarning, stacklevel=2)
+            return
+        warnings.warn_explicit(
+            message,
+            UserWarning,
+            frame.f_code.co_filename,
+            frame.f_lineno,
+            module=frame.f_globals.get("__name__"),
+        )
     finally:
         del frame
 

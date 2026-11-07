@@ -74,7 +74,11 @@ def test_missing_map_warning_points_at_caller(tmp_path: Path) -> None:
         exodusii.File(*map(str, paths))
 
     assert len(record) == 1
-    assert Path(record[0].filename).resolve() == Path(__file__).resolve()
+    warned = Path(record[0].filename)
+    expected = Path(__file__)
+    # Editable installs and host test runs may surface different checkout roots,
+    # but the warning should still point at this test module rather than exodusii internals.
+    assert warned.parts[-3:] == expected.parts[-3:]
 
 
 def test_partial_missing_node_map_lists_only_affected_files(tmp_path: Path) -> None:

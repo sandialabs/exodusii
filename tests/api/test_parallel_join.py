@@ -189,11 +189,11 @@ def test_join_node_set_distribution_factors_default_to_one(tmp_path: Path) -> No
         # Rank 1 stores no factors (1.0); shared node 104 takes rank 1's value.
         node_set = pef.node_set(5)
         assert np.asarray(node_set.nodes).tolist() == [100, 102, 104, 106, 108]
-        assert np.allclose(node_set.dist_facts, [0.5, 0.5, 1.0, 1.0, 1.0])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(node_set.dist_facts, [0.5, 0.5, 1.0, 1.0, 1.0])
         pef.write(joined)
 
     with ExodusFile.open(joined) as exo:
-        assert np.allclose(exo.node_set(5).dist_facts, [0.5, 0.5, 1.0, 1.0, 1.0])  # ty: ignore[invalid-argument-type]
+        assert np.allclose(exo.node_set(5).dist_facts, [0.5, 0.5, 1.0, 1.0, 1.0])
     with netCDF4.Dataset(joined) as ds:
         assert ds["dist_fact_ns1"].dimensions == ("num_nod_ns1",)
 

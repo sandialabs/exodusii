@@ -28,6 +28,7 @@ import numbers
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cmp_to_key
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
@@ -214,7 +215,7 @@ class Lineout:
             dtype = np.dtype([(name, "f8") for name in output_header])
             return np.asarray(list(zip(*output_dense.T, strict=False)), dtype=dtype)
 
-        header = list(header_or_structured)
+        header = cast(list[str], list(header_or_structured))
         dense = np.asarray(data, dtype=np.float64)
         return self._apply_dense(header, dense)
 
