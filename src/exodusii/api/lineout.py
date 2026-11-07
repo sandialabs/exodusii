@@ -216,7 +216,9 @@ class Lineout:
             result = np.asarray(list(zip(*output_dense.T, strict=False)), dtype=dtype)
             return cast(npt.NDArray[np.void], result)
 
-        header = cast(list[str], list(header_or_structured))
+        if isinstance(header_or_structured, np.ndarray):
+            raise TypeError("two-argument apply expects a sequence of column names")
+        header = list(header_or_structured)
         dense = np.asarray(data, dtype=np.float64)
         return self._apply_dense(header, dense)
 
