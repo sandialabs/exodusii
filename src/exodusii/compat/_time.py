@@ -65,7 +65,7 @@ def cycle_time_index(exo: Any, cycle: int) -> int:
     cycles = np.asarray(exo.values(candidate, on="global"), dtype=np.float64)
     if not np.any(cycles == cycle):
         raise ValueError(f"Cycle {cycle} not found")
-    return int(np.abs(cycles - cycle).argmin())
+    return int(np.argmin(np.abs(cycles - cycle)))
 
 
 __all__ = ["cycle_time_index", "legacy_time_index"]

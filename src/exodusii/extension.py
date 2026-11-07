@@ -210,7 +210,7 @@ def compute_volume_averaged_elem_variable(
 
 def _legacy_time_step(file, target: float) -> int:
     times = np.asarray(file.get_times(), dtype=np.float64)
-    return int(np.abs(times - target).argmin()) + 1
+    return int(np.argmin(np.abs(times - target))) + 1
 
 
 __all__ = [
