@@ -8,3 +8,8 @@ htmlcov
 # Ignore personal settings
 .vscode
 .vscode/settings.json
+
+# setuptools build artifacts
+build/
+dist/
+*.egg-info/

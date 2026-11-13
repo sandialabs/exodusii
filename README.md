@@ -386,6 +386,19 @@ python -m exodusii learn skills exodusii-region-reduce
 python -m exodusii learn skills exodusii-geometry
 ```
 
+To install exodusii guidance and skills into a repository for coding agents:
+
+```bash
+python -m exodusii agent bootstrap            # .agent/exodusii/{BOOTSTRAP,INDEX}.md + skills/
+python -m exodusii agent bootstrap opencode   # generic layout + .opencode/skills/<skill>/SKILL.md
+python -m exodusii agent bootstrap claude     # CLAUDE.md + .claude/skills/<skill>/SKILL.md
+python -m exodusii agent bootstrap claude --append  # merge into an existing CLAUDE.md
+```
+
+`--brief` writes only the bootstrap file, `--force` overwrites unmanaged files,
+and `-C DIR` writes into another directory. Re-running refreshes files the
+command previously wrote.
+
 ---
 
 ## Package layout

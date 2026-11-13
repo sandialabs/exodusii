@@ -159,8 +159,19 @@ Self-learning CLI
 Use ``python -m exodusii learn`` to query the built-in capability
 documentation::
 
-    python -m exodusii learn -c overview
-    python -m exodusii learn -c python_api
-    python -m exodusii learn -c commands
-    python -m exodusii learn --skill list
-    python -m exodusii learn --skill exodusii-comparison .body
+    python -m exodusii learn capabilities overview
+    python -m exodusii learn capabilities python_api
+    python -m exodusii learn capabilities commands
+    python -m exodusii learn skills list
+    python -m exodusii learn skills exodusii-comparison .body
+
+To install the same guidance and skills into a repository for coding agents,
+use ``agent bootstrap``::
+
+    python -m exodusii agent bootstrap            # .agent/exodusii/...
+    python -m exodusii agent bootstrap opencode   # + .opencode/skills/<skill>/SKILL.md
+    python -m exodusii agent bootstrap claude     # CLAUDE.md + .claude/skills/<skill>/SKILL.md
+
+Pass ``--append`` with the ``claude`` target to merge the guidance into an
+existing ``CLAUDE.md``, ``--brief`` to write only the bootstrap file, and
+``--force`` to overwrite files the command did not create.

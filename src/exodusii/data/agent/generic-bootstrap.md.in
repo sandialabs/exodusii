@@ -1,0 +1,51 @@
+# exodusii Agent Bootstrap
+
+This repository uses exodusii to read, write, compare, and query Exodus II finite-element databases.
+
+## When to use exodusii
+
+- Use exodusii to inspect Exodus/NetCDF simulation output (mesh metadata, blocks, sets, times, variables).
+- Use exodusii to extract nodal, element, global, edge, face, and set variables at selected time steps.
+- Use exodusii to compare results against a baseline with exodiff-style tolerances.
+- Use exodusii for geometric region queries, element centers/volumes, region statistics, and region mass.
+- Use exodusii to read decomposed parallel Exodus/Nemesis files as one joined database.
+- Use exodusii to write or copy Exodus databases.
+
+## Preferred First Commands
+
+- `python -m exodusii learn`
+- `python -m exodusii learn capabilities overview`
+- `python -m exodusii learn capabilities commands`
+- `python -m exodusii learn skills list`
+- `python -m exodusii inspect FILE.exo`
+- `python -m exodusii variables FILE.exo`
+
+## Database-First Rule
+
+- Run `python -m exodusii inspect` and `python -m exodusii variables` before guessing variable, block, or set names.
+- Prefer the JSON commands (`query`, `stats`, `region-stats`, `blocks`, `sets`, `times`) over parsing `exoread`, `ncdump`, or other text output.
+- Use `stats` for large arrays and `query` only for small extracted tables; `query` truncates by default.
+- Use `python -m exodusii diff GOLD TEST` (or `exodusii.diff`) for baseline comparison instead of hand-rolled array checks.
+- Prefer the modern API (`exodusii.ExodusFile`, `exodusii.ExodusWriter`, `exodusii.ParallelExodusFile`) in new code; use the legacy `ExodusIIFile` API only for existing callers.
+
+## Self-Learning
+
+- Use `python -m exodusii learn capabilities TOPIC` for compact capability retrieval (e.g. `query`, `python_api`, `mesh_geometry`, `region_reduce`).
+- Use dotted paths for narrower answers, e.g. `python -m exodusii learn capabilities query.selectors`.
+- Use `python -m exodusii learn skills SKILL` to read a skill, or `python -m exodusii learn skills SKILL .body` for just its body.
+- Add `--terse` for compact JSON.
+
+## Avoid
+
+- Do not open Exodus files with raw `netCDF4`/`h5py` or `ncdump` when exodusii exposes the data.
+- Do not guess variable names, block IDs, or time indices; discover them with `inspect`, `variables`, `blocks`, and `times`.
+- Do not mix time conventions: the modern API uses zero-based time indices (`index:N`) while `step:N` and the legacy API are one-based.
+- Do not dump full arrays into context; summarize with `stats` or limit `query` output.
+- Do not treat the static capability dataset as a full API reference; source and API docs remain authoritative for exact signatures.
+
+## Local Skill Map
+
+@@SKILL_MAP@@
+
+Core starting points:
+@@CORE_BOOTSTRAP_SKILLS@@

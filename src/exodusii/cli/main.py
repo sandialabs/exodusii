@@ -23,6 +23,7 @@ import argparse
 from typing import TextIO
 
 from exodusii.cli._command import Command
+from exodusii.cli.agent import Agent
 from exodusii.cli.blocks import Blocks
 from exodusii.cli.examples import Examples
 from exodusii.cli.exodiff import Diff
@@ -52,6 +53,7 @@ _COMMANDS: list[type[Command]] = [
     Examples,
     Tracers,
     Learn,
+    Agent,
     Read,
     Diff,
 ]

@@ -129,6 +129,9 @@ and uses semantic versioning once versioned releases are established.
   - flat-capped cylinder
   - bounded and unbounded time domains
 - Added lineout support for structured-array and dense-array tabular data.
+- Added `python -m exodusii agent bootstrap [generic|opencode|claude]` to write
+  repo-local agent guidance (`.agent/exodusii/`, `CLAUDE.md`) and install the
+  static skills as `SKILL.md` files, mirroring `canary agent bootstrap`.
 
 ### Changed
 

@@ -1,14 +1,15 @@
 [build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "exodusii"
-version = "26.11.7"
+version = "26.11.12"
 description = "A modern pure-Python interface for Sandia Exodus II finite element databases."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
   { name = "Timothy Jesse Fuller" }
 ]
@@ -22,7 +23,6 @@ keywords = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: BSD License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
@@ -63,15 +63,18 @@ Homepage = "https://github.com/sandialabs/exodusii"
 Repository = "https://github.com/sandialabs/exodusii"
 Issues = "https://github.com/sandialabs/exodusii/issues"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/exodusii"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["exodusii*"]
 
-[tool.hatch.build.targets.wheel.sources]
-"src" = ""
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/exodusii/data/capabilities.json" = "exodusii/data/capabilities.json"
-"src/exodusii/data/skills.json" = "exodusii/data/skills.json"
+# Non-Python files installed with the package.  ``data/agent`` has no
+# ``__init__.py``, so it must be listed explicitly rather than discovered.
+[tool.setuptools.package-data]
+exodusii = [
+  "py.typed",
+  "data/*.json",
+  "data/agent/*.md.in",
+]
 
 [tool.pytest.ini_options]
 addopts = "--durations=20 -ra --import-mode=importlib"
